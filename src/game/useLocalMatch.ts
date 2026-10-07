@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { advanceGame, deployAnchor } from "./simulation";
+import { getBotCommand } from "./bot";
+import { applyPlayerCommands, type PlayerCommand } from "./playerController";
 import { createInitialGameState } from "./state";
 import type { Vec2 } from "./types";
 
 export function useLocalMatch() {
   const [state, setState] = useState(createInitialGameState);
   const moveTarget = useRef<Vec2 | null>(null);
+  const deployRequested = useRef(false);
 
   useEffect(() => {
     let frameId = 0;
@@ -15,7 +17,19 @@ export function useLocalMatch() {
       // Cap long frame gaps so a paused tab cannot create one huge simulation jump.
       const deltaSeconds = Math.min((time - previousTime) / 1000, 0.05);
       previousTime = time;
-      setState((current) => advanceGame(current, { moveTarget: moveTarget.current }, deltaSeconds));
+      const playerCommand: PlayerCommand = {
+        moveTarget: moveTarget.current,
+        deployAnchor: deployRequested.current,
+      };
+      deployRequested.current = false;
+      setState((current) => applyPlayerCommands(
+        current,
+        {
+          player: playerCommand,
+          rival: getBotCommand(current, "rival"),
+        },
+        deltaSeconds,
+      ));
       frameId = requestAnimationFrame(frame);
     };
 
@@ -29,7 +43,7 @@ export function useLocalMatch() {
   }, []);
 
   const deploy = useCallback(() => {
-    setState((current) => deployAnchor(current, "player"));
+    deployRequested.current = true;
   }, []);
 
   return { state, setMoveTarget, deploy };
