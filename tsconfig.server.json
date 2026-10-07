@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "composite": true,
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": [
+    "server",
+    "src/game/constants.ts",
+    "src/game/geometry.ts",
+    "src/game/simulation.ts",
+    "src/game/state.ts",
+    "src/game/types.ts",
+    "src/network/protocol.ts"
+  ]
+}

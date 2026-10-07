@@ -7,6 +7,7 @@ const RIVAL_BASE: Vec2 = { x: 50, y: 12 };
 export function createInitialGameState(): GameState {
   return {
     remainingMs: GAME_RULES.matchDurationMs,
+    nextAnchorId: 1,
     players: {
       player: {
         id: "player",
@@ -28,20 +29,12 @@ export function createInitialGameState(): GameState {
           oxygen: GAME_RULES.oxygenMaximum,
           carriedSalvage: 0,
           bankedSalvage: 0,
-          tetherKits: 1,
+          tetherKits: 2,
           respawns: 0,
         },
       },
     },
-    anchors: [
-      {
-        id: "rival-anchor-1",
-        owner: "rival",
-        position: { x: 58, y: 34 },
-        parentId: baseId("rival"),
-        powered: true,
-      },
-    ],
+    anchors: [],
     salvage: [
       { id: "salvage-1", position: { x: 28, y: 106 }, collected: false },
       { id: "salvage-2", position: { x: 65, y: 96 }, collected: false },

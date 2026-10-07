@@ -37,6 +37,7 @@ export interface PlayerState {
 
 export interface GameState {
   remainingMs: number;
+  nextAnchorId: number;
   players: Record<PlayerId, PlayerState>;
   anchors: Anchor[];
   salvage: SalvageDeposit[];

@@ -6,6 +6,7 @@ import type { GameState, PlayerId, Vec2 } from "../types";
 interface ArenaRendererProps {
   state: GameState;
   onMoveTargetChange: (target: Vec2 | null) => void;
+  disabled?: boolean;
 }
 
 function worldPoint(event: PointerEvent<SVGSVGElement>): Vec2 {
@@ -17,13 +18,15 @@ function worldPoint(event: PointerEvent<SVGSVGElement>): Vec2 {
   };
 }
 
-export function ArenaRenderer({ state, onMoveTargetChange }: ArenaRendererProps) {
+export function ArenaRenderer({ state, onMoveTargetChange, disabled = false }: ArenaRendererProps) {
   function beginMove(event: PointerEvent<SVGSVGElement>) {
+    if (disabled) return;
     event.currentTarget.setPointerCapture(event.pointerId);
     onMoveTargetChange(worldPoint(event));
   }
 
   function continueMove(event: PointerEvent<SVGSVGElement>) {
+    if (disabled) return;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       onMoveTargetChange(worldPoint(event));
     }
@@ -33,7 +36,7 @@ export function ArenaRenderer({ state, onMoveTargetChange }: ArenaRendererProps)
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
-    onMoveTargetChange(null);
+    if (!disabled) onMoveTargetChange(null);
   }
 
   return (
@@ -42,6 +45,7 @@ export function ArenaRenderer({ state, onMoveTargetChange }: ArenaRendererProps)
       viewBox={`0 0 ${WORLD.width} ${WORLD.height}`}
       role="img"
       aria-label="Tetherbound arena. Hold and drag to move your astronaut."
+      aria-disabled={disabled}
       onPointerDown={beginMove}
       onPointerMove={continueMove}
       onPointerUp={stopMove}

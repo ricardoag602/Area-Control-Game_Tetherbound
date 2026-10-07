@@ -8,6 +8,8 @@ interface NetworkNode {
   position: Vec2;
 }
 
+const DISTANCE_TIE_EPSILON = 1e-9;
+
 export function getPoweredNodes(state: GameState, playerId: PlayerId): NetworkNode[] {
   return [
     { id: baseId(playerId), position: state.players[playerId].basePosition },
@@ -65,7 +67,7 @@ export function deployAnchor(state: GameState, playerId: PlayerId): GameState {
   if (!parent) return state;
 
   const anchor: Anchor = {
-    id: `${playerId}-anchor-${state.anchors.length + 1}`,
+    id: `${playerId}-anchor-${state.nextAnchorId}`,
     owner: playerId,
     position: { ...player.astronaut.position },
     parentId: parent.id,
@@ -74,6 +76,7 @@ export function deployAnchor(state: GameState, playerId: PlayerId): GameState {
 
   return {
     ...state,
+    nextAnchorId: state.nextAnchorId + 1,
     anchors: [...state.anchors, anchor],
     players: {
       ...state.players,
@@ -95,8 +98,44 @@ export function advanceGame(
 ): GameState {
   if (state.remainingMs <= 0) return state;
 
-  const player = state.players.player;
+  return advanceMatch(state, { player: input }, deltaSeconds);
+}
+
+export function advanceMatch(
+  state: GameState,
+  inputs: Partial<Record<PlayerId, GameInput>>,
+  deltaSeconds: number,
+): GameState {
+  if (state.remainingMs <= 0) return state;
+
+  let nextState: GameState = {
+    ...state,
+    remainingMs: Math.max(0, state.remainingMs - deltaSeconds * 1000),
+  };
+  const activePlayers: PlayerId[] = [];
+
+  for (const playerId of ["player", "rival"] as const) {
+    const input = inputs[playerId];
+    if (!input) continue;
+
+    const result = advancePlayer(nextState, playerId, input, deltaSeconds);
+    nextState = result.state;
+    if (!result.respawned) activePlayers.push(playerId);
+  }
+
+  nextState = collectSalvage(nextState, activePlayers);
+  return deliverSalvage(nextState, activePlayers);
+}
+
+function advancePlayer(
+  state: GameState,
+  playerId: PlayerId,
+  input: GameInput,
+  deltaSeconds: number,
+): { state: GameState; respawned: boolean } {
+  const player = state.players[playerId];
   const currentAstronaut = player.astronaut;
+
   const nextPosition = input.moveTarget
     ? clampToWorld(
         moveToward(
@@ -109,7 +148,7 @@ export function advanceGame(
       )
     : currentAstronaut.position;
 
-  const safe = isInsideSafeZone(state, "player", nextPosition);
+  const safe = isInsideSafeZone(state, playerId, nextPosition);
   const oxygen = safe
     ? Math.min(
         GAME_RULES.oxygenMaximum,
@@ -123,67 +162,125 @@ export function advanceGame(
   if (!safe && oxygen === 0) {
     // Running out of oxygen costs carried salvage and returns the player to base.
     return {
-      ...state,
-      remainingMs: Math.max(0, state.remainingMs - deltaSeconds * 1000),
-      players: {
-        ...state.players,
-        player: {
-          ...player,
-          astronaut: {
-            ...currentAstronaut,
-            position: { ...player.basePosition },
-            oxygen: GAME_RULES.oxygenMaximum,
-            carriedSalvage: 0,
-            respawns: currentAstronaut.respawns + 1,
+      respawned: true,
+      state: {
+        ...state,
+        players: {
+          ...state.players,
+          [playerId]: {
+            ...player,
+            astronaut: {
+              ...currentAstronaut,
+              position: { ...player.basePosition },
+              oxygen: GAME_RULES.oxygenMaximum,
+              carriedSalvage: 0,
+              respawns: currentAstronaut.respawns + 1,
+            },
           },
         },
       },
     };
   }
 
-  let carriedSalvage = currentAstronaut.carriedSalvage;
-  // Mapping returns a new deposit list while collecting anything within reach.
-  const salvage = state.salvage.map((deposit) => {
-    if (
-      !deposit.collected &&
-      carriedSalvage < GAME_RULES.salvageCarryLimit &&
-      distance(nextPosition, deposit.position) <= GAME_RULES.collectionRadius
-    ) {
-      carriedSalvage += 1;
-      return { ...deposit, collected: true };
-    }
-    return deposit;
-  });
-
-  let bankedSalvage = currentAstronaut.bankedSalvage;
-  let tetherKits = currentAstronaut.tetherKits;
-  if (carriedSalvage > 0 && isAtDeliveryNode(state, "player", nextPosition)) {
-    // Each full salvage batch becomes a tether; the remainder stays banked.
-    bankedSalvage += carriedSalvage;
-    carriedSalvage = 0;
-    tetherKits += Math.floor(bankedSalvage / GAME_RULES.salvagePerTether);
-    bankedSalvage %= GAME_RULES.salvagePerTether;
-  }
-
   return {
-    ...state,
-    remainingMs: Math.max(0, state.remainingMs - deltaSeconds * 1000),
-    salvage,
-    players: {
-      ...state.players,
-      player: {
-        ...player,
-        astronaut: {
-          ...currentAstronaut,
-          position: nextPosition,
-          oxygen,
-          carriedSalvage,
-          bankedSalvage,
-          tetherKits,
+    respawned: false,
+    state: {
+      ...state,
+      players: {
+        ...state.players,
+        [playerId]: {
+          ...player,
+          astronaut: {
+            ...currentAstronaut,
+            position: nextPosition,
+            oxygen,
+          },
         },
       },
     },
   };
+}
+
+function collectSalvage(state: GameState, activePlayers: PlayerId[]): GameState {
+  let players = state.players;
+  // Exact ties rotate using the number of deposits already claimed. This keeps
+  // either player slot from permanently owning the simultaneous-pickup advantage.
+  let tieBreakTurn = state.salvage.filter((deposit) => deposit.collected).length;
+
+  const salvage = state.salvage.map((deposit) => {
+    if (deposit.collected) return deposit;
+
+    const contenders = activePlayers
+      .filter(
+        (playerId) =>
+          players[playerId].astronaut.carriedSalvage < GAME_RULES.salvageCarryLimit,
+      )
+      .map((playerId) => ({
+        playerId,
+        distance: distance(players[playerId].astronaut.position, deposit.position),
+      }))
+      .filter((contender) => contender.distance <= GAME_RULES.collectionRadius)
+      .sort((a, b) => a.distance - b.distance);
+
+    if (contenders.length === 0) return deposit;
+
+    let winner = contenders[0].playerId;
+    if (
+      contenders.length === 2 &&
+      Math.abs(contenders[0].distance - contenders[1].distance) <= DISTANCE_TIE_EPSILON
+    ) {
+      winner = tieBreakTurn % 2 === 0 ? "player" : "rival";
+      tieBreakTurn += 1;
+    }
+
+    const player = players[winner];
+    players = {
+      ...players,
+      [winner]: {
+        ...player,
+        astronaut: {
+          ...player.astronaut,
+          carriedSalvage: player.astronaut.carriedSalvage + 1,
+        },
+      },
+    };
+
+    return { ...deposit, collected: true };
+  });
+
+  return { ...state, players, salvage };
+}
+
+function deliverSalvage(state: GameState, activePlayers: PlayerId[]): GameState {
+  let players = state.players;
+
+  for (const playerId of activePlayers) {
+    const player = players[playerId];
+    const astronaut = player.astronaut;
+    if (
+      astronaut.carriedSalvage === 0 ||
+      !isAtDeliveryNode(state, playerId, astronaut.position)
+    ) {
+      continue;
+    }
+
+    const salvageTotal = astronaut.bankedSalvage + astronaut.carriedSalvage;
+    players = {
+      ...players,
+      [playerId]: {
+        ...player,
+        astronaut: {
+          ...astronaut,
+          carriedSalvage: 0,
+          bankedSalvage: salvageTotal % GAME_RULES.salvagePerTether,
+          tetherKits:
+            astronaut.tetherKits + Math.floor(salvageTotal / GAME_RULES.salvagePerTether),
+        },
+      },
+    };
+  }
+
+  return { ...state, players };
 }
 
 export function getTerritoryScore(state: GameState, playerId: PlayerId) {
