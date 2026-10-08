@@ -1,4 +1,6 @@
 import type { GameState, PlayerId, Vec2 } from "../game/types";
+import { createClientId } from "./clientId";
+import { resolveRoomServerUrl } from "./connectionInfo";
 import type { ClientMessage, RoomSnapshot, ServerMessage } from "./protocol";
 
 export type ConnectionStatus = "idle" | "connecting" | "connected" | "reconnecting" | "offline";
@@ -20,6 +22,10 @@ type SessionIntent =
 
 const RETRY_DELAYS = [250, 500, 1_000, 2_000, 4_000];
 const HANDSHAKE_TIMEOUT_MS = 5_000;
+
+export function getRoomServerUrl() {
+  return resolveRoomServerUrl(window.location, import.meta.env.VITE_WS_URL);
+}
 
 export class RoomClient {
   private snapshot: RoomClientSnapshot = {
@@ -56,7 +62,7 @@ export class RoomClient {
 
   createRoom(name: string, playerLimit: 2 = 2) {
     this.sessionToken = null;
-    this.begin({ kind: "create", requestId: crypto.randomUUID(), name: name.trim(), playerLimit });
+    this.begin({ kind: "create", requestId: createClientId(), name: name.trim(), playerLimit });
   }
 
   joinRoom(roomCode: string, name: string) {
@@ -65,7 +71,7 @@ export class RoomClient {
     this.sessionToken = saved?.token ?? null;
     this.begin({
       kind: "join",
-      requestId: crypto.randomUUID(),
+      requestId: createClientId(),
       roomCode: code,
       name: (saved?.name ?? name).trim(),
     });
@@ -78,7 +84,7 @@ export class RoomClient {
     this.sessionToken = saved.token;
     this.begin({
       kind: "join",
-      requestId: crypto.randomUUID(),
+      requestId: createClientId(),
       roomCode: code,
       name: saved.name,
     });
@@ -116,7 +122,7 @@ export class RoomClient {
   }
 
   deployAnchor() {
-    const actionId = crypto.randomUUID();
+    const actionId = createClientId();
     this.pendingActions.add(actionId);
     this.send({ type: "deploy_anchor", actionId });
   }
@@ -360,9 +366,7 @@ export class RoomClient {
   }
 
   private webSocketUrl() {
-    if (import.meta.env.VITE_WS_URL) return import.meta.env.VITE_WS_URL as string;
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    return `${protocol}//${window.location.hostname}:8788`;
+    return getRoomServerUrl();
   }
 
   private sessionKey(code: string) {

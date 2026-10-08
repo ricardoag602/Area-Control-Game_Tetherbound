@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
 import { getTerritoryScore } from "../../game/simulation";
 import type { GameState, PlayerId } from "../../game/types";
 import type { ConnectionStatus } from "../RoomClient";
+import { isValidRoomCode, normalizeRoomCode } from "../connectionInfo";
 import type { RoomSnapshot } from "../protocol";
 
 interface CreateRoomViewProps {
@@ -44,12 +45,19 @@ interface JoinRoomViewProps {
   connection: ConnectionStatus;
   error: string | null;
   onBack: () => void;
-  onJoin: (name: string) => void;
+  onCodeChange: (code: string) => void;
+  onJoin: (name: string, code: string) => void;
 }
 
-export function JoinRoomView({ code, connection, error, onBack, onJoin }: JoinRoomViewProps) {
+export function JoinRoomView({ code, connection, error, onBack, onCodeChange, onJoin }: JoinRoomViewProps) {
   const [name, setName] = useState("Explorer 2");
   const busy = connection === "connecting" || connection === "reconnecting";
+  const validCode = isValidRoomCode(code);
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!busy && validCode && name.trim()) onJoin(name, code);
+  }
 
   return (
     <div className="screen screen--room">
@@ -57,18 +65,30 @@ export function JoinRoomView({ code, connection, error, onBack, onJoin }: JoinRo
       <header className="section-heading">
         <p className="eyebrow">Incoming signal</p>
         <h2>Join room</h2>
-        <p>Enter your astronaut name to join room <strong>{code}</strong>.</p>
+        <p>Enter the five-character room code shared by the host.</p>
       </header>
-      <div className="room-card">
-        <label className="field-label" htmlFor="guest-name">Astronaut name</label>
-        <input id="guest-name" className="text-input" value={name} maxLength={20}
-          onChange={(event) => setName(event.target.value)} autoComplete="nickname" />
-        {error && <p className="form-error" role="alert">{error}</p>}
-      </div>
-      <button className="button button--primary" disabled={busy || !name.trim()}
-        onClick={() => onJoin(name)}>
-        {busy ? "Connecting…" : "Join Room"}
-      </button>
+      <form className="join-form" onSubmit={submit}>
+        <div className="room-card">
+          <label className="field-label" htmlFor="room-code">Room code</label>
+          <input id="room-code" className="text-input room-code-input" value={code}
+            maxLength={5} autoCapitalize="characters" autoComplete="off" autoCorrect="off"
+            spellCheck={false} inputMode="text" placeholder="ABCDE"
+            aria-describedby="room-code-help" aria-invalid={code.length === 5 && !validCode}
+            onChange={(event) => onCodeChange(normalizeRoomCode(event.target.value))} />
+          <p id="room-code-help" className="field-help">Five characters. Codes do not use I, O, 0, or 1.</p>
+          {code.length === 5 && !validCode && (
+            <p className="form-error" role="alert">Check the code—the characters I, O, 0, and 1 are not used.</p>
+          )}
+          <label className="field-label" htmlFor="guest-name">Astronaut name</label>
+          <input id="guest-name" className="text-input" value={name} maxLength={20}
+            onChange={(event) => setName(event.target.value)} autoComplete="nickname" />
+          {error && <p className="form-error" role="alert">{error}</p>}
+        </div>
+        <button type="submit" className="button button--primary"
+          disabled={busy || !validCode || !name.trim()}>
+          {busy ? "Connecting…" : "Join Room"}
+        </button>
+      </form>
     </div>
   );
 }
@@ -78,12 +98,14 @@ interface RoomLobbyProps {
   localPlayerId: PlayerId;
   connection: ConnectionStatus;
   latencyMs: number | null;
+  invitationLink: string;
+  localAddressOnly: boolean;
   onCopyLink: () => Promise<void>;
   onReadyChange: (ready: boolean) => void;
   onLeave: () => void;
 }
 
-export function RoomLobby({ room, localPlayerId, connection, latencyMs, onCopyLink, onReadyChange, onLeave }: RoomLobbyProps) {
+export function RoomLobby({ room, localPlayerId, connection, latencyMs, invitationLink, localAddressOnly, onCopyLink, onReadyChange, onLeave }: RoomLobbyProps) {
   const localPlayer = room.players.find((player) => player.id === localPlayerId);
   const connectedCount = room.players.filter((player) => player.connected).length;
   const [copied, setCopied] = useState(false);
@@ -99,12 +121,27 @@ export function RoomLobby({ room, localPlayerId, connection, latencyMs, onCopyLi
       <button className="text-button back-button" onClick={onLeave}>← Leave room</button>
       <header className="section-heading">
         <p className="eyebrow">Mission lobby</p>
-        <h2>{room.code}</h2>
+        <h2>Waiting room</h2>
         <p>{connectedCount} of {room.playerLimit} astronauts connected</p>
       </header>
       <div className="connection-strip" data-status={connection}>
         <span>{connection === "reconnecting" ? "Reconnecting…" : "Room server connected"}</span>
         <strong>{latencyMs === null ? "Measuring latency" : `${latencyMs} ms RTT`}</strong>
+      </div>
+      <div className="room-card invite-card">
+        <div className="room-code-block">
+          <span>Room code</span>
+          <strong>{room.code}</strong>
+          <p>The other player can choose Join Multiplayer Room and enter this code.</p>
+        </div>
+        <span className="field-label">Invitation link</span>
+        <code className="invite-url">{invitationLink}</code>
+        <button className="button button--secondary button--compact" onClick={copyLink}>
+          {copied ? "Invitation link copied" : "Copy invitation link"}
+        </button>
+        {localAddressOnly && (
+          <p className="notice">This localhost link works only on this computer. For another device, open the Network address printed by <code>npm run dev</code> and enter room code <strong>{room.code}</strong>.</p>
+        )}
       </div>
       <div className="room-card lobby-card">
         {(["player", "rival"] as const).map((slot) => {
@@ -121,9 +158,6 @@ export function RoomLobby({ room, localPlayerId, connection, latencyMs, onCopyLi
           );
         })}
       </div>
-      <button className="button button--secondary" onClick={copyLink}>
-        {copied ? "Invitation link copied" : "Copy invitation link"}
-      </button>
       <button className="button button--primary" disabled={connection !== "connected"}
         onClick={() => onReadyChange(!localPlayer?.ready)}>
         {localPlayer?.ready ? "Cancel Ready" : "Ready Up"}

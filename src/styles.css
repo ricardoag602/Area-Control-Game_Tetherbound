@@ -130,6 +130,31 @@ button { -webkit-tap-highlight-color: transparent; }
 
 .menu-actions { display: grid; gap: .75rem; }
 
+.connection-details {
+  border: 1px solid rgba(139, 191, 214, .16);
+  border-radius: 1rem;
+  color: #8da4b6;
+  background: rgba(7, 18, 29, .56);
+  font-size: .72rem;
+  text-align: left;
+}
+
+.connection-details summary {
+  padding: .85rem 1rem;
+  color: #a9c9d8;
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.connection-details[open] summary { border-bottom: 1px solid rgba(139, 191, 214, .12); }
+.connection-details dl { display: grid; gap: .75rem; margin: 0; padding: .9rem 1rem 0; }
+.connection-details dl > div { display: grid; gap: .18rem; }
+.connection-details dt { color: #6f8799; text-transform: uppercase; letter-spacing: .08em; }
+.connection-details dd { margin: 0; }
+.connection-details code { color: #9feaff; overflow-wrap: anywhere; }
+.connection-details > p { margin: .8rem 1rem 1rem; line-height: 1.45; }
+.connection-details .connection-warning { color: #f0bc79; }
+
 .button {
   min-height: calc(3.75rem * var(--control-scale));
   border: 1px solid transparent;
@@ -257,6 +282,10 @@ button { -webkit-tap-highlight-color: transparent; }
 
 .text-input:focus { border-color: #62d7f0; box-shadow: 0 0 0 3px rgba(77, 204, 234, .12); }
 
+.join-form { display: grid; gap: 1.4rem; }
+.room-code-input { font-size: 1.25rem; font-weight: 900; letter-spacing: .24em; text-transform: uppercase; }
+.field-help { margin: -.7rem 0 0; color: #71889a; font-size: .72rem; line-height: 1.4; }
+
 .room-rule-row { display: flex; justify-content: space-between; color: #9bb1c1; }
 .room-rule-row strong { color: #eefaff; }
 .form-error { margin: 0; color: #ff9b83; font-size: .82rem; line-height: 1.45; }
@@ -328,13 +357,26 @@ button { -webkit-tap-highlight-color: transparent; }
 .room-code-block {
   display: grid;
   gap: .6rem;
-  padding-top: 1rem;
-  border-top: 1px solid rgba(137, 196, 216, .14);
+  padding-bottom: 1rem;
+  border-bottom: 1px solid rgba(137, 196, 216, .14);
   text-align: center;
 }
 .room-code-block > span { color: #7e94a7; font-size: .75rem; text-transform: uppercase; letter-spacing: .1em; }
 .room-code-block strong { color: #8fe9ff; font-size: 2.25rem; letter-spacing: .2em; }
-.room-code-block p { overflow: hidden; margin: 0; color: #60788b; font-size: .72rem; text-overflow: ellipsis; white-space: nowrap; }
+.room-code-block p { margin: 0; color: #71889a; font-size: .72rem; line-height: 1.4; }
+.invite-card { gap: .85rem; }
+.invite-url {
+  display: block;
+  padding: .8rem;
+  border: 1px solid rgba(126, 209, 236, .18);
+  border-radius: .75rem;
+  color: #9feaff;
+  background: rgba(5, 14, 23, .72);
+  font-size: .72rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
 
 .screen--game { width: min(100%, 42rem); padding: 0; background: #0b1118; }
 

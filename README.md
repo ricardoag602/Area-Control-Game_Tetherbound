@@ -24,8 +24,8 @@ The terminal prints both a local URL and a network URL.
 
 1. Open the local URL in the first tab.
 2. Select **Create Multiplayer Room**, enter a name, and create the room.
-3. Copy the invitation link.
-4. Open the link in a second tab and join with a different name.
+3. Copy the invitation link or note the five-character room code.
+4. In a second tab, open the link or select **Join Multiplayer Room** and enter the code, then join with a different name.
 5. Mark both players ready.
 6. Move or deploy a tether in either tab and verify the other tab updates.
 7. Refresh either tab to verify it reconnects to the same player slot.

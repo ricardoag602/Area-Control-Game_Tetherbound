@@ -2,7 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import { GameView } from "./game/components/GameView";
 import { NetworkGameView } from "./game/components/NetworkGameView";
 import type { GameMode } from "./game/types";
-import { RoomClient } from "./network/RoomClient";
+import { getRoomServerUrl, RoomClient } from "./network/RoomClient";
+import {
+  createGameAddress,
+  createInvitationLink,
+  isLoopbackHostname,
+  normalizeRoomCode,
+} from "./network/connectionInfo";
 import {
   CreateRoomView,
   JoinRoomView,
@@ -17,11 +23,14 @@ const LARGE_CONTROLS_KEY = "tetherbound.largeControls";
 
 export function App() {
   const [initialRoomCode] = useState(
-    () => new URLSearchParams(window.location.search).get("room")?.toUpperCase() ?? "",
+    () => normalizeRoomCode(new URLSearchParams(window.location.search).get("room") ?? ""),
   );
+  const [joinRoomCode, setJoinRoomCode] = useState(initialRoomCode);
   const [view, setView] = useState<View>(initialRoomCode ? "join-room" : "menu");
   const [gameMode, setGameMode] = useState<GameMode>("bot");
   const [roomClient] = useState(() => new RoomClient());
+  const [gameAddress] = useState(() => createGameAddress(window.location.href));
+  const [roomServerAddress] = useState(() => getRoomServerUrl());
   const roomSession = useRoomClient(roomClient);
   const resumeAttempted = useRef(false);
   const [largeControls, setLargeControls] = useState(
@@ -35,7 +44,7 @@ export function App() {
   useEffect(() => {
     if (resumeAttempted.current || !initialRoomCode) return;
     resumeAttempted.current = true;
-    if (roomClient.resumeRoom(initialRoomCode)) setView("lobby");
+    roomClient.resumeRoom(initialRoomCode);
   }, [initialRoomCode, roomClient]);
 
   useEffect(() => {
@@ -64,6 +73,7 @@ export function App() {
   function leaveMultiplayer() {
     roomClient.leave();
     clearRoomFromUrl();
+    setJoinRoomCode("");
     setGameMode("bot");
     setView("menu");
   }
@@ -75,15 +85,12 @@ export function App() {
   }
 
   async function copyInvitationLink() {
-    if (!roomSession.room) return;
-    const url = new URL(window.location.href);
-    url.searchParams.set("room", roomSession.room.code);
-    const text = url.toString();
+    if (!invitationLink) return;
     try {
-      await navigator.clipboard.writeText(text);
+      await navigator.clipboard.writeText(invitationLink);
     } catch {
       const field = document.createElement("textarea");
-      field.value = text;
+      field.value = invitationLink;
       field.style.position = "fixed";
       field.style.opacity = "0";
       document.body.append(field);
@@ -92,6 +99,11 @@ export function App() {
       field.remove();
     }
   }
+
+  const invitationLink = roomSession.room
+    ? createInvitationLink(window.location.href, roomSession.room.code)
+    : "";
+  const localAddressOnly = isLoopbackHostname(window.location.hostname);
 
   return (
     <main className={largeControls ? "app app--large-controls" : "app"}>
@@ -103,6 +115,10 @@ export function App() {
             onLargeControlsChange={setLargeControls}
             onBotGame={startBotGame}
             onCreateRoom={() => setView("create-room")}
+            onJoinRoom={() => { setJoinRoomCode(""); setView("join-room"); }}
+            gameAddress={gameAddress}
+            roomServerAddress={roomServerAddress}
+            localAddressOnly={localAddressOnly}
           />
         )}
         {view === "create-room" && (
@@ -111,13 +127,15 @@ export function App() {
             onCreate={(name) => { roomClient.createRoom(name, 2); setView("lobby"); }} />
         )}
         {view === "join-room" && (
-          <JoinRoomView code={initialRoomCode} connection={roomSession.connection} error={roomSession.error}
+          <JoinRoomView code={joinRoomCode} connection={roomSession.connection} error={roomSession.error}
             onBack={leaveMultiplayer}
-            onJoin={(name) => { roomClient.joinRoom(initialRoomCode, name); setView("lobby"); }} />
+            onCodeChange={setJoinRoomCode}
+            onJoin={(name, code) => { setJoinRoomCode(code); roomClient.joinRoom(code, name); }} />
         )}
         {view === "lobby" && roomSession.room && roomSession.playerId && (
           <RoomLobby room={roomSession.room} localPlayerId={roomSession.playerId}
             connection={roomSession.connection} latencyMs={roomSession.latencyMs}
+            invitationLink={invitationLink} localAddressOnly={localAddressOnly}
             onCopyLink={copyInvitationLink} onReadyChange={(ready) => roomClient.setReady(ready)}
             onLeave={leaveMultiplayer} />
         )}
@@ -152,6 +170,10 @@ interface MainMenuProps {
   onLargeControlsChange: (enabled: boolean) => void;
   onBotGame: () => void;
   onCreateRoom: () => void;
+  onJoinRoom: () => void;
+  gameAddress: string;
+  roomServerAddress: string;
+  localAddressOnly: boolean;
 }
 
 function MainMenu({
@@ -159,6 +181,10 @@ function MainMenu({
   onLargeControlsChange,
   onBotGame,
   onCreateRoom,
+  onJoinRoom,
+  gameAddress,
+  roomServerAddress,
+  localAddressOnly,
 }: MainMenuProps) {
   return (
     <div className="screen screen--menu">
@@ -183,7 +209,23 @@ function MainMenu({
           <span>Create Multiplayer Room</span>
           <small>Invite another astronaut</small>
         </button>
+        <button className="button button--secondary" onClick={onJoinRoom}>
+          <span>Join Multiplayer Room</span>
+          <small>Enter an existing room code</small>
+        </button>
       </div>
+
+      <details className="connection-details">
+        <summary>Connection details</summary>
+        <dl>
+          <div><dt>Open this game</dt><dd><code>{gameAddress}</code></dd></div>
+          <div><dt>Room server</dt><dd><code>{roomServerAddress}</code></dd></div>
+        </dl>
+        <p>Players open the game address, then enter a room code. The room server address is shown for troubleshooting only.</p>
+        {localAddressOnly && (
+          <p className="connection-warning">This localhost address works only on this computer. For a phone, use the Network address printed by <code>npm run dev</code>.</p>
+        )}
+      </details>
 
       <label className="setting-card">
         <span>
