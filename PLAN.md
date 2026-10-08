@@ -40,12 +40,14 @@ Build one local arena with two simulated players and no networking.
 
 **Exit condition:** Two separate phones or browser sessions can complete the same synchronized match.
 
-**Current progress:** The two-player room vertical slice is implemented: server-issued room codes, join links, ready state, authoritative 20 Hz snapshots, fair shared-resource resolution, acknowledged idempotent actions, RTT measurement, backpressure protection, paused reconnect grace, refresh recovery, result screens, and rematches. Public deployment and real-device network testing remain before this milestone is complete.
+**Current progress:** The two-player room vertical slice is implemented: server-issued room codes, join links, ready state, authoritative 20 Hz snapshots, ordered movement input, fair shared-resource resolution, acknowledged idempotent actions, RTT measurement, render-only position smoothing, backpressure protection, paused reconnect grace, refresh recovery, result screens, and rematches. Public deployment and real-device network testing remain before this milestone is complete.
 
 ## Milestone 4: Mobile usability
 
 - Portrait phone layout
 - One-thumb controls and contextual action button
+- Smooth walking plus a hold, aim, and release momentum burst
+- Automatic WASD and arrow-key walking with tap-then-hold boosts on the same key
 - Action previews and costs
 - Legible oxygen, salvage, tether, score, and connection status
 - Haptics, sound controls, reduced motion, and color-safe palettes

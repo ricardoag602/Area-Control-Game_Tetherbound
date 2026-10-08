@@ -1,4 +1,5 @@
 import { GAME_RULES } from "./constants";
+import { createMovementState } from "./movement";
 import type { GameState, PlayerId, Vec2 } from "./types";
 
 const PLAYER_BASE: Vec2 = { x: 50, y: 148 };
@@ -14,6 +15,7 @@ export function createInitialGameState(): GameState {
         basePosition: PLAYER_BASE,
         astronaut: {
           position: { x: 50, y: 135 },
+          movement: createMovementState({ x: 0, y: -1 }),
           oxygen: GAME_RULES.oxygenMaximum,
           carriedSalvage: 0,
           bankedSalvage: 0,
@@ -26,6 +28,7 @@ export function createInitialGameState(): GameState {
         basePosition: RIVAL_BASE,
         astronaut: {
           position: { x: 50, y: 25 },
+          movement: createMovementState({ x: 0, y: 1 }),
           oxygen: GAME_RULES.oxygenMaximum,
           carriedSalvage: 0,
           bankedSalvage: 0,

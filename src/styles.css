@@ -392,8 +392,14 @@ button { -webkit-tap-highlight-color: transparent; }
   width: 100%;
   height: 100%;
   touch-action: none;
+  -webkit-touch-callout: none;
   user-select: none;
   cursor: crosshair;
+}
+
+.world:focus-visible {
+  outline: 2px solid rgba(105, 221, 244, .85);
+  outline-offset: -3px;
 }
 
 .world[aria-disabled="true"] { cursor: not-allowed; }
@@ -435,10 +441,49 @@ button { -webkit-tap-highlight-color: transparent; }
 }
 
 .world__astronaut rect { stroke: none; }
+.world__astronaut-body {
+  transform-box: fill-box;
+  transform-origin: center;
+  transition: transform 60ms linear;
+  will-change: transform;
+}
 .world__astronaut--player circle { stroke: #d9faff; }
 .world__astronaut--player rect { fill: #69ddf4; }
 .world__astronaut--rival circle { stroke: #ffd7ca; }
 .world__astronaut--rival rect { fill: #ff8a68; }
+
+.world__charge-feedback { pointer-events: none; }
+.world__charge-feedback--player { color: #62e2f8; }
+.world__charge-feedback--rival { color: #ff8a68; }
+.world__charge-aim {
+  stroke: currentColor;
+  stroke-width: .55;
+  stroke-dasharray: 1.7 1.4;
+  stroke-linecap: round;
+  opacity: .72;
+}
+.world__charge-target { fill: none; stroke: currentColor; stroke-width: .5; opacity: .85; }
+.world__charge-track, .world__charge-progress, .world__charge-flash { fill: none; }
+.world__charge-track { stroke: currentColor; stroke-width: .65; opacity: .18; }
+.world__charge-progress {
+  stroke: currentColor;
+  stroke-width: .85;
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 2px currentColor);
+  transition: stroke-dasharray 70ms linear;
+}
+.world__charge-flash {
+  stroke: currentColor;
+  stroke-width: .75;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: charge-ready-flash 420ms ease-out both;
+}
+
+@keyframes charge-ready-flash {
+  from { opacity: .9; transform: scale(.8); }
+  to { opacity: 0; transform: scale(1.7); }
+}
 
 .world__salvage {
   fill: #ffd16c;
@@ -487,6 +532,17 @@ button { -webkit-tap-highlight-color: transparent; }
   pointer-events: none;
 }
 
+.control-hint--charging { color: #91edff; font-weight: 800; }
+.control-hint__keyboard { display: none; }
+.control-hint__pointer { display: inline; }
+
+@media (any-hover: hover) and (any-pointer: fine) {
+  .control-hint__pointer { display: none; }
+  .control-hint__keyboard--inactive { display: inline; }
+  .world:focus ~ .control-hint .control-hint__keyboard--active { display: inline; }
+  .world:focus ~ .control-hint .control-hint__keyboard--inactive { display: none; }
+}
+
 .game-hud { position: absolute; z-index: 10; left: 0; right: 0; display: flex; align-items: center; gap: .55rem; padding: 1rem; }
 .game-hud--top { top: env(safe-area-inset-top); }
 .game-hud--bottom { bottom: env(safe-area-inset-bottom); background: linear-gradient(transparent, rgba(4, 9, 14, .92) 40%); padding-top: 3rem; }
@@ -515,6 +571,8 @@ button { -webkit-tap-highlight-color: transparent; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+  .world__astronaut-body { transform: none !important; }
+  .world__charge-flash { display: none; }
 }
 
 @media (min-width: 48rem) {

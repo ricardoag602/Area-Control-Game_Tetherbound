@@ -145,18 +145,24 @@ describe("RoomServer", () => {
     expect(hostInitial.state).toEqual(guestInitial.state);
 
     const movementOnHost = waitForMessage(host, (message): message is Extract<ServerMessage, { type: "game_state" }> =>
-      message.type === "game_state" && message.lastProcessedInput.player === 1 &&
+      message.type === "game_state" && message.lastProcessedInput.player === 2 &&
+      message.state.players.player.astronaut.movement.mode === "idle" &&
       message.state.players.player.astronaut.position.y < hostInitial.state.players.player.astronaut.position.y,
     );
     const movementOnGuest = waitForMessage(guest, (message): message is Extract<ServerMessage, { type: "game_state" }> =>
-      message.type === "game_state" && message.lastProcessedInput.player === 1 &&
+      message.type === "game_state" && message.lastProcessedInput.player === 2 &&
+      message.state.players.player.astronaut.movement.mode === "idle" &&
       message.state.players.player.astronaut.position.y < guestInitial.state.players.player.astronaut.position.y,
     );
-    send(host, { type: "move_target", seq: 1, target: { x: 50, y: 100 } });
+    send(host, {
+      type: "movement_input",
+      seq: 1,
+      command: { type: "walk_direction", direction: { x: 0, y: -1 } },
+    });
+    send(host, { type: "movement_input", seq: 2, command: { type: "stop" } });
     const [hostMoved, guestMoved] = await Promise.all([movementOnHost, movementOnGuest]);
     expect(hostMoved.stateVersion).toBe(guestMoved.stateVersion);
 
-    send(host, { type: "move_target", seq: 2, target: null });
     const actionId = "deploy-once";
     send(host, { type: "deploy_anchor", actionId });
     send(host, { type: "deploy_anchor", actionId });
@@ -358,6 +364,191 @@ describe("RoomServer", () => {
 
     const resumedAt = room?.gameState?.remainingMs ?? 0;
     await waitUntil(() => (room?.gameState?.remainingMs ?? resumedAt) < resumedAt);
+  });
+
+  it("orders charge and release inputs once and broadcasts identical burst snapshots", async () => {
+    const server = await createServer();
+    const { host, guest, hostInitial } = await createStartedRoom(server);
+    const direction = { x: 0, y: -1 };
+
+    const chargedOnHostPromise = waitForMessage(
+      host,
+      (message): message is Extract<ServerMessage, { type: "game_state" }> =>
+        message.type === "game_state" &&
+        message.lastProcessedInput.player === 10 &&
+        message.state.players.player.astronaut.movement.mode === "charging" &&
+        message.state.players.player.astronaut.movement.chargeSeconds >= 0.8,
+      3_000,
+    );
+    const chargedOnGuestPromise = waitForMessage(
+      guest,
+      (message): message is Extract<ServerMessage, { type: "game_state" }> =>
+        message.type === "game_state" &&
+        message.lastProcessedInput.player === 10 &&
+        message.state.players.player.astronaut.movement.mode === "charging" &&
+        message.state.players.player.astronaut.movement.chargeSeconds >= 0.8,
+      3_000,
+    );
+    send(host, {
+      type: "movement_input",
+      seq: 10,
+      command: { type: "charge_direction", direction },
+    });
+    const [chargedOnHost, chargedOnGuest] = await Promise.all([
+      chargedOnHostPromise,
+      chargedOnGuestPromise,
+    ]);
+    expect(chargedOnHost.stateVersion).toBe(chargedOnGuest.stateVersion);
+    expect(chargedOnHost.state).toEqual(chargedOnGuest.state);
+
+    const burstOnHostPromise = waitForMessage(
+      host,
+      (message): message is Extract<ServerMessage, { type: "game_state" }> =>
+        message.type === "game_state" &&
+        message.lastProcessedInput.player === 12 &&
+        message.state.players.player.astronaut.movement.mode === "burst",
+    );
+    const burstOnGuestPromise = waitForMessage(
+      guest,
+      (message): message is Extract<ServerMessage, { type: "game_state" }> =>
+        message.type === "game_state" &&
+        message.lastProcessedInput.player === 12 &&
+        message.state.players.player.astronaut.movement.mode === "burst",
+    );
+    send(host, {
+      type: "movement_input",
+      seq: 12,
+      command: { type: "release_direction", direction },
+    });
+    send(host, {
+      type: "movement_input",
+      seq: 11,
+      command: { type: "charge_direction", direction: { x: 1, y: 0 } },
+    });
+    send(host, {
+      type: "movement_input",
+      seq: 12,
+      command: { type: "release_direction", direction },
+    });
+    const [burstOnHost, burstOnGuest] = await Promise.all([
+      burstOnHostPromise,
+      burstOnGuestPromise,
+    ]);
+    expect(burstOnHost.stateVersion).toBe(burstOnGuest.stateVersion);
+    expect(burstOnHost.state).toEqual(burstOnGuest.state);
+    expect(burstOnHost.lastProcessedInput.player).toBe(12);
+
+    const settledPromise = waitForMessage(
+      host,
+      (message): message is Extract<ServerMessage, { type: "game_state" }> =>
+        message.type === "game_state" &&
+        message.lastProcessedInput.player === 12 &&
+        message.state.players.player.astronaut.movement.mode === "idle" &&
+        message.state.players.player.astronaut.position.y <
+          hostInitial.state.players.player.astronaut.position.y,
+    );
+    const settled = await settledPromise;
+    const settledPosition = settled.state.players.player.astronaut.position;
+    const later = await waitForMessage(
+      host,
+      (message): message is Extract<ServerMessage, { type: "game_state" }> =>
+        message.type === "game_state" &&
+        message.stateVersion > settled.stateVersion &&
+        message.lastProcessedInput.player === 12 &&
+        message.state.players.player.astronaut.movement.mode === "idle",
+    );
+    expect(later.state.players.player.astronaut.position).toEqual(settledPosition);
+  });
+
+  it("cancels charge on disconnect and accepts the next ordered input after reconnect", async () => {
+    const server = await createServer();
+    const { host, guest, hostWelcome } = await createStartedRoom(server);
+    const target = { x: 50, y: 80 };
+
+    const chargingPromise = waitForMessage(
+      guest,
+      (message): message is Extract<ServerMessage, { type: "game_state" }> =>
+        message.type === "game_state" &&
+        message.lastProcessedInput.player === 1 &&
+        message.state.players.player.astronaut.movement.mode === "charging" &&
+        message.state.players.player.astronaut.movement.chargeSeconds > 0,
+    );
+    send(host, {
+      type: "movement_input",
+      seq: 1,
+      command: { type: "charge", target },
+    });
+    await chargingPromise;
+
+    const cancelledPromise = waitForMessage(
+      guest,
+      (message): message is Extract<ServerMessage, { type: "game_state" }> =>
+        message.type === "game_state" &&
+        message.lastProcessedInput.player === 1 &&
+        message.state.players.player.astronaut.movement.mode === "idle" &&
+        message.state.players.player.astronaut.movement.chargeSeconds === 0,
+    );
+    host.terminate();
+    const cancelled = await cancelledPromise;
+    const room = server.rooms.get(hostWelcome.room.code);
+    const pausedRemaining = room?.gameState?.remainingMs;
+    await new Promise((resolve) => setTimeout(resolve, 180));
+    expect(room?.gameState?.remainingMs).toBe(pausedRemaining);
+    expect(room?.gameState?.players.player.astronaut.movement).toMatchObject({
+      mode: "idle",
+      chargeSeconds: 0,
+      burstDistanceRemaining: 0,
+    });
+
+    const resumedHost = await connect(server);
+    const resumedWelcomePromise = waitForMessage(resumedHost, isWelcome);
+    const resumedStatePromise = waitForMessage(resumedHost, isGameState);
+    send(resumedHost, {
+      type: "join_room",
+      requestId: "movement-resume-request",
+      code: hostWelcome.room.code,
+      name: "Host",
+      sessionToken: hostWelcome.sessionToken,
+    });
+    expect((await resumedWelcomePromise).reconnected).toBe(true);
+    const resumedState = await resumedStatePromise;
+    expect(resumedState.state.players.player.astronaut.movement).toMatchObject({
+      mode: "idle",
+      chargeSeconds: 0,
+    });
+    expect(resumedState.state.players.player.astronaut.position).toEqual(
+      cancelled.state.players.player.astronaut.position,
+    );
+
+    const movedOnHostPromise = waitForMessage(
+      resumedHost,
+      (message): message is Extract<ServerMessage, { type: "game_state" }> =>
+        message.type === "game_state" &&
+        message.lastProcessedInput.player === 2 &&
+        message.state.players.player.astronaut.movement.mode === "walking" &&
+        message.state.players.player.astronaut.position.y <
+          resumedState.state.players.player.astronaut.position.y,
+    );
+    const movedOnGuestPromise = waitForMessage(
+      guest,
+      (message): message is Extract<ServerMessage, { type: "game_state" }> =>
+        message.type === "game_state" &&
+        message.lastProcessedInput.player === 2 &&
+        message.state.players.player.astronaut.movement.mode === "walking" &&
+        message.state.players.player.astronaut.position.y <
+          resumedState.state.players.player.astronaut.position.y,
+    );
+    send(resumedHost, {
+      type: "movement_input",
+      seq: 2,
+      command: { type: "walk", target },
+    });
+    const [movedOnHost, movedOnGuest] = await Promise.all([
+      movedOnHostPromise,
+      movedOnGuestPromise,
+    ]);
+    expect(movedOnHost.stateVersion).toBe(movedOnGuest.stateVersion);
+    expect(movedOnHost.state).toEqual(movedOnGuest.state);
   });
 
   it("acknowledges a deploy action and replays its result without deploying twice", async () => {

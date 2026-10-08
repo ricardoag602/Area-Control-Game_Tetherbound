@@ -1,4 +1,4 @@
-import type { GameState, PlayerId, Vec2 } from "../game/types";
+import type { GameState, MovementCommand, PlayerId } from "../game/types";
 import { createClientId } from "./clientId";
 import { resolveRoomServerUrl } from "./connectionInfo";
 import type { ClientMessage, RoomSnapshot, ServerMessage } from "./protocol";
@@ -22,6 +22,7 @@ type SessionIntent =
 
 const RETRY_DELAYS = [250, 500, 1_000, 2_000, 4_000];
 const HANDSHAKE_TIMEOUT_MS = 5_000;
+const CLIENT_ERROR_CLOSE_CODE = 4003;
 
 export function getRoomServerUrl() {
   return resolveRoomServerUrl(window.location, import.meta.env.VITE_WS_URL);
@@ -46,9 +47,10 @@ export class RoomClient {
   private retryTimer: number | null = null;
   private handshakeTimer: number | null = null;
   private pingTimer: number | null = null;
-  private moveTimer: number | null = null;
-  private pendingMoveTarget: Vec2 | null | undefined;
-  private lastMoveSentAt = 0;
+  private movementTimer: number | null = null;
+  private pendingMovementCommand: MovementCommand | null = null;
+  private lastMovementSentAt = 0;
+  private lastMovementType: MovementCommand["type"] | null = null;
   private shouldReconnect = false;
   private inputSequence = 0;
   private readonly pendingActions = new Set<string>();
@@ -95,30 +97,36 @@ export class RoomClient {
     this.send({ type: "set_ready", ready });
   }
 
-  setMoveTarget(target: Vec2 | null) {
+  sendMovementCommand(command: MovementCommand) {
     const now = performance.now();
-    const elapsed = now - this.lastMoveSentAt;
-    if (target === null || elapsed >= 50) {
-      this.clearMoveTimer();
-      this.sendMoveTarget(target);
+    const elapsed = now - this.lastMovementSentAt;
+    const continuous = command.type === "walk" ||
+      command.type === "walk_direction" ||
+      command.type === "charge" ||
+      command.type === "charge_direction";
+    const sameContinuousGesture = continuous && command.type === this.lastMovementType;
+    if (!sameContinuousGesture || elapsed >= 50) {
+      this.clearMovementTimer();
+      this.sendMovementCommandNow(command);
       return;
     }
 
-    this.pendingMoveTarget = target;
-    if (this.moveTimer === null) {
-      this.moveTimer = window.setTimeout(() => {
-        const pending = this.pendingMoveTarget;
-        this.moveTimer = null;
-        this.pendingMoveTarget = undefined;
-        if (pending !== undefined) this.sendMoveTarget(pending);
+    this.pendingMovementCommand = command;
+    if (this.movementTimer === null) {
+      this.movementTimer = window.setTimeout(() => {
+        const pending = this.pendingMovementCommand;
+        this.movementTimer = null;
+        this.pendingMovementCommand = null;
+        if (pending) this.sendMovementCommandNow(pending);
       }, 50 - elapsed);
     }
   }
 
-  private sendMoveTarget(target: Vec2 | null) {
+  private sendMovementCommandNow(command: MovementCommand) {
     this.inputSequence += 1;
-    this.lastMoveSentAt = performance.now();
-    this.send({ type: "move_target", seq: this.inputSequence, target });
+    this.lastMovementSentAt = performance.now();
+    this.lastMovementType = command.type;
+    this.send({ type: "movement_input", seq: this.inputSequence, command });
   }
 
   deployAnchor() {
@@ -141,6 +149,8 @@ export class RoomClient {
     this.intent = null;
     this.sessionToken = null;
     this.retryAttempt = 0;
+    this.inputSequence = 0;
+    this.lastMovementType = null;
     this.pendingActions.clear();
     if (roomCode) this.removeSession(roomCode);
     this.update({
@@ -160,6 +170,8 @@ export class RoomClient {
     this.socket?.close(1000, "Starting a new session");
     this.intent = intent;
     this.retryAttempt = 0;
+    this.inputSequence = 0;
+    this.lastMovementType = null;
     this.pendingActions.clear();
     this.shouldReconnect = true;
     this.update({
@@ -215,14 +227,18 @@ export class RoomClient {
       this.startHandshakeTimer(socket);
     });
 
-    socket.addEventListener("message", (event) => this.handleMessage(String(event.data)));
+    socket.addEventListener("message", (event) => this.handleMessage(socket, String(event.data)));
     socket.addEventListener("close", () => this.handleClose(socket));
     socket.addEventListener("error", () => {
       // A close event follows and owns retry behavior.
     });
   }
 
-  private handleMessage(raw: string) {
+  private handleMessage(socket: WebSocket, raw: string) {
+    // A replaced socket can still have a message queued when its close event runs.
+    // Never let that stale room mutate the active session.
+    if (socket !== this.socket) return;
+
     let message: ServerMessage;
     try {
       message = JSON.parse(raw) as ServerMessage;
@@ -252,6 +268,13 @@ export class RoomClient {
       return;
     }
     if (message.type === "game_state") {
+      const localPlayerId = this.snapshot.playerId;
+      const acknowledgedInput = localPlayerId
+        ? message.lastProcessedInput[localPlayerId]
+        : undefined;
+      if (acknowledgedInput !== undefined) {
+        this.inputSequence = Math.max(this.inputSequence, acknowledgedInput);
+      }
       if (message.stateVersion >= this.snapshot.stateVersion) {
         this.update({ gameState: message.state, stateVersion: message.stateVersion });
       }
@@ -272,7 +295,7 @@ export class RoomClient {
       if (!message.recoverable) {
         this.shouldReconnect = false;
         this.clearTimers();
-        this.socket?.close(1008, message.code);
+        this.socket?.close(CLIENT_ERROR_CLOSE_CODE, message.code);
         this.update({ connection: "offline" });
       }
     }
@@ -283,7 +306,8 @@ export class RoomClient {
     this.socket = null;
     this.stopPings();
     this.clearHandshakeTimer();
-    this.clearMoveTimer();
+    this.clearMovementTimer();
+    this.lastMovementType = null;
     if (!this.shouldReconnect || !this.intent) {
       this.update({ connection: "offline" });
       return;
@@ -345,15 +369,15 @@ export class RoomClient {
   private clearTimers() {
     this.stopPings();
     this.clearHandshakeTimer();
-    this.clearMoveTimer();
+    this.clearMovementTimer();
     if (this.retryTimer !== null) window.clearTimeout(this.retryTimer);
     this.retryTimer = null;
   }
 
-  private clearMoveTimer() {
-    if (this.moveTimer !== null) window.clearTimeout(this.moveTimer);
-    this.moveTimer = null;
-    this.pendingMoveTarget = undefined;
+  private clearMovementTimer() {
+    if (this.movementTimer !== null) window.clearTimeout(this.movementTimer);
+    this.movementTimer = null;
+    this.pendingMovementCommand = null;
   }
 
   private currentName() {

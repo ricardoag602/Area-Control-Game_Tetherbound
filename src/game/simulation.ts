@@ -1,7 +1,8 @@
 import { GAME_RULES, WORLD } from "./constants";
-import { clampToWorld, distance, moveToward } from "./geometry";
+import { distance, distanceToSegment } from "./geometry";
+import { advanceMovement, cancelMovement } from "./movement";
 import { baseId } from "./state";
-import type { Anchor, GameInput, GameState, PlayerId, Vec2 } from "./types";
+import type { Anchor, GameInput, GameState, MatchInputs, PlayerId, Vec2 } from "./types";
 
 interface NetworkNode {
   id: string;
@@ -51,6 +52,8 @@ export function canDeployAnchor(state: GameState, playerId: PlayerId) {
 
   return (
     player.astronaut.tetherKits > 0 &&
+    player.astronaut.movement.mode !== "charging" &&
+    player.astronaut.movement.mode !== "burst" &&
     ownedAnchors.length < GAME_RULES.maximumAnchorsPerPlayer &&
     findConnectionParent(state, playerId, position) !== null &&
     getPoweredNodes(state, playerId).every(
@@ -98,12 +101,12 @@ export function advanceGame(
 ): GameState {
   if (state.remainingMs <= 0) return state;
 
-  return advanceMatch(state, { player: input }, deltaSeconds);
+  return advanceMatch(state, { player: [input] }, deltaSeconds);
 }
 
 export function advanceMatch(
   state: GameState,
-  inputs: Partial<Record<PlayerId, GameInput>>,
+  inputs: MatchInputs,
   deltaSeconds: number,
 ): GameState {
   if (state.remainingMs <= 0) return state;
@@ -113,40 +116,37 @@ export function advanceMatch(
     remainingMs: Math.max(0, state.remainingMs - deltaSeconds * 1000),
   };
   const activePlayers: PlayerId[] = [];
+  const movementPaths = {} as Record<PlayerId, { start: Vec2; end: Vec2 }>;
 
   for (const playerId of ["player", "rival"] as const) {
-    const input = inputs[playerId];
-    if (!input) continue;
-
-    const result = advancePlayer(nextState, playerId, input, deltaSeconds);
+    const result = advancePlayer(nextState, playerId, inputs[playerId] ?? [], deltaSeconds);
     nextState = result.state;
+    movementPaths[playerId] = result.path;
     if (!result.respawned) activePlayers.push(playerId);
   }
 
-  nextState = collectSalvage(nextState, activePlayers);
+  nextState = collectSalvage(nextState, activePlayers, movementPaths);
   return deliverSalvage(nextState, activePlayers);
 }
 
 function advancePlayer(
   state: GameState,
   playerId: PlayerId,
-  input: GameInput,
+  inputs: GameInput[],
   deltaSeconds: number,
-): { state: GameState; respawned: boolean } {
+): { state: GameState; respawned: boolean; path: { start: Vec2; end: Vec2 } } {
   const player = state.players[playerId];
   const currentAstronaut = player.astronaut;
 
-  const nextPosition = input.moveTarget
-    ? clampToWorld(
-        moveToward(
-          currentAstronaut.position,
-          input.moveTarget,
-          GAME_RULES.movementSpeed * deltaSeconds,
-        ),
-        WORLD.width,
-        WORLD.height,
-      )
-    : currentAstronaut.position;
+  const movementStep = advanceMovement(
+    currentAstronaut.position,
+    currentAstronaut.movement,
+    inputs,
+    deltaSeconds,
+    WORLD.width,
+    WORLD.height,
+  );
+  const nextPosition = movementStep.position;
 
   const safe = isInsideSafeZone(state, playerId, nextPosition);
   const oxygen = safe
@@ -163,6 +163,7 @@ function advancePlayer(
     // Running out of oxygen costs carried salvage and returns the player to base.
     return {
       respawned: true,
+      path: { start: currentAstronaut.position, end: player.basePosition },
       state: {
         ...state,
         players: {
@@ -172,6 +173,7 @@ function advancePlayer(
             astronaut: {
               ...currentAstronaut,
               position: { ...player.basePosition },
+              movement: cancelMovement(movementStep.movement),
               oxygen: GAME_RULES.oxygenMaximum,
               carriedSalvage: 0,
               respawns: currentAstronaut.respawns + 1,
@@ -184,6 +186,7 @@ function advancePlayer(
 
   return {
     respawned: false,
+    path: { start: currentAstronaut.position, end: nextPosition },
     state: {
       ...state,
       players: {
@@ -193,6 +196,7 @@ function advancePlayer(
           astronaut: {
             ...currentAstronaut,
             position: nextPosition,
+            movement: movementStep.movement,
             oxygen,
           },
         },
@@ -201,7 +205,11 @@ function advancePlayer(
   };
 }
 
-function collectSalvage(state: GameState, activePlayers: PlayerId[]): GameState {
+function collectSalvage(
+  state: GameState,
+  activePlayers: PlayerId[],
+  movementPaths: Record<PlayerId, { start: Vec2; end: Vec2 }>,
+): GameState {
   let players = state.players;
   // Exact ties rotate using the number of deposits already claimed. This keeps
   // either player slot from permanently owning the simultaneous-pickup advantage.
@@ -217,7 +225,11 @@ function collectSalvage(state: GameState, activePlayers: PlayerId[]): GameState 
       )
       .map((playerId) => ({
         playerId,
-        distance: distance(players[playerId].astronaut.position, deposit.position),
+        distance: distanceToSegment(
+          deposit.position,
+          movementPaths[playerId].start,
+          movementPaths[playerId].end,
+        ),
       }))
       .filter((contender) => contender.distance <= GAME_RULES.collectionRadius)
       .sort((a, b) => a.distance - b.distance);

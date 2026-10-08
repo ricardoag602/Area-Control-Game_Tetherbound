@@ -23,3 +23,23 @@ export function clampToWorld(position: Vec2, width: number, height: number): Vec
     y: Math.min(height, Math.max(0, position.y)),
   };
 }
+
+export function distanceToSegment(point: Vec2, start: Vec2, end: Vec2) {
+  const segmentX = end.x - start.x;
+  const segmentY = end.y - start.y;
+  const lengthSquared = segmentX * segmentX + segmentY * segmentY;
+  if (lengthSquared === 0) return distance(point, start);
+
+  const projection = Math.min(
+    1,
+    Math.max(
+      0,
+      ((point.x - start.x) * segmentX + (point.y - start.y) * segmentY) /
+        lengthSquared,
+    ),
+  );
+  return distance(point, {
+    x: start.x + segmentX * projection,
+    y: start.y + segmentY * projection,
+  });
+}

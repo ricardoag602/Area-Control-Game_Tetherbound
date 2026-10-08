@@ -6,6 +6,29 @@ export interface Vec2 {
   y: number;
 }
 
+export type MovementMode = "idle" | "walking" | "charging" | "burst";
+
+export type MovementCommand =
+  | { type: "walk"; target: Vec2 }
+  | { type: "walk_direction"; direction: Vec2 }
+  | { type: "charge" | "release"; target: Vec2 }
+  | { type: "charge_direction" | "release_direction"; direction: Vec2 }
+  | { type: "stop" };
+
+export interface MovementState {
+  mode: MovementMode;
+  target: Vec2 | null;
+  queuedDirection: Vec2 | null;
+  direction: Vec2;
+  velocity: Vec2;
+  gaitDistance: number;
+  gaitPhase: number;
+  chargeSeconds: number;
+  burstDistanceRemaining: number;
+  burstDistanceTotal: number;
+  lastCommandSequence: number;
+}
+
 export interface Anchor {
   id: string;
   owner: PlayerId;
@@ -22,6 +45,7 @@ export interface SalvageDeposit {
 
 export interface AstronautState {
   position: Vec2;
+  movement: MovementState;
   oxygen: number;
   carriedSalvage: number;
   bankedSalvage: number;
@@ -44,5 +68,8 @@ export interface GameState {
 }
 
 export interface GameInput {
-  moveTarget: Vec2 | null;
+  sequence: number;
+  command: MovementCommand;
 }
+
+export type MatchInputs = Partial<Record<PlayerId, GameInput[]>>;

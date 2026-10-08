@@ -14,6 +14,7 @@
     "server",
     "src/game/constants.ts",
     "src/game/geometry.ts",
+    "src/game/movement.ts",
     "src/game/simulation.ts",
     "src/game/state.ts",
     "src/game/types.ts",

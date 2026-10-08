@@ -1,7 +1,8 @@
 import { advanceMatch, deployAnchor } from "./simulation";
-import type { GameInput, GameState, PlayerId } from "./types";
+import type { GameInput, GameState, MovementCommand, PlayerId } from "./types";
 
-export interface PlayerCommand extends GameInput {
+export interface PlayerCommand {
+  movementCommands: MovementCommand[];
   deployAnchor: boolean;
 }
 
@@ -19,7 +20,7 @@ export function applyPlayerCommands(
   deltaSeconds: number,
 ): GameState {
   let nextState = state;
-  const inputs: Partial<Record<PlayerId, GameInput>> = {};
+  const inputs: Partial<Record<PlayerId, GameInput[]>> = {};
 
   for (const playerId of PLAYER_ORDER) {
     const command = commands[playerId];
@@ -28,7 +29,11 @@ export function applyPlayerCommands(
     if (command.deployAnchor) {
       nextState = deployAnchor(nextState, playerId);
     }
-    inputs[playerId] = { moveTarget: command.moveTarget };
+    let sequence = nextState.players[playerId].astronaut.movement.lastCommandSequence;
+    inputs[playerId] = command.movementCommands.map((movementCommand) => ({
+      sequence: ++sequence,
+      command: movementCommand,
+    }));
   }
 
   return advanceMatch(nextState, inputs, deltaSeconds);

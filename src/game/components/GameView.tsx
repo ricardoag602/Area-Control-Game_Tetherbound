@@ -6,7 +6,7 @@ interface GameViewProps {
 }
 
 export function GameView({ onLeave }: GameViewProps) {
-  const { state, setMoveTarget, deploy } = useLocalMatch();
+  const { state, sendMovementCommand, deploy } = useLocalMatch();
   return <MatchScreen state={state} localPlayerId="player" opponentName="Bot" statusText="Mechanics sandbox"
-    onMoveTargetChange={setMoveTarget} onDeploy={deploy} onLeave={onLeave} />;
+    interpolatePositions={true} onMovementCommand={sendMovementCommand} onDeploy={deploy} onLeave={onLeave} />;
 }

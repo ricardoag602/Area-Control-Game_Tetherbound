@@ -1,9 +1,11 @@
 import { randomBytes } from "node:crypto";
 import type { AddressInfo } from "node:net";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
+import { SIMULATION_RULES } from "../src/game/constants";
 import { advanceMatch, deployAnchor, getTerritoryScore } from "../src/game/simulation";
+import { cancelMovement } from "../src/game/movement";
 import { createInitialGameState } from "../src/game/state";
-import type { GameInput, GameState, PlayerId, Vec2 } from "../src/game/types";
+import type { GameInput, GameState, PlayerId } from "../src/game/types";
 import {
   parseClientMessage,
   type ClientMessage,
@@ -15,6 +17,7 @@ import {
 const ROOM_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const PLAYER_IDS: PlayerId[] = ["player", "rival"];
 const MAX_ACTION_HISTORY = 256;
+const MAX_PENDING_INPUTS = 64;
 const MAX_REQUEST_KEYS_PER_PLAYER = 16;
 const MAX_MESSAGES_PER_SECOND = 120;
 const SOFT_BUFFER_LIMIT = 64 * 1024;
@@ -30,7 +33,7 @@ interface ConnectedPlayer {
   sessionToken: string;
   socket: WebSocket | null;
   disconnectedAt: number | null;
-  input: GameInput;
+  pendingInputs: GameInput[];
   lastInputSeq: number;
   processedActions: Map<string, boolean>;
   requestKeys: Set<string>;
@@ -47,6 +50,7 @@ interface MatchRoom {
   winner: PlayerId | "draw" | null;
   finishReason: "time" | "disconnect" | null;
   lastTickAt: number;
+  tickAccumulatorMs: number;
   lastActivityAt: number;
 }
 
@@ -81,7 +85,7 @@ export class RoomServer {
   private readonly heartbeat: NodeJS.Timeout;
 
   constructor(options: RoomServerOptions = {}) {
-    this.tickRate = options.tickRate ?? 20;
+    this.tickRate = options.tickRate ?? SIMULATION_RULES.ticksPerSecond;
     this.disconnectGraceMs = options.disconnectGraceMs ?? 30_000;
     this.webSocketServer = new WebSocketServer({
       port: options.port ?? 8788,
@@ -193,6 +197,7 @@ export class RoomServer {
       winner: null,
       finishReason: null,
       lastTickAt: now,
+      tickAccumulatorMs: 0,
       lastActivityAt: now,
     };
     this.rooms.set(code, room);
@@ -253,7 +258,7 @@ export class RoomServer {
       sessionToken: randomBytes(24).toString("base64url"),
       socket,
       disconnectedAt: null,
-      input: { moveTarget: null },
+      pendingInputs: [],
       lastInputSeq: 0,
       processedActions: new Map(),
       requestKeys: new Set(),
@@ -351,10 +356,12 @@ export class RoomServer {
 
     if (room.phase !== "playing" || !room.gameState) return;
 
-    if (message.type === "move_target") {
-      if (message.seq <= player.lastInputSeq || !this.validTarget(message.target)) return;
+    if (message.type === "movement_input") {
+      if (message.seq <= player.lastInputSeq || player.pendingInputs.length >= MAX_PENDING_INPUTS) {
+        return;
+      }
       player.lastInputSeq = message.seq;
-      player.input = { moveTarget: message.target };
+      player.pendingInputs.push({ sequence: message.seq, command: message.command });
       return;
     }
 
@@ -391,12 +398,13 @@ export class RoomServer {
     room.winner = null;
     room.finishReason = null;
     room.lastTickAt = Date.now();
+    room.tickAccumulatorMs = 0;
     room.lastActivityAt = Date.now();
     room.stateVersion += 1;
     room.revision += 1;
     for (const player of room.players.values()) {
       player.ready = false;
-      player.input = { moveTarget: null };
+      player.pendingInputs = [];
     }
     this.broadcastRoom(room);
     this.broadcastGameState(room);
@@ -415,8 +423,9 @@ export class RoomServer {
     room.revision += 1;
     for (const player of room.players.values()) {
       player.ready = false;
-      player.input = { moveTarget: null };
+      player.pendingInputs = [];
     }
+    if (room.gameState) room.gameState = this.cancelAllMovement(room.gameState);
     this.broadcastRoom(room);
   }
 
@@ -438,7 +447,12 @@ export class RoomServer {
     player.socket = null;
     player.connected = false;
     player.disconnectedAt = Date.now();
-    player.input = { moveTarget: null };
+    player.pendingInputs = [];
+    if (room.gameState) {
+      room.gameState = this.cancelPlayerMovement(room.gameState, player.id);
+      room.stateVersion += 1;
+      this.broadcastGameState(room);
+    }
     room.lastActivityAt = Date.now();
     room.revision += 1;
     this.broadcastRoom(room);
@@ -457,19 +471,41 @@ export class RoomServer {
       if (!matchReady) {
         // Keep the match clock, oxygen, and resources frozen during the reconnect grace period.
         room.lastTickAt = now;
+        room.tickAccumulatorMs = 0;
         continue;
       }
 
-      const elapsedSeconds = Math.min((now - room.lastTickAt) / 1000, 0.1);
+      const fixedStepMs = 1_000 / this.tickRate;
+      const elapsedMs = Math.max(0, now - room.lastTickAt);
       room.lastTickAt = now;
-      const inputs: Partial<Record<PlayerId, GameInput>> = {};
+      room.tickAccumulatorMs = Math.min(
+        room.tickAccumulatorMs + elapsedMs,
+        fixedStepMs * SIMULATION_RULES.maximumCatchUpSteps,
+      );
+      const stepCount = Math.min(
+        SIMULATION_RULES.maximumCatchUpSteps,
+        Math.floor((room.tickAccumulatorMs + 0.0001) / fixedStepMs),
+      );
+      if (stepCount === 0) continue;
+      room.tickAccumulatorMs -= stepCount * fixedStepMs;
+
+      const inputs: Partial<Record<PlayerId, GameInput[]>> = {};
       for (const player of room.players.values()) {
-        if (player.connected) inputs[player.id] = player.input;
+        if (player.connected) inputs[player.id] = player.pendingInputs.splice(0);
       }
-      room.gameState = advanceMatch(room.gameState, inputs, elapsedSeconds);
-      room.stateVersion += 1;
-      if (room.gameState.remainingMs <= 0) {
-        this.finishMatch(room, "time");
+
+      for (let step = 0; step < stepCount; step += 1) {
+        room.gameState = advanceMatch(
+          room.gameState,
+          step === 0 ? inputs : {},
+          fixedStepMs / 1_000,
+        );
+        room.stateVersion += 1;
+        if (room.gameState.remainingMs <= 0) {
+          room.tickAccumulatorMs = 0;
+          this.finishMatch(room, "time");
+          break;
+        }
       }
       this.broadcastGameState(room);
     }
@@ -589,17 +625,25 @@ export class RoomServer {
     return typeof name === "string" && name.trim().length >= 1 && name.trim().length <= 20;
   }
 
-  private validTarget(target: Vec2 | null) {
-    return (
-      target === null ||
-      (typeof target === "object" &&
-        Number.isFinite(target.x) &&
-        Number.isFinite(target.y) &&
-        target.x >= 0 &&
-        target.x <= 100 &&
-        target.y >= 0 &&
-        target.y <= 160)
-    );
+  private cancelPlayerMovement(state: GameState, playerId: PlayerId): GameState {
+    const player = state.players[playerId];
+    return {
+      ...state,
+      players: {
+        ...state.players,
+        [playerId]: {
+          ...player,
+          astronaut: {
+            ...player.astronaut,
+            movement: cancelMovement(player.astronaut.movement),
+          },
+        },
+      },
+    };
+  }
+
+  private cancelAllMovement(state: GameState): GameState {
+    return this.cancelPlayerMovement(this.cancelPlayerMovement(state, "player"), "rival");
   }
 
   private consumeMessageAllowance(socket: WebSocket) {

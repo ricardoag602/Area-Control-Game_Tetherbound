@@ -18,6 +18,16 @@ The single development command starts:
 
 The terminal prints both a local URL and a network URL.
 
+## Controls
+
+- Drag anywhere in the arena to walk. Movement accelerates and settles smoothly.
+- On desktop, use **WASD** or the **arrow keys** for directional walking, including normalized diagonals.
+- To boost with the keyboard, tap a direction, press that same key again, and hold the second press to charge. Release to launch.
+- Keyboard and pointer controls hand off automatically to whichever one you use most recently.
+- Press and hold your astronaut, then drag to aim a momentum burst.
+- The astronaut lunges briefly, then slows during the first second of the hold. Release after the ring flashes at two seconds for maximum distance, or release sooner for a shorter burst.
+- Select **Deploy** while connected to your tether network to place an available anchor.
+
 ## Test multiplayer
 
 ### Two browser tabs
@@ -38,7 +48,11 @@ Open the printed **Network** URL on the computer before creating the room. The r
 
 - The server owns movement, oxygen, salvage, tethers, timer, and scoring.
 - The server simulates rooms and sends full state snapshots at 20 Hz.
+- Bot and multiplayer matches share a fixed 20 Hz rules step with bounded catch-up, so charge timing stays consistent across frame-rate dips.
 - Movement inputs carry increasing sequence numbers.
+- Movement edges are queued in order, so a quick charge and release cannot disappear between server ticks.
+- Fast bursts use swept pickup checks, preventing players from skipping through salvage between snapshots.
+- Multiplayer positions are visually smoothed without changing the server-owned game state.
 - Discrete actions are acknowledged and retried by unique ID, preventing loss or duplicate tether deployment.
 - Refreshes resume through an opaque session token stored only in the joining browser session.
 - Initial room requests are idempotent, so retrying a lost handshake cannot create duplicate rooms or players.
@@ -54,6 +68,7 @@ Open the printed **Network** URL on the computer before creating the room. The r
 - `server/RoomServer.ts` — room lifecycle, authoritative simulation, heartbeat, and reconnect handling
 - `src/network/RoomClient.ts` — socket lifecycle, session resume, backoff, and latency tracking
 - `src/network/protocol.ts` — shared network message contracts
+- `src/game/movement.ts` — walking, charge, burst, and movement feel rules
 - `src/game/simulation.ts` — transport-independent game rules
 - `src/game/components/MatchScreen.tsx` — shared bot and multiplayer match presentation
 

@@ -12,7 +12,7 @@ const LOW_OXYGEN_THRESHOLD = 35;
  */
 export function getBotCommand(state: GameState, playerId: PlayerId): PlayerCommand {
   if (state.remainingMs <= 0) {
-    return { moveTarget: null, deployAnchor: false };
+    return { movementCommands: [{ type: "stop" }], deployAnchor: false };
   }
 
   const astronaut = state.players[playerId].astronaut;
@@ -42,7 +42,7 @@ export function getBotCommand(state: GameState, playerId: PlayerId): PlayerComma
   }
 
   return {
-    moveTarget,
+    movementCommands: moveTarget ? [{ type: "walk", target: moveTarget }] : [{ type: "stop" }],
     deployAnchor: canDeployAnchor(state, playerId),
   };
 }

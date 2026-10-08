@@ -3,9 +3,13 @@ export const WORLD = {
   height: 160,
 } as const;
 
+export const SIMULATION_RULES = {
+  ticksPerSecond: 20,
+  maximumCatchUpSteps: 5,
+} as const;
+
 export const GAME_RULES = {
   matchDurationMs: 5 * 60 * 1000,
-  movementSpeed: 25,
   oxygenMaximum: 100,
   oxygenDrainPerSecond: 9,
   oxygenRecoveryPerSecond: 22,

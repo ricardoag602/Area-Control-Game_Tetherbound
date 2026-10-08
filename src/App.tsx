@@ -152,7 +152,8 @@ export function App() {
         {view === "game" && gameMode === "multiplayer" && roomSession.room && roomSession.gameState && roomSession.playerId && (
           <NetworkGameView state={roomSession.gameState} room={roomSession.room}
             localPlayerId={roomSession.playerId} connection={roomSession.connection}
-            latencyMs={roomSession.latencyMs} onMoveTargetChange={(target) => roomClient.setMoveTarget(target)}
+            latencyMs={roomSession.latencyMs}
+            onMovementCommand={(command) => roomClient.sendMovementCommand(command)}
             onDeploy={() => roomClient.deployAnchor()} onLeave={leaveMultiplayer} />
         )}
         {view === "result" && roomSession.room && roomSession.gameState && roomSession.playerId && (

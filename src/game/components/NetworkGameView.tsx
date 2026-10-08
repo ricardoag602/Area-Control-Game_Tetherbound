@@ -1,6 +1,6 @@
 import type { ConnectionStatus } from "../../network/RoomClient";
 import type { RoomSnapshot } from "../../network/protocol";
-import type { GameState, PlayerId, Vec2 } from "../types";
+import type { GameState, MovementCommand, PlayerId } from "../types";
 import { MatchScreen } from "./MatchScreen";
 
 interface NetworkGameViewProps {
@@ -9,12 +9,12 @@ interface NetworkGameViewProps {
   localPlayerId: PlayerId;
   connection: ConnectionStatus;
   latencyMs: number | null;
-  onMoveTargetChange: (target: Vec2 | null) => void;
+  onMovementCommand: (command: MovementCommand) => void;
   onDeploy: () => void;
   onLeave: () => void;
 }
 
-export function NetworkGameView({ state, room, localPlayerId, connection, latencyMs, onMoveTargetChange, onDeploy, onLeave }: NetworkGameViewProps) {
+export function NetworkGameView({ state, room, localPlayerId, connection, latencyMs, onMovementCommand, onDeploy, onLeave }: NetworkGameViewProps) {
   const opponent = room.players.find((player) => player.id !== localPlayerId);
   const controlsDisabled = connection !== "connected" || !opponent?.connected;
   const statusText = connection !== "connected"
@@ -24,5 +24,6 @@ export function NetworkGameView({ state, room, localPlayerId, connection, latenc
       : "Room synchronized";
   return <MatchScreen state={state} localPlayerId={localPlayerId} opponentName={opponent?.name ?? "Rival"}
     statusText={statusText} latencyMs={latencyMs} controlsDisabled={controlsDisabled}
-    onMoveTargetChange={onMoveTargetChange} onDeploy={onDeploy} onLeave={onLeave} />;
+    interpolatePositions={true}
+    onMovementCommand={onMovementCommand} onDeploy={onDeploy} onLeave={onLeave} />;
 }

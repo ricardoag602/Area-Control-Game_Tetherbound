@@ -1,5 +1,6 @@
 import { canDeployAnchor, getTerritoryScore, isInsideSafeZone } from "../simulation";
-import type { GameState, PlayerId, Vec2 } from "../types";
+import { MOVEMENT_RULES } from "../movement";
+import type { GameState, MovementCommand, PlayerId } from "../types";
 import { ArenaRenderer } from "./ArenaRenderer";
 
 interface MatchScreenProps {
@@ -9,7 +10,8 @@ interface MatchScreenProps {
   statusText: string;
   latencyMs?: number | null;
   controlsDisabled?: boolean;
-  onMoveTargetChange: (target: Vec2 | null) => void;
+  interpolatePositions?: boolean;
+  onMovementCommand: (command: MovementCommand) => void;
   onDeploy: () => void;
   onLeave: () => void;
 }
@@ -19,11 +21,24 @@ function formatTime(milliseconds: number) {
   return `${Math.floor(totalSeconds / 60)}:${(totalSeconds % 60).toString().padStart(2, "0")}`;
 }
 
-export function MatchScreen({ state, localPlayerId, opponentName, statusText, latencyMs, controlsDisabled = false, onMoveTargetChange, onDeploy, onLeave }: MatchScreenProps) {
+export function MatchScreen({ state, localPlayerId, opponentName, statusText, latencyMs, controlsDisabled = false, interpolatePositions = false, onMovementCommand, onDeploy, onLeave }: MatchScreenProps) {
   const opponentId: PlayerId = localPlayerId === "player" ? "rival" : "player";
   const astronaut = state.players[localPlayerId].astronaut;
   const safe = isInsideSafeZone(state, localPlayerId, astronaut.position);
   const oxygenRounded = Math.round(astronaut.oxygen);
+  const chargePercent = Math.min(
+    100,
+    Math.round((astronaut.movement.chargeSeconds / MOVEMENT_RULES.fullChargeSeconds) * 100),
+  );
+  const controlHint = controlsDisabled
+    ? "Match paused while the link recovers"
+    : astronaut.movement.mode === "charging"
+      ? chargePercent >= 100
+        ? "Burst ready · release"
+        : `Charging ${chargePercent}% · aim, then release`
+      : astronaut.movement.mode === "burst"
+        ? "Momentum burst"
+        : null;
 
   return (
     <div className="screen screen--game">
@@ -41,11 +56,27 @@ export function MatchScreen({ state, localPlayerId, opponentName, statusText, la
         </div>
       </div>
       <div className="arena">
-        <ArenaRenderer state={state} disabled={controlsDisabled} onMoveTargetChange={onMoveTargetChange} />
+        <ArenaRenderer state={state} localPlayerId={localPlayerId} disabled={controlsDisabled}
+          interpolatePositions={interpolatePositions}
+          onMovementCommand={onMovementCommand} />
         <div className={safe ? "zone-status zone-status--safe" : "zone-status zone-status--exposed"}>
           {safe ? "Life support connected" : "Emergency oxygen draining"}
         </div>
-        <p className="control-hint">{controlsDisabled ? "Match paused while the link recovers" : "Hold and drag anywhere to move"}</p>
+        <p className={astronaut.movement.mode === "charging" ? "control-hint control-hint--charging" : "control-hint"}>
+          {controlHint ?? (
+            <>
+              <span className="control-hint__keyboard control-hint__keyboard--active">
+                Move: WASD / arrows or drag · Boost: tap, then hold the same key
+              </span>
+              <span className="control-hint__keyboard control-hint__keyboard--inactive">
+                Focus arena for keys · drag to move · hold astronaut to boost
+              </span>
+              <span className="control-hint__pointer">
+                drag to move · hold your astronaut to charge
+              </span>
+            </>
+          )}
+        </p>
       </div>
       <div className="game-hud game-hud--bottom">
         <div className="meter-group">

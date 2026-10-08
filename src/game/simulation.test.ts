@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { GAME_RULES } from "./constants";
+import { MOVEMENT_RULES } from "./movement";
 import {
   advanceGame,
   advanceMatch,
@@ -18,7 +19,11 @@ describe("Tetherbound simulation", () => {
   it("drains oxygen outside the network", () => {
     const state = createInitialGameState();
     state.players.player.astronaut.position = { x: 10, y: 80 };
-    const next = advanceGame(state, { moveTarget: null }, 1);
+    const next = advanceGame(
+      state,
+      { sequence: 1, command: { type: "stop" } },
+      1,
+    );
     expect(next.players.player.astronaut.oxygen).toBe(
       GAME_RULES.oxygenMaximum - GAME_RULES.oxygenDrainPerSecond,
     );
@@ -40,10 +45,22 @@ describe("Tetherbound simulation", () => {
     state.players.player.astronaut.oxygen = 1;
     state.players.player.astronaut.carriedSalvage = 2;
 
-    const next = advanceGame(state, { moveTarget: null }, 1);
+    const next = advanceGame(
+      state,
+      {
+        sequence: 1,
+        command: { type: "charge", target: { x: 30, y: 80 } },
+      },
+      1,
+    );
     expect(next.players.player.astronaut.position).toEqual(state.players.player.basePosition);
     expect(next.players.player.astronaut.carriedSalvage).toBe(0);
     expect(next.players.player.astronaut.respawns).toBe(1);
+    expect(next.players.player.astronaut.movement).toMatchObject({
+      mode: "idle",
+      chargeSeconds: 0,
+      burstDistanceRemaining: 0,
+    });
   });
 
   it("awards a contested salvage deposit to the closest astronaut", () => {
@@ -56,7 +73,7 @@ describe("Tetherbound simulation", () => {
 
     const next = advanceMatch(
       state,
-      { player: { moveTarget: null }, rival: { moveTarget: null } },
+      { player: [], rival: [] },
       0,
     );
 
@@ -76,7 +93,7 @@ describe("Tetherbound simulation", () => {
 
     const next = advanceMatch(
       state,
-      { player: { moveTarget: null }, rival: { moveTarget: null } },
+      { player: [], rival: [] },
       0,
     );
 
@@ -91,10 +108,55 @@ describe("Tetherbound simulation", () => {
     state.players.player.astronaut.position = { ...base };
     state.salvage = [{ id: "delivery", position: { ...base }, collected: false }];
 
-    const next = advanceGame(state, { moveTarget: null }, 0);
+    const next = advanceGame(
+      state,
+      { sequence: 1, command: { type: "stop" } },
+      0,
+    );
 
     expect(next.salvage[0].collected).toBe(true);
     expect(next.players.player.astronaut.carriedSalvage).toBe(0);
     expect(next.players.player.astronaut.bankedSalvage).toBe(1);
+  });
+
+  it("collects salvage swept through by a burst without collecting nearby misses", () => {
+    let state = createInitialGameState();
+    state.players.player.astronaut.position = { x: 20, y: 80 };
+    state.players.player.astronaut.oxygen = GAME_RULES.oxygenMaximum;
+    state.salvage = [
+      { id: "on-path", position: { x: 30, y: 80 }, collected: false },
+      {
+        id: "outside-radius",
+        position: { x: 30, y: 80 + GAME_RULES.collectionRadius + 0.01 },
+        collected: false,
+      },
+    ];
+
+    state = advanceGame(
+      state,
+      {
+        sequence: 1,
+        command: { type: "charge", target: { x: 100, y: 80 } },
+      },
+      MOVEMENT_RULES.fullChargeSeconds,
+    );
+    const burst = advanceGame(
+      state,
+      {
+        sequence: 2,
+        command: { type: "release", target: { x: 100, y: 80 } },
+      },
+      MOVEMENT_RULES.maximumBurstDistance / MOVEMENT_RULES.burstSpeed,
+    );
+
+    expect(burst.players.player.astronaut.position.x).toBeCloseTo(
+      20 + MOVEMENT_RULES.maximumBurstDistance,
+      6,
+    );
+    expect(burst.salvage.find((deposit) => deposit.id === "on-path")?.collected).toBe(true);
+    expect(
+      burst.salvage.find((deposit) => deposit.id === "outside-radius")?.collected,
+    ).toBe(false);
+    expect(burst.players.player.astronaut.carriedSalvage).toBe(1);
   });
 });
