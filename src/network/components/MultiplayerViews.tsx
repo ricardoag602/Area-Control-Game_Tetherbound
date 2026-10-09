@@ -216,11 +216,11 @@ export function MatchResultView({
       <div className="result-scores" aria-label="Final scores">
         <div className={`result-score result-score--${localPlayerId}`}>
           <span>You</span>
-          <strong>{localScore}%</strong>
+          <strong>{Math.round(localScore)}%</strong>
         </div>
         <div className={`result-score result-score--${opponentId}`}>
           <span>{opponent?.name ?? "Rival"}</span>
-          <strong>{opponentScore}%</strong>
+          <strong>{Math.round(opponentScore)}%</strong>
         </div>
       </div>
 

@@ -394,7 +394,7 @@ export class RoomServer {
 
   private startMatch(room: MatchRoom) {
     room.phase = "playing";
-    room.gameState = createInitialGameState();
+    room.gameState = createInitialGameState(`${room.code}:${room.revision}`);
     room.winner = null;
     room.finishReason = null;
     room.lastTickAt = Date.now();

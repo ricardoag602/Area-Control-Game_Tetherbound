@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { WORLD } from "../game/constants";
 import { parseClientMessage } from "./protocol";
 
 describe("movement protocol", () => {
@@ -88,6 +89,16 @@ describe("movement protocol", () => {
       seq: 1,
       command: { type: "walk", target: { x: -1, y: 80 } },
     }))).toBeNull();
+
+    expect(parseClientMessage(JSON.stringify({
+      type: "movement_input",
+      seq: 2,
+      command: { type: "walk", target: { x: WORLD.width, y: WORLD.height } },
+    }))).toEqual({
+      type: "movement_input",
+      seq: 2,
+      command: { type: "walk", target: { x: WORLD.width, y: WORLD.height } },
+    });
   });
 
   it("allows a bounded outside aim so edge bursts retain their direction", () => {

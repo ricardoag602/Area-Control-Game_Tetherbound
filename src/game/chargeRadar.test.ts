@@ -10,6 +10,7 @@ import {
   createMovementState,
   MOVEMENT_RULES,
 } from "./movement";
+import { WORLD } from "./constants";
 
 function chargingMovement(chargeSeconds: number) {
   return {
@@ -77,6 +78,16 @@ describe("charge radar", () => {
     expect(clockwise.minimumTurnRadians).toBeLessThanOrEqual(0);
   });
 
+  it("uses terrain turn authority when predicting the remaining envelope", () => {
+    const movement = chargingMovement(0.7);
+    const normal = calculateChargeRadar(movement, 1);
+    const slowed = calculateChargeRadar(movement, 0.55);
+    const span = (radar: ReturnType<typeof calculateChargeRadar>) =>
+      radar.maximumTurnRadians - radar.minimumTurnRadians;
+
+    expect(span(slowed)).toBeLessThan(span(normal));
+  });
+
   it("narrows monotonically through an authoritative moving turn charge", () => {
     let position = { x: 50, y: 80 };
     let movement = createMovementState({ x: 0, y: -1 });
@@ -134,17 +145,26 @@ describe("charge radar", () => {
     expect(endpoint.y).toBeGreaterThan(80);
   });
 
-  it("keeps pointer charge narrow and produces finite seam-safe geometry", () => {
-    const radar = calculateChargeRadar({
+  it("gives touch and keyboard charges the same visible steering envelope", () => {
+    const keyboard = calculateChargeRadar(chargingMovement(0.5));
+    // Touch uses the same tank-charge state after its hold gesture arms.
+    const touch = calculateChargeRadar({
       ...chargingMovement(0.5),
-      tankThrottle: 0,
+      tankThrottle: 1,
+      tankSteering: 0,
       direction: { x: -1, y: 0.000000001 },
+      facing: { x: -1, y: 0.000000001 },
     });
-    const path = buildChargeRadarPath({ x: 1, y: 1 }, radar);
-    const endpoint = chargeRadarEndpoint({ x: 1, y: 1 }, radar);
+    const path = buildChargeRadarPath({ x: 1, y: 1 }, touch);
+    const endpoint = chargeRadarEndpoint({ x: 1, y: 1 }, touch);
 
-    expect(radar.minimumTurnRadians).toBe(0);
-    expect(radar.maximumTurnRadians).toBe(0);
+    expect(touch.maximumTurnRadians - touch.minimumTurnRadians).toBeCloseTo(
+      keyboard.maximumTurnRadians - keyboard.minimumTurnRadians,
+      8,
+    );
+    expect(touch.maximumTurnRadians - touch.minimumTurnRadians).toBeGreaterThan(0);
+    expect(touch.powerRatio).toBeCloseTo(keyboard.powerRatio, 10);
+    expect(touch.canRelease).toBe(keyboard.canRelease);
     expect(path).not.toMatch(/NaN|Infinity/);
     expect(Number.isFinite(endpoint.x)).toBe(true);
     expect(Number.isFinite(endpoint.y)).toBe(true);
@@ -157,9 +177,9 @@ describe("charge radar", () => {
       ...chargingMovement(MOVEMENT_RULES.fullChargeSeconds),
       direction: { x: 1, y: 0 },
     });
-    const endpoint = chargeRadarEndpoint({ x: 98, y: 80 }, radar);
+    const endpoint = chargeRadarEndpoint({ x: WORLD.width - 2, y: 80 }, radar);
 
-    expect(endpoint).toEqual({ x: 100, y: 80 });
+    expect(endpoint).toEqual({ x: WORLD.width, y: 80 });
   });
 
   it("falls back from a malformed direction without emitting invalid reach", () => {

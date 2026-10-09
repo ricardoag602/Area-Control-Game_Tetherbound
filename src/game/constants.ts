@@ -1,7 +1,7 @@
-export const WORLD = {
-  width: 100,
-  height: 160,
-} as const;
+import { WORLD_BOUNDS } from "./world";
+
+/** Shared alias retained for movement, protocol, and renderer consumers. */
+export const WORLD = WORLD_BOUNDS;
 
 export const SIMULATION_RULES = {
   ticksPerSecond: 20,

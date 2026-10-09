@@ -1,8 +1,19 @@
-import { canDeployAnchor, getTerritoryScore, isInsideSafeZone } from "../simulation";
+import { useMemo, type CSSProperties } from "react";
+import { GAME_RULES } from "../constants";
+import {
+  canDeployAnchor,
+  isInsideSafeZone,
+  strongestWeatherForBiome,
+} from "../simulation";
 import { MOVEMENT_RULES } from "../movement";
+import { calculateOxygenPresentation } from "../oxygen";
 import { useDeployShortcut } from "../input/useDeployShortcut";
 import type { GameState, MovementCommand, PlayerId } from "../types";
+import { sampleTerritoryGrid } from "../territory";
+import { sampleWorld } from "../world";
+import type { WorldTimelineEvent } from "../worldEvents";
 import { ArenaRenderer } from "./ArenaRenderer";
+import { Minimap } from "./Minimap";
 
 interface MatchScreenProps {
   state: GameState;
@@ -25,8 +36,41 @@ function formatTime(milliseconds: number) {
 export function MatchScreen({ state, localPlayerId, opponentName, statusText, latencyMs, controlsDisabled = false, interpolatePositions = false, onMovementCommand, onDeploy, onLeave }: MatchScreenProps) {
   const opponentId: PlayerId = localPlayerId === "player" ? "rival" : "player";
   const astronaut = state.players[localPlayerId].astronaut;
+  const territoryGrid = useMemo(() => sampleTerritoryGrid(state), [
+    state.anchors,
+    state.players.player.basePosition.x,
+    state.players.player.basePosition.y,
+    state.players.rival.basePosition.x,
+    state.players.rival.basePosition.y,
+  ]);
   const safe = isInsideSafeZone(state, localPlayerId, astronaut.position);
   const oxygenRounded = Math.round(astronaut.oxygen);
+  const oxygenPresentation = calculateOxygenPresentation(
+    astronaut.oxygen,
+    GAME_RULES.oxygenMaximum,
+  );
+  const oxygenEffectStyle = {
+    "--oxygen-vignette-opacity": oxygenPresentation.redVignetteOpacity,
+    "--oxygen-wash-opacity": oxygenPresentation.redWashOpacity,
+  } as CSSProperties;
+  const worldSample = sampleWorld(astronaut.position);
+  const localWeather = strongestWeatherForBiome(
+    state.activeWeather ?? [],
+    worldSample?.biome ?? "neutral",
+  );
+  const lastWorldEvent = state.lastWorldEvent ?? null;
+  const elapsedMs = Number.isFinite(state.elapsedMs)
+    ? state.elapsedMs
+    : GAME_RULES.matchDurationMs - state.remainingMs;
+  const timelineTicksPerSecond = state.worldTimeline?.rules.ticksPerSecond ?? 20;
+  const eventAgeMs = lastWorldEvent
+    ? elapsedMs - lastWorldEvent.scheduledTick /
+      timelineTicksPerSecond * 1_000
+    : Number.POSITIVE_INFINITY;
+  const eventAnnouncement = lastWorldEvent &&
+      eventAgeMs >= 0 && eventAgeMs < 4_500
+    ? describeWorldEvent(lastWorldEvent)
+    : null;
   const chargePercent = Math.min(
     100,
     Math.round((astronaut.movement.chargeSeconds / MOVEMENT_RULES.fullChargeSeconds) * 100),
@@ -48,20 +92,31 @@ export function MatchScreen({ state, localPlayerId, opponentName, statusText, la
       <div className="game-hud game-hud--top">
         <button className="icon-button" onClick={onLeave} aria-label="Leave match">×</button>
         <div className={`score-panel score-panel--${localPlayerId === "player" ? "cyan" : "coral"}`}>
-          <span>You</span><strong>{getTerritoryScore(state, localPlayerId)}%</strong>
+          <span>You</span><strong>{Math.round(territoryGrid.score[localPlayerId])}%</strong>
         </div>
         <div className="match-clock">
           <span>{statusText}{latencyMs !== undefined && ` · ${latencyMs ?? "—"} ms`}</span>
           <strong>{formatTime(state.remainingMs)}</strong>
         </div>
         <div className={`score-panel score-panel--${opponentId === "player" ? "cyan" : "coral"}`}>
-          <span>{opponentName}</span><strong>{getTerritoryScore(state, opponentId)}%</strong>
+          <span>{opponentName}</span><strong>{Math.round(territoryGrid.score[opponentId])}%</strong>
         </div>
       </div>
       <div className="arena">
         <ArenaRenderer state={state} localPlayerId={localPlayerId} disabled={controlsDisabled}
           interpolatePositions={interpolatePositions}
+          oxygenZoomMultiplier={oxygenPresentation.cameraZoomMultiplier}
           onMovementCommand={onMovementCommand} />
+        <div className="oxygen-danger-overlay" style={oxygenEffectStyle} aria-hidden="true" />
+        <Minimap state={state} localPlayerId={localPlayerId} grid={territoryGrid} />
+        <div className="biome-status">
+          <span>Biome</span>
+          <strong>{formatBiome(worldSample?.biome ?? "neutral")}</strong>
+          {localWeather && <small>{formatEffect(localWeather.effect)} · L{localWeather.intensity}</small>}
+        </div>
+        {eventAnnouncement && (
+          <div className="world-event-toast" role="status">{eventAnnouncement}</div>
+        )}
         <div className={safe ? "zone-status zone-status--safe" : "zone-status zone-status--exposed"}>
           {safe ? "Life support connected" : "Emergency oxygen draining"}
         </div>
@@ -95,4 +150,22 @@ export function MatchScreen({ state, localPlayerId, opponentName, statusText, la
       </div>
     </div>
   );
+}
+
+function describeWorldEvent(event: WorldTimelineEvent) {
+  if (event.kind === "salvage_drop") {
+    return `Supply drop · ${formatBiome(event.biome)} · ${event.amount} salvage`;
+  }
+  if (event.kind === "biome_weather") {
+    return `${formatEffect(event.effect)} forming in ${formatBiome(event.biome)}`;
+  }
+  return "World system pulse";
+}
+
+function formatBiome(biome: string) {
+  return biome.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function formatEffect(effect: string) {
+  return effect.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }

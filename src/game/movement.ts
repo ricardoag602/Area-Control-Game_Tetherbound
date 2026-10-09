@@ -32,6 +32,7 @@ export const MOVEMENT_RULES = {
   keyboardBoostDoubleTapMs: 300,
   keyboardBoostTapMaximumMs: 220,
   gestureSlopPx: 12,
+  touchGestureSlopPx: 20,
   astronautHitRadiusPx: 24,
   largeControlHitRadiusPx: 28,
   aimDeadZonePx: 16,
@@ -57,12 +58,18 @@ export interface ChargingTurnStep extends TankTurnStep {
   chargeSeconds: number;
 }
 
+export interface MovementEnvironment {
+  speedMultiplier?: number;
+  turnRateMultiplier?: number;
+}
+
 /** Shared by authoritative movement and the charge radar prediction. */
 export function stepChargingTurn(
   chargeSeconds: number,
   angularVelocity: number,
   steering: TankInput["steering"],
   deltaSeconds: number,
+  turnRateMultiplier = 1,
 ): ChargingTurnStep {
   const seconds = Math.max(0, deltaSeconds);
   const nextCharge = Math.min(
@@ -76,6 +83,7 @@ export function stepChargingTurn(
       steering,
       getChargeMotionScale(nextCharge),
       seconds,
+      sanitizeMultiplier(turnRateMultiplier),
     ),
   };
 }
@@ -160,6 +168,7 @@ export function advanceMovement(
   deltaSeconds: number,
   worldWidth: number,
   worldHeight: number,
+  environment: MovementEnvironment = {},
 ): MovementStep {
   const acceptedInputs: GameInput[] = [];
   let latestSequence = movement.lastCommandSequence;
@@ -212,20 +221,36 @@ export function advanceMovement(
     : step;
 
   const seconds = Math.max(0, deltaSeconds);
+  const speedMultiplier = sanitizeMultiplier(environment.speedMultiplier ?? 1);
+  const turnRateMultiplier = sanitizeMultiplier(
+    environment.turnRateMultiplier ?? 1,
+  );
   if (seconds === 0) {
     return finalize({ position: { ...position }, movement: nextMovement });
   }
 
   if (nextMovement.mode === "burst") {
     return finalize(
-      advanceBurst(position, nextMovement, seconds, worldWidth, worldHeight),
+      advanceBurst(
+        position,
+        nextMovement,
+        seconds,
+        worldWidth,
+        worldHeight,
+        speedMultiplier,
+      ),
     );
   }
 
   let velocity = { ...nextMovement.velocity };
 
   if (isTankControlled(nextMovement)) {
-    nextMovement = advanceTankControls(nextMovement, seconds);
+    nextMovement = advanceTankControls(
+      nextMovement,
+      seconds,
+      speedMultiplier,
+      turnRateMultiplier,
+    );
     velocity = scale(nextMovement.facing, nextMovement.forwardSpeed);
   } else {
     let desiredVelocity = { ...ZERO };
@@ -255,7 +280,7 @@ export function advanceMovement(
           2 * MOVEMENT_RULES.walkDeceleration * remaining,
         );
         const desiredSpeed = Math.min(
-          MOVEMENT_RULES.walkMaximumSpeed,
+          MOVEMENT_RULES.walkMaximumSpeed * speedMultiplier,
           stoppingSpeed,
         );
         desiredVelocity = scale(direction, desiredSpeed);
@@ -274,9 +299,10 @@ export function advanceMovement(
       } else {
         desiredVelocity = scale(
           nextMovement.direction,
-          MOVEMENT_RULES.walkMaximumSpeed,
+          MOVEMENT_RULES.walkMaximumSpeed * speedMultiplier,
         );
-        acceleration = magnitude(nextMovement.velocity) > MOVEMENT_RULES.walkMaximumSpeed
+        acceleration = magnitude(nextMovement.velocity) >
+            MOVEMENT_RULES.walkMaximumSpeed * speedMultiplier
           ? MOVEMENT_RULES.walkDeceleration
           : MOVEMENT_RULES.walkAcceleration;
       }
@@ -285,7 +311,8 @@ export function advanceMovement(
         MOVEMENT_RULES.fullChargeSeconds,
         nextMovement.chargeSeconds + seconds,
       );
-      const speedCap = MOVEMENT_RULES.walkMaximumSpeed * getChargeMotionScale(nextCharge);
+      const speedCap = MOVEMENT_RULES.walkMaximumSpeed * speedMultiplier *
+        getChargeMotionScale(nextCharge);
       desiredVelocity = scale(nextMovement.direction, speedCap);
       acceleration = magnitude(nextMovement.velocity) > speedCap
         ? MOVEMENT_RULES.walkDeceleration
@@ -341,6 +368,8 @@ export function advanceMovement(
 function advanceTankControls(
   movement: MovementState,
   seconds: number,
+  speedMultiplier: number,
+  turnRateMultiplier: number,
 ): MovementState {
   const charging = movement.mode === "charging";
   const turn = charging
@@ -349,6 +378,7 @@ function advanceTankControls(
         movement.angularVelocity,
         movement.tankSteering,
         seconds,
+        turnRateMultiplier,
       )
     : {
         chargeSeconds: 0,
@@ -357,6 +387,7 @@ function advanceTankControls(
           movement.tankSteering,
           1,
           seconds,
+          turnRateMultiplier,
         ),
       };
   const headingRadians = movementHeading(movement) + turn.angleDelta;
@@ -366,7 +397,8 @@ function advanceTankControls(
   const motionScale = charging ? getChargeMotionScale(turn.chargeSeconds) : 1;
 
   const desiredForwardSpeed =
-    movement.tankThrottle * MOVEMENT_RULES.walkMaximumSpeed * motionScale;
+    movement.tankThrottle * MOVEMENT_RULES.walkMaximumSpeed * speedMultiplier *
+    motionScale;
   const forwardAcceleration =
     Math.abs(desiredForwardSpeed) > Math.abs(movement.forwardSpeed) &&
       (movement.forwardSpeed === 0 ||
@@ -628,10 +660,11 @@ function advanceBurst(
   deltaSeconds: number,
   worldWidth: number,
   worldHeight: number,
+  speedMultiplier: number,
 ): MovementStep {
   const requestedDistance = Math.min(
     movement.burstDistanceRemaining,
-    MOVEMENT_RULES.burstSpeed * deltaSeconds,
+    MOVEMENT_RULES.burstSpeed * speedMultiplier * deltaSeconds,
   );
   const nextPosition = clampToWorld(
     add(position, scale(movement.direction, requestedDistance)),
@@ -651,7 +684,10 @@ function advanceBurst(
       position: nextPosition,
       movement: {
         ...movement,
-        velocity: scale(movement.direction, MOVEMENT_RULES.burstSpeed),
+        velocity: scale(
+          movement.direction,
+          MOVEMENT_RULES.burstSpeed * speedMultiplier,
+        ),
         burstDistanceRemaining: remaining,
       },
     };
@@ -762,9 +798,11 @@ function stepTankTurn(
   steering: TankInput["steering"],
   motionScale: number,
   seconds: number,
+  turnRateMultiplier = 1,
 ): TankTurnStep {
   const desiredAngularVelocity =
-    steering * MOVEMENT_RULES.tankTurnMaximumRadiansPerSecond * motionScale;
+    steering * MOVEMENT_RULES.tankTurnMaximumRadiansPerSecond * motionScale *
+    turnRateMultiplier;
   const angularAcceleration =
     Math.abs(desiredAngularVelocity) > Math.abs(angularVelocity) &&
       (angularVelocity === 0 ||
@@ -774,7 +812,7 @@ function stepTankTurn(
   const nextAngularVelocity = approachScalar(
     angularVelocity,
     desiredAngularVelocity,
-    angularAcceleration * seconds,
+    angularAcceleration * turnRateMultiplier * seconds,
   );
   return {
     angularVelocity: nextAngularVelocity,
@@ -836,4 +874,8 @@ function smoothstep(value: number) {
 
 function clamp(value: number, minimum: number, maximum: number) {
   return Math.min(maximum, Math.max(minimum, value));
+}
+
+function sanitizeMultiplier(value: number) {
+  return Number.isFinite(value) ? clamp(value, 0.1, 2) : 1;
 }

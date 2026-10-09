@@ -20,6 +20,7 @@ export function useFollowCamera(
   center: Vec2,
   movement: MovementState,
   chargeIntentActive: boolean,
+  oxygenZoomMultiplier = 1,
 ) {
   const [aspectRatio, setAspectRatio] = useState(1);
   const [zoom, setZoom] = useState(1);
@@ -28,7 +29,9 @@ export function useFollowCamera(
   const chargeStartedAt = useRef<number | null>(null);
   const chargeIntentRef = useRef(chargeIntentActive);
   const authoritativeProgressRef = useRef(0);
+  const oxygenZoomRef = useRef(oxygenZoomMultiplier);
   chargeIntentRef.current = chargeIntentActive;
+  oxygenZoomRef.current = oxygenZoomMultiplier;
   authoritativeProgressRef.current = movement.mode === "charging"
     ? Math.min(1, movement.chargeSeconds / MOVEMENT_RULES.fullChargeSeconds)
     : 0;
@@ -75,8 +78,8 @@ export function useFollowCamera(
   // progress then reconciles it without making camera feel depend on latency.
   useEffect(() => {
     if (reduceMotion) {
-      springRef.current = { zoom: 1, velocity: 0 };
-      setZoom(1);
+      springRef.current = { zoom: oxygenZoomMultiplier, velocity: 0 };
+      setZoom(oxygenZoomMultiplier);
       return;
     }
 
@@ -96,9 +99,8 @@ export function useFollowCamera(
         localProgress,
         authoritativeProgressRef.current,
       );
-      const targetZoom = chargeIntentRef.current
-        ? chargeZoomTarget(progress)
-        : 1;
+      const targetZoom = oxygenZoomRef.current +
+        (chargeIntentRef.current ? chargeZoomTarget(progress) - 1 : 0);
       const spring = stepCameraZoomSpring(
         springRef.current,
         targetZoom,
@@ -121,12 +123,18 @@ export function useFollowCamera(
 
     frameId = requestAnimationFrame(frame);
     return () => cancelAnimationFrame(frameId);
-  }, [chargeIntentActive, movement.chargeSeconds, movement.mode, reduceMotion]);
+  }, [
+    chargeIntentActive,
+    movement.chargeSeconds,
+    movement.mode,
+    oxygenZoomMultiplier,
+    reduceMotion,
+  ]);
 
   return calculateCameraViewBox(
     center,
     aspectRatio,
-    reduceMotion ? 1 : zoom,
+    reduceMotion ? oxygenZoomMultiplier : zoom,
   );
 }
 

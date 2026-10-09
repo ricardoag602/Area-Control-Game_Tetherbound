@@ -29,7 +29,10 @@ export function applyPlayerCommands(
     if (command.deployAnchor) {
       nextState = deployAnchor(nextState, playerId);
     }
-    let sequence = nextState.players[playerId].astronaut.movement.lastCommandSequence;
+    let sequence = Math.max(
+      nextState.players[playerId].astronaut.movement.lastCommandSequence,
+      ...(nextState.pendingInputs?.[playerId] ?? []).map((input) => input.sequence),
+    );
     inputs[playerId] = command.movementCommands.map((movementCommand) => ({
       sequence: ++sequence,
       command: movementCommand,

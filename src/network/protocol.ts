@@ -139,9 +139,9 @@ function validTarget(value: unknown): value is Vec2 | null {
       typeof value.y === "number" &&
       Number.isFinite(value.y) &&
       value.x >= 0 &&
-      value.x <= 100 &&
+      value.x <= WORLD.width &&
       value.y >= 0 &&
-      value.y <= 160)
+      value.y <= WORLD.height)
   );
 }
 

@@ -108,7 +108,7 @@ export function App() {
   return (
     <main className={largeControls ? "app app--large-controls" : "app"}>
       <div className="space-noise" aria-hidden="true" />
-      <section className="view-stage" aria-live="polite">
+      <section className="view-stage">
         {view === "menu" && (
           <MainMenu
             largeControls={largeControls}

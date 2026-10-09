@@ -17,7 +17,10 @@
     "src/game/movement.ts",
     "src/game/simulation.ts",
     "src/game/state.ts",
+    "src/game/territory.ts",
     "src/game/types.ts",
+    "src/game/world.ts",
+    "src/game/worldEvents.ts",
     "src/network/protocol.ts"
   ]
 }

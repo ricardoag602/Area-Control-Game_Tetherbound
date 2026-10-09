@@ -10,7 +10,7 @@ describe("basic bot controller", () => {
     const command = getBotCommand(state, "rival");
 
     expect(command.movementCommands).toEqual([
-      { type: "walk", target: { x: 31, y: 51 } },
+      { type: "walk", target: { x: 120, y: 50 } },
     ]);
   });
 

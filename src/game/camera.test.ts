@@ -6,6 +6,7 @@ import {
   stepCameraZoomSpring,
   type CameraZoomSpring,
 } from "./camera";
+import { WORLD } from "./constants";
 
 describe("camera framing", () => {
   it("uses a responsive view centered directly on the local player", () => {
@@ -15,16 +16,26 @@ describe("camera framing", () => {
   });
 
   it("keeps the player center-locked by allowing overscan at world edges", () => {
-    const view = calculateCameraViewBox({ x: 50, y: 135 }, 0.5, 1);
+    const center = { x: WORLD.width / 2, y: WORLD.height - 15 };
+    const view = calculateCameraViewBox(center, 0.5, 1);
 
-    expect(view.y).toBe(95);
-    expect(view.y + view.height).toBe(175);
+    expect(view.y).toBe(center.y - 40);
+    expect(view.y + view.height).toBe(WORLD.height + 25);
   });
 
   it("fits very wide viewports to the world width", () => {
-    const view = calculateCameraViewBox({ x: 50, y: 80 }, 2, 1);
+    const view = calculateCameraViewBox(
+      { x: WORLD.width / 2, y: WORLD.height / 2 },
+      3,
+      1,
+    );
 
-    expect(view).toEqual({ x: 0, y: 55, width: 100, height: 50 });
+    expect(view).toEqual({
+      x: 0,
+      y: WORLD.height / 2 - WORLD.width / 6,
+      width: WORLD.width,
+      height: WORLD.width / 3,
+    });
   });
 
   it("falls back safely for invalid aspect, center, and zoom values", () => {
@@ -34,7 +45,12 @@ describe("camera framing", () => {
       Number.NaN,
     );
 
-    expect(view).toEqual({ x: 25, y: 40, width: 50, height: 80 });
+    expect(view).toEqual({
+      x: WORLD.width / 2 - 24,
+      y: WORLD.height / 2 - 40,
+      width: 48,
+      height: 80,
+    });
     expect(Object.values(view).every(Number.isFinite)).toBe(true);
   });
 

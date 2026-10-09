@@ -103,7 +103,8 @@ export class RoomClient {
     const continuous = command.type === "walk" ||
       command.type === "walk_direction" ||
       command.type === "charge" ||
-      command.type === "charge_direction";
+      command.type === "charge_direction" ||
+      command.type === "tank_charge";
     const sameContinuousGesture = continuous && command.type === this.lastMovementType;
     if (!sameContinuousGesture || elapsed >= 50) {
       this.clearMovementTimer();

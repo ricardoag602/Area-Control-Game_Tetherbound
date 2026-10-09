@@ -6,17 +6,21 @@ import {
   chargeRadarEndpoint,
 } from "../chargeRadar";
 import { MOVEMENT_RULES } from "../movement";
+import { getEnvironmentModifiers } from "../simulation";
 import { baseId } from "../state";
+import { getTouchChargeInput } from "../input/touchCharge";
 import { useKeyboardMovement } from "../input/useKeyboardMovement";
 import type {
   AstronautState,
   GameState,
   MovementCommand,
   PlayerId,
+  TankInput,
   Vec2,
 } from "../types";
 import { useFollowCamera } from "./useFollowCamera";
 import { useSmoothedPositions } from "./useSmoothedPositions";
+import { BiomeLayer } from "./BiomeLayer";
 
 interface ArenaRendererProps {
   state: GameState;
@@ -24,6 +28,7 @@ interface ArenaRendererProps {
   onMovementCommand: (command: MovementCommand) => void;
   disabled?: boolean;
   interpolatePositions?: boolean;
+  oxygenZoomMultiplier?: number;
 }
 
 type GestureMode = "walking" | "charge-candidate" | "charging";
@@ -32,6 +37,7 @@ interface ActiveGesture {
   element: SVGSVGElement;
   pointerId: number;
   mode: GestureMode;
+  pointerType: string;
   originClient: Vec2;
   latestClient: Vec2;
 }
@@ -42,9 +48,14 @@ export function ArenaRenderer({
   onMovementCommand,
   disabled = false,
   interpolatePositions = false,
+  oxygenZoomMultiplier = 1,
 }: ArenaRendererProps) {
   const renderPositions = useSmoothedPositions(state, interpolatePositions);
   const localAstronaut = state.players[localPlayerId].astronaut;
+  const localEnvironment = getEnvironmentModifiers(
+    state,
+    localAstronaut.position,
+  );
   const arenaRef = useRef<SVGSVGElement>(null);
   const [chargeIntentActive, setChargeIntentActive] = useState(false);
   const camera = useFollowCamera(
@@ -52,16 +63,37 @@ export function ArenaRenderer({
     renderPositions[localPlayerId],
     localAstronaut.movement,
     chargeIntentActive,
+    oxygenZoomMultiplier,
   );
   const commandRef = useRef(onMovementCommand);
+  const localAstronautRef = useRef(localAstronaut);
   const gestureRef = useRef<ActiveGesture | null>(null);
   const chargeTimerRef = useRef<number | null>(null);
-  const [gestureAim, setGestureAim] = useState<Vec2 | null>(null);
+  const lastTouchChargeInputRef = useRef<TankInput | null>(null);
+  const [touchChargePreview, setTouchChargePreview] = useState<TankInput | null>(null);
   commandRef.current = onMovementCommand;
+  localAstronautRef.current = localAstronaut;
 
   const clearChargeTimer = useCallback(() => {
     if (chargeTimerRef.current !== null) window.clearTimeout(chargeTimerRef.current);
     chargeTimerRef.current = null;
+  }, []);
+
+  const emitTouchCharge = useCallback((
+    gesture: ActiveGesture,
+    astronaut: AstronautState,
+    force = false,
+  ) => {
+    const tankInput = touchChargeInput(gesture, astronaut);
+    const previous = lastTouchChargeInputRef.current;
+    const changed = !previous ||
+      previous.throttle !== tankInput.throttle ||
+      previous.steering !== tankInput.steering;
+    if (!changed && !force) return;
+
+    lastTouchChargeInputRef.current = tankInput;
+    setTouchChargePreview(tankInput);
+    commandRef.current({ type: "tank_charge", ...tankInput });
   }, []);
 
   const clearPointerGesture = useCallback((sendStop: boolean) => {
@@ -71,7 +103,8 @@ export function ArenaRenderer({
     setChargeIntentActive(false);
     gestureRef.current = null;
     clearChargeTimer();
-    setGestureAim(null);
+    lastTouchChargeInputRef.current = null;
+    setTouchChargePreview(null);
     if (gesture.element.hasPointerCapture(gesture.pointerId)) {
       gesture.element.releasePointerCapture(gesture.pointerId);
     }
@@ -118,6 +151,20 @@ export function ArenaRenderer({
   }, [cancelGesture, disabled]);
 
   useEffect(() => {
+    const gesture = gestureRef.current;
+    if (!gesture || gesture.mode !== "charging") return;
+    // A held finger represents an aim direction, not an endlessly held turn
+    // key. Re-evaluate as the authoritative heading rotates so steering goes
+    // neutral on target while still using the desktop tank-charge physics.
+    emitTouchCharge(gesture, localAstronaut, false);
+  }, [
+    emitTouchCharge,
+    localAstronaut,
+    localAstronaut.movement.facing.x,
+    localAstronaut.movement.facing.y,
+  ]);
+
+  useEffect(() => {
     const cancelOnBlur = () => cancelGesture();
     const cancelWhenHidden = () => {
       if (document.visibilityState === "hidden") cancelGesture();
@@ -158,6 +205,7 @@ export function ArenaRenderer({
       element,
       pointerId: event.pointerId,
       mode: beginsOnAstronaut ? "charge-candidate" : "walking",
+      pointerType: event.pointerType,
       originClient: clientPoint,
       latestClient: clientPoint,
     };
@@ -167,18 +215,15 @@ export function ArenaRenderer({
       return;
     }
 
-    commandRef.current({ type: "stop" });
+    // Match the desktop second press: keep forward authority during the short
+    // arm window, then transition into the shared tank-charge state machine.
+    commandRef.current({ type: "tank_drive", throttle: 1, steering: 0 });
     chargeTimerRef.current = window.setTimeout(() => {
       const gesture = gestureRef.current;
       if (!gesture || gesture.mode !== "charge-candidate") return;
       gesture.mode = "charging";
       setChargeIntentActive(true);
-      const target = relativeChargeTarget(
-        gesture,
-        localAstronaut,
-      );
-      setGestureAim(target);
-      commandRef.current({ type: "charge", target });
+      emitTouchCharge(gesture, localAstronautRef.current, true);
     }, MOVEMENT_RULES.gestureArmMs);
   }
 
@@ -192,7 +237,10 @@ export function ArenaRenderer({
     gesture.latestClient = clientPoint;
 
     if (gesture.mode === "charge-candidate") {
-      if (pointDistance(clientPoint, gesture.originClient) <= MOVEMENT_RULES.gestureSlopPx) return;
+      const gestureSlop = gesture.pointerType === "touch"
+        ? MOVEMENT_RULES.touchGestureSlopPx
+        : MOVEMENT_RULES.gestureSlopPx;
+      if (pointDistance(clientPoint, gesture.originClient) <= gestureSlop) return;
       clearChargeTimer();
       gesture.mode = "walking";
       commandRef.current({ type: "walk", target });
@@ -200,12 +248,7 @@ export function ArenaRenderer({
     }
 
     if (gesture.mode === "charging") {
-      const chargeTarget = relativeChargeTarget(
-        gesture,
-        localAstronaut,
-      );
-      setGestureAim(chargeTarget);
-      commandRef.current({ type: "charge", target: chargeTarget });
+      emitTouchCharge(gesture, localAstronautRef.current, false);
       return;
     }
 
@@ -222,25 +265,18 @@ export function ArenaRenderer({
 
     event.preventDefault();
     gesture.latestClient = { x: event.clientX, y: event.clientY };
-    const hasDashAim = pointDistance(
-      { x: event.clientX, y: event.clientY },
-      gesture.originClient,
-    ) >= MOVEMENT_RULES.aimDeadZonePx;
-    const shouldRelease = gesture.mode === "charging" && hasDashAim;
-    const releaseTarget = relativeChargeTarget(
-      gesture,
-      localAstronaut,
-    );
+    const shouldRelease = gesture.mode === "charging";
 
     gestureRef.current = null;
     clearChargeTimer();
+    lastTouchChargeInputRef.current = null;
     setChargeIntentActive(false);
-    setGestureAim(null);
+    setTouchChargePreview(null);
     if (gesture.element.hasPointerCapture(gesture.pointerId)) {
       gesture.element.releasePointerCapture(gesture.pointerId);
     }
     commandRef.current(
-      shouldRelease ? { type: "release", target: releaseTarget } : { type: "stop" },
+      shouldRelease ? { type: "tank_release" } : { type: "stop" },
     );
   }
 
@@ -260,7 +296,7 @@ export function ArenaRenderer({
       role="application"
       tabIndex={0}
       aria-roledescription="game arena"
-      aria-label="Tetherbound game arena. Keyboard controls stay active throughout the match. Use W and S or the up and down arrows to drive forward and reverse. Use A and D or the left and right arrows to turn. Tap W or S, then press and hold that same key to charge; release it to burst. Press T to deploy a tether and Escape to cancel keyboard movement. Drag to move with a pointer. Hold the astronaut, drag to aim, and release to burst."
+      aria-label="Tetherbound game arena. Keyboard controls stay active throughout the match. Use W and S or the up and down arrows to drive forward and reverse. Use A and D or the left and right arrows to turn. Tap W or S, then press and hold that same key to charge; release it to burst. Press T to deploy a tether and Escape to cancel keyboard movement. Drag to move with a pointer. Hold the astronaut, steer the charge, and release to burst."
       aria-keyshortcuts="W A S D T ArrowUp ArrowDown ArrowLeft ArrowRight"
       aria-disabled={disabled}
       onContextMenu={(event) => event.preventDefault()}
@@ -278,6 +314,7 @@ export function ArenaRenderer({
       <rect className="world__void" x={-WORLD.width} y={-WORLD.height}
         width={WORLD.width * 3} height={WORLD.height * 3} />
       <rect className="world__surface" width={WORLD.width} height={WORLD.height} />
+      <BiomeLayer />
       <rect width={WORLD.width} height={WORLD.height} fill="url(#world-grid)" />
       <rect className="world__boundary" width={WORLD.width} height={WORLD.height} />
 
@@ -301,7 +338,8 @@ export function ArenaRenderer({
         astronaut={localAstronaut}
         position={renderPositions[localPlayerId]}
         playerId={localPlayerId}
-        gestureAim={gestureAim}
+        touchChargePreview={touchChargePreview}
+        turnRateMultiplier={localEnvironment.turnRateMultiplier}
       />
 
       <Astronaut
@@ -368,31 +406,35 @@ function ChargeFeedback({
   astronaut,
   position,
   playerId,
-  gestureAim,
+  touchChargePreview,
+  turnRateMultiplier,
 }: {
   astronaut: AstronautState;
   position: Vec2;
   playerId: PlayerId;
-  gestureAim: Vec2 | null;
+  touchChargePreview: TankInput | null;
+  turnRateMultiplier: number;
 }) {
   const movement = astronaut.movement;
-  const charging = movement.mode === "charging" || gestureAim !== null;
+  const charging = movement.mode === "charging" || touchChargePreview !== null;
   if (!charging) return null;
 
   const progress = Math.min(1, movement.chargeSeconds / MOVEMENT_RULES.fullChargeSeconds);
-  const gestureDirection = gestureAim
-    ? normalizeDirection(
-        {
-          x: gestureAim.x - position.x,
-          y: gestureAim.y - position.y,
-        },
-        movement.direction,
-      )
-    : movement.direction;
-  const radar = calculateChargeRadar({
-    ...movement,
-    direction: gestureDirection,
-  });
+  const radarMovement = touchChargePreview
+    ? {
+        ...movement,
+        mode: "charging" as const,
+        tankThrottle: touchChargePreview.throttle,
+        tankSteering: touchChargePreview.steering,
+        direction: touchChargePreview.throttle < 0
+          ? { x: -movement.facing.x, y: -movement.facing.y }
+          : movement.facing,
+      }
+    : movement;
+  const radar = calculateChargeRadar(
+    radarMovement,
+    turnRateMultiplier,
+  );
   const target = chargeRadarEndpoint(position, radar);
   const radarPath = buildChargeRadarPath(position, radar);
   const isFull = progress >= 1;
@@ -531,15 +573,6 @@ function pointDistance(a: Vec2, b: Vec2) {
   return Math.hypot(b.x - a.x, b.y - a.y);
 }
 
-function normalizeDirection(value: Vec2, fallback: Vec2): Vec2 {
-  const length = Math.hypot(value.x, value.y);
-  if (length > 0.000001) return { x: value.x / length, y: value.y / length };
-  const fallbackLength = Math.hypot(fallback.x, fallback.y);
-  return fallbackLength > 0.000001
-    ? { x: fallback.x / fallbackLength, y: fallback.y / fallbackLength }
-    : { x: 0, y: -1 };
-}
-
 function relativeChargeTarget(gesture: ActiveGesture, astronaut: AstronautState): Vec2 {
   const origin = clientToWorldUnclamped(
     gesture.element,
@@ -565,6 +598,25 @@ function relativeChargeTarget(gesture: ActiveGesture, astronaut: AstronautState)
     x: astronaut.position.x + direction.x * MOVEMENT_RULES.aimVectorDistance,
     y: astronaut.position.y + direction.y * MOVEMENT_RULES.aimVectorDistance,
   };
+}
+
+function touchChargeInput(
+  gesture: ActiveGesture,
+  astronaut: AstronautState,
+): TankInput {
+  const target = relativeChargeTarget(gesture, astronaut);
+  const hasAim = pointDistance(
+    gesture.latestClient,
+    gesture.originClient,
+  ) >= MOVEMENT_RULES.aimDeadZonePx;
+  return getTouchChargeInput(
+    astronaut.movement.facing,
+    {
+      x: target.x - astronaut.position.x,
+      y: target.y - astronaut.position.y,
+    },
+    hasAim,
+  );
 }
 
 function clampWorldPoint(point: Vec2): Vec2 {

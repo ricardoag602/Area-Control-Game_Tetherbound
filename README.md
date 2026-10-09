@@ -4,6 +4,8 @@
 
 Tetherbound is a mobile-first, two-player territory game about extending fragile life-support networks across an alien surface.
 
+The current arena is a 210 × 350 world divided into water, jungle, desert, taiga, and protected base corridors. Terrain changes authoritative movement and oxygen behavior, while a seeded match timeline synchronizes resource drops and biome weather in bot and multiplayer games.
+
 ## Run locally
 
 ```sh
@@ -25,9 +27,11 @@ The terminal prints both a local URL and a network URL.
 - To boost with the keyboard, tap **W** or **S**, press that same key again, and hold the second press to charge. You can steer during the charge, but the turn eases to a stop with your movement. Release to launch.
 - The charge radar shows your remaining turn envelope and projected launch reach; it narrows as rotational control settles.
 - Keyboard and pointer controls hand off automatically to whichever one you use most recently.
-- Press and hold your astronaut, then drag to aim a momentum burst.
+- Press and hold your astronaut, then drag to steer a momentum burst. Touch uses the same narrowing radar and diminishing turn authority as keyboard charging; holding still charges a straight-ahead launch.
 - The astronaut lunges briefly, then slows throughout the charge. Release when the ring flashes after one second for maximum distance, or release sooner for a shorter burst.
 - The camera follows your astronaut, eases closer during a charge, and springs back when you launch.
+- Below 40% oxygen, the camera closes in slightly while a red edge vignette and subtle wash intensify toward empty.
+- The translucent pixel minimap shows biome blocks, tether territory, anchors, and both astronauts.
 - Select **Deploy** or press **T** while connected to your tether network to place an available anchor.
 
 ## Test multiplayer
@@ -49,6 +53,8 @@ Open the printed **Network** URL on the computer before creating the room. The r
 ## Reliability model
 
 - The server owns movement, oxygen, salvage, tethers, timer, and scoring.
+- Biome effects and match events use the authoritative elapsed match clock; no gameplay system relies on client timers or `Math.random`.
+- Every match event stream is seeded and serializable, allowing identical replay and reconnect behavior.
 - The server simulates rooms and sends full state snapshots at 20 Hz.
 - Bot and multiplayer matches share a fixed 20 Hz rules step with bounded catch-up, so charge timing stays consistent across frame-rate dips.
 - Movement inputs carry increasing sequence numbers.
@@ -72,6 +78,10 @@ Open the printed **Network** URL on the computer before creating the room. The r
 - `src/network/protocol.ts` — shared network message contracts
 - `src/game/movement.ts` — walking, charge, burst, and movement feel rules
 - `src/game/simulation.ts` — transport-independent game rules
+- `src/game/world.ts` — renderer-independent biome geometry and terrain effects
+- `src/game/worldEvents.ts` — deterministic master event timeline and future system hooks
+- `src/game/territory.ts` — coarse territory sampling shared by scoring and the minimap
+- `src/game/oxygen.ts` — bounded oxygen presentation values for camera and screen effects
 - `src/game/components/MatchScreen.tsx` — shared bot and multiplayer match presentation
 
 ## Verification

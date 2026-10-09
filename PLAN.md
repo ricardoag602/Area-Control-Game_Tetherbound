@@ -17,6 +17,8 @@ Build one local arena with two simulated players and no networking.
 
 **Exit condition:** One player can repeatedly leave safety, collect salvage, return, fabricate an anchor, and extend a connected network.
 
+**Current progress:** Implemented for bot and multiplayer matches, including oxygen presentation, a 4.59× biome arena, terrain effects, deterministic supply drops, and an extensible seeded world-event timeline.
+
 ## Milestone 2: Territory competition
 
 - Network connectivity calculation
@@ -28,6 +30,8 @@ Build one local arena with two simulated players and no networking.
 - Match timer and win states
 
 **Exit condition:** Two players sharing one device or test harness can complete a full match with a clear winner.
+
+**Current progress:** Powered coverage is sampled into a deterministic territory grid and displayed through the pixel minimap. Connection disruption, repair, base vulnerability, and a territory-hold victory remain.
 
 ## Milestone 3: Authoritative multiplayer
 
@@ -90,10 +94,8 @@ Add only after the core game is balanced.
 
 ## Immediate implementation order
 
-1. Scaffold the TypeScript, React, PixiJS, and test environment.
-2. Implement the main menu, room setup, and match shell.
-3. Define the deterministic game-state model and tunable constants.
-4. Implement movement and safe-zone geometry.
-5. Add oxygen and respawn behavior.
-6. Add salvage collection, delivery, and tether deployment.
-7. Playtest the local loop before implementing combat or networking.
+1. Add enemy anchor disruption with downstream network disconnection.
+2. Add repair and reconnection grace behavior.
+3. Add a territory-hold victory condition and home-base vulnerability.
+4. Playtest biome movement, oxygen pressure, event cadence, and resource density.
+5. Enable timeline-driven buffs and debuffs only after the core competition is balanced.

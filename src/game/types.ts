@@ -1,3 +1,9 @@
+import type {
+  BiomeWeatherEvent,
+  WorldTimelineEvent,
+  WorldTimelineState,
+} from "./worldEvents";
+
 export type PlayerId = "player" | "rival";
 export type GameMode = "bot" | "multiplayer";
 
@@ -78,8 +84,17 @@ export interface PlayerState {
 }
 
 export interface GameState {
+  /** Authoritative match clock used by deterministic world systems. */
+  elapsedMs: number;
+  /** Unsimulated wall time retained until the next fixed physics tick. */
+  simulationRemainderMs: number;
+  /** Commands received between fixed ticks, consumed together in sequence order. */
+  pendingInputs: MatchInputs;
   remainingMs: number;
   nextAnchorId: number;
+  worldTimeline: WorldTimelineState;
+  activeWeather: BiomeWeatherEvent[];
+  lastWorldEvent: WorldTimelineEvent | null;
   players: Record<PlayerId, PlayerState>;
   anchors: Anchor[];
   salvage: SalvageDeposit[];

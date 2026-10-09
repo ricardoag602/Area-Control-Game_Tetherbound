@@ -33,7 +33,10 @@ export interface ChargeRadar {
  * is limited to the requested forward semicircle; release-now is always
  * included, so the fan never claims that the player must keep turning.
  */
-export function calculateChargeRadar(movement: MovementState): ChargeRadar {
+export function calculateChargeRadar(
+  movement: MovementState,
+  turnRateMultiplier = 1,
+): ChargeRadar {
   const travelDirection = normalize(movement.direction, movement.facing);
   const burstDistance = getBurstDistance(movement.chargeSeconds);
   const burstRange = MOVEMENT_RULES.maximumBurstDistance -
@@ -66,13 +69,18 @@ export function calculateChargeRadar(movement: MovementState): ChargeRadar {
     };
   }
 
-  const left = predictRemainingTurn(movement, -1);
-  const right = predictRemainingTurn(movement, 1);
+  const left = predictRemainingTurn(movement, -1, turnRateMultiplier);
+  const right = predictRemainingTurn(movement, 1, turnRateMultiplier);
   // Preserve the full semicircle at the start of a charge even when the
   // configured ready time is shorter than the natural steering envelope.
   // This visual floor smoothly disappears as launch power fills.
-  const visualHalfAngle =
-    CHARGE_RADAR_RULES.maximumHalfAngleRadians * (1 - powerRatio);
+  const safeTurnRateMultiplier = Number.isFinite(turnRateMultiplier)
+    ? clamp(turnRateMultiplier, 0.1, 2)
+    : 1;
+  const visualAuthorityScale = 1 +
+    powerRatio * (safeTurnRateMultiplier - 1);
+  const visualHalfAngle = CHARGE_RADAR_RULES.maximumHalfAngleRadians *
+    (1 - powerRatio) * visualAuthorityScale;
   const predictedMinimum = Math.min(0, left, right);
   const predictedMaximum = Math.max(0, left, right);
   const visualSpan = Math.max(
@@ -159,6 +167,7 @@ export function chargeRadarEndpoint(center: Vec2, radar: ChargeRadar): Vec2 {
 function predictRemainingTurn(
   movement: MovementState,
   steering: Exclude<TankAxis, 0>,
+  turnRateMultiplier: number,
 ) {
   const seconds = 1 / SIMULATION_RULES.ticksPerSecond;
   let chargeSeconds = movement.chargeSeconds;
@@ -175,6 +184,7 @@ function predictRemainingTurn(
       angularVelocity,
       steering,
       seconds,
+      turnRateMultiplier,
     );
     chargeSeconds = step.chargeSeconds;
     angularVelocity = step.angularVelocity;

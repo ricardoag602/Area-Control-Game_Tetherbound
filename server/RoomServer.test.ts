@@ -1,7 +1,9 @@
 import { once } from "node:events";
 import { afterEach, describe, expect, it } from "vitest";
 import WebSocket from "ws";
+import { WORLD } from "../src/game/constants";
 import { MOVEMENT_RULES } from "../src/game/movement";
+import { createWorldTimeline } from "../src/game/worldEvents";
 import type { ClientMessage, ServerMessage } from "../src/network/protocol";
 import { RoomServer } from "./RoomServer";
 
@@ -594,6 +596,131 @@ describe("RoomServer", () => {
     ).toHaveLength(1);
   });
 
+  it("broadcasts and restores authoritative world-event state after reconnect", async () => {
+    const server = await createServer();
+    const { host, guest, hostWelcome, guestWelcome } = await createStartedRoom(server);
+    const room = server.rooms.get(hostWelcome.room.code);
+    if (!room?.gameState) throw new Error("Expected a running match");
+
+    const ticksPerSecond = 20;
+    const startTick = Math.floor(
+      room.gameState.elapsedMs / 1_000 * ticksPerSecond,
+    );
+    const hostEventPromise = waitForMessage(
+      host,
+      (message): message is Extract<ServerMessage, { type: "game_state" }> =>
+        message.type === "game_state" &&
+        message.state.lastWorldEvent?.kind === "biome_weather" &&
+        message.state.activeWeather.length > 0,
+    );
+    const guestEventPromise = waitForMessage(
+      guest,
+      (message): message is Extract<ServerMessage, { type: "game_state" }> =>
+        message.type === "game_state" &&
+        message.state.lastWorldEvent?.kind === "biome_weather" &&
+        message.state.activeWeather.length > 0,
+    );
+
+    room.gameState.worldTimeline = createWorldTimeline("server-weather-snapshot", {
+      startTick,
+      rules: {
+        ticksPerSecond,
+        minimumIntervalTicks: 1,
+        maximumIntervalTicks: 1,
+        minimumWeatherDurationTicks: 100,
+        maximumWeatherDurationTicks: 100,
+        bounds: WORLD,
+        biomeRegions: [{
+          id: "water-snapshot-zone",
+          biome: "water",
+          x: 5,
+          y: 65,
+          width: 30,
+          height: 30,
+        }],
+        eventWeights: { salvage_drop: 0, biome_weather: 1 },
+      },
+    });
+    room.gameState.activeWeather = [];
+    room.gameState.lastWorldEvent = null;
+
+    const [hostEvent, guestEvent] = await Promise.all([
+      hostEventPromise,
+      guestEventPromise,
+    ]);
+    expect(hostEvent.stateVersion).toBe(guestEvent.stateVersion);
+    expect(hostEvent.state.worldTimeline).toEqual(guestEvent.state.worldTimeline);
+    expect(hostEvent.state.activeWeather).toEqual(guestEvent.state.activeWeather);
+    expect(hostEvent.state.lastWorldEvent).toEqual(guestEvent.state.lastWorldEvent);
+    expect(hostEvent.state.worldTimeline.rules.bounds).toEqual(WORLD);
+    expect(hostEvent.state.activeWeather).toContainEqual(
+      hostEvent.state.lastWorldEvent,
+    );
+
+    const disconnectedPromise = waitForMessage(
+      host,
+      (message): message is Extract<ServerMessage, { type: "room_state" }> =>
+        message.type === "room_state" && message.room.players.some(
+          (player) => player.id === "rival" && !player.connected,
+        ),
+    );
+    guest.terminate();
+    await disconnectedPromise;
+    if (!room.gameState) throw new Error("Expected the match to remain available");
+    const frozenWorldState = JSON.parse(JSON.stringify({
+      worldTimeline: room.gameState.worldTimeline,
+      activeWeather: room.gameState.activeWeather,
+      lastWorldEvent: room.gameState.lastWorldEvent,
+    }));
+
+    const resumedGuest = await connect(server);
+    const resumedWelcomePromise = waitForMessage(resumedGuest, isWelcome);
+    const resumedStatePromise = waitForMessage(resumedGuest, isGameState);
+    send(resumedGuest, {
+      type: "join_room",
+      requestId: "world-event-resume-request",
+      code: hostWelcome.room.code,
+      name: "Guest",
+      sessionToken: guestWelcome.sessionToken,
+    });
+
+    expect((await resumedWelcomePromise).reconnected).toBe(true);
+    const resumedState = await resumedStatePromise;
+    expect(resumedState.state.worldTimeline).toEqual(
+      frozenWorldState.worldTimeline,
+    );
+    expect(resumedState.state.activeWeather).toEqual(
+      frozenWorldState.activeWeather,
+    );
+    expect(resumedState.state.lastWorldEvent).toEqual(
+      frozenWorldState.lastWorldEvent,
+    );
+  });
+
+  it("awards a timed match to the player controlling more territory", async () => {
+    const server = await createServer();
+    const { host, hostWelcome } = await createStartedRoom(server);
+    const room = server.rooms.get(hostWelcome.room.code);
+    if (!room?.gameState) throw new Error("Expected a running match");
+
+    room.gameState.anchors = [{
+      id: "player-territory-lead",
+      owner: "player",
+      position: { x: 105, y: 306 },
+      parentId: "player-base",
+      powered: true,
+    }];
+    room.gameState.remainingMs = 1;
+
+    const finished = await waitForMessage(
+      host,
+      (message): message is Extract<ServerMessage, { type: "room_state" }> =>
+        message.type === "room_state" && message.room.phase === "finished",
+    );
+    expect(finished.room.finishReason).toBe("time");
+    expect(finished.room.winner).toBe("player");
+  });
+
   it("requires both finished players to request a rematch, then starts a fresh match", async () => {
     const server = await createServer();
     const { host, guest, hostWelcome, hostInitial } = await createStartedRoom(server);
@@ -610,6 +737,8 @@ describe("RoomServer", () => {
         message.type === "room_state" && message.room.phase === "finished",
     );
     const finished = await finishedPromise;
+    expect(finished.room.finishReason).toBe("time");
+    expect(finished.room.winner).toBe("draw");
     expect(finished.room.players.every((player) => !player.ready)).toBe(true);
 
     const hostVotePromise = waitForMessage(

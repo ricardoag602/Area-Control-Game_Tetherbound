@@ -9,7 +9,8 @@ export const CAMERA_RULES = {
   baseVisibleHeight: 80,
   maximumChargeZoom: 0.1,
   minimumSpringZoom: 0.985,
-  maximumSpringZoom: 1.115,
+  // Allows charge zoom and the subtle low-oxygen zoom to combine safely.
+  maximumSpringZoom: 1.16,
   springAngularFrequency: 16,
   springDampingRatio: 0.78,
   maximumSpringDeltaSeconds: 1 / 30,
