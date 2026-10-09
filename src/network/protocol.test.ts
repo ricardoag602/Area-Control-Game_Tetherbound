@@ -2,6 +2,38 @@ import { describe, expect, it } from "vitest";
 import { parseClientMessage } from "./protocol";
 
 describe("movement protocol", () => {
+  it.each([
+    { type: "tank_drive", throttle: 1, steering: -1 },
+    { type: "tank_drive", throttle: 0, steering: 1 },
+    { type: "tank_charge", throttle: -1, steering: 0 },
+    { type: "tank_charge", throttle: 1, steering: 1 },
+    { type: "tank_release" },
+  ] as const)("accepts authoritative tank command %#", (command) => {
+    expect(parseClientMessage(JSON.stringify({
+      type: "movement_input",
+      seq: 9,
+      command,
+    }))).toEqual({
+      type: "movement_input",
+      seq: 9,
+      command,
+    });
+  });
+
+  it.each([
+    { type: "tank_drive", throttle: 0, steering: 0 },
+    { type: "tank_drive", throttle: 0.5, steering: 1 },
+    { type: "tank_drive", throttle: 2, steering: 0 },
+    { type: "tank_charge", throttle: 0, steering: 1 },
+    { type: "tank_charge", throttle: 1, steering: -2 },
+  ])("rejects malformed tank command %#", (command) => {
+    expect(parseClientMessage(JSON.stringify({
+      type: "movement_input",
+      seq: 9,
+      command,
+    }))).toBeNull();
+  });
+
   it.each(["charge_direction", "release_direction"] as const)(
     "accepts a finite nonzero %s command",
     (commandType) => {

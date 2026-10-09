@@ -43,11 +43,8 @@ export function useSmoothedPositions(state: GameState, enabled: boolean): Render
       const track = tracks.current[playerId];
       const astronaut = state.players[playerId].astronaut;
       const target = astronaut.position;
-      const modeChanged = astronaut.movement.mode !== track.mode;
-      const burstTransition = modeChanged &&
-        (astronaut.movement.mode === "burst" || track.mode === "burst");
       const correctionDistance = distance(track.displayed, target);
-      const shouldSnap = !enabled || reduceMotion || burstTransition || correctionDistance > SNAP_DISTANCE;
+      const shouldSnap = !enabled || reduceMotion || correctionDistance > SNAP_DISTANCE;
 
       track.mode = astronaut.movement.mode;
       track.from = shouldSnap ? { ...target } : { ...track.displayed };

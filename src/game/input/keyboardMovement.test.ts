@@ -1,71 +1,101 @@
 import { describe, expect, it } from "vitest";
 import { MOVEMENT_RULES } from "../movement";
 import {
-  getKeyboardDirection,
+  getTankInput,
+  isGameplayKeyboardBlockedElement,
   isKeyboardBoostDoubleTap,
   isKeyboardMovementCode,
+  isTankBoostCode,
   type KeyboardTap,
 } from "./keyboardMovement";
 
-const SQRT_HALF = Math.SQRT1_2;
-
 describe("keyboard movement input", () => {
   it.each([
-    ["KeyW", { x: 0, y: -1 }],
-    ["ArrowUp", { x: 0, y: -1 }],
-    ["KeyS", { x: 0, y: 1 }],
-    ["ArrowDown", { x: 0, y: 1 }],
-    ["KeyA", { x: -1, y: 0 }],
-    ["ArrowLeft", { x: -1, y: 0 }],
-    ["KeyD", { x: 1, y: 0 }],
-    ["ArrowRight", { x: 1, y: 0 }],
-  ] as const)("maps %s to its cardinal direction", (code, expected) => {
+    ["KeyW", { throttle: 1, steering: 0 }],
+    ["ArrowUp", { throttle: 1, steering: 0 }],
+    ["KeyS", { throttle: -1, steering: 0 }],
+    ["ArrowDown", { throttle: -1, steering: 0 }],
+    ["KeyA", { throttle: 0, steering: -1 }],
+    ["ArrowLeft", { throttle: 0, steering: -1 }],
+    ["KeyD", { throttle: 0, steering: 1 }],
+    ["ArrowRight", { throttle: 0, steering: 1 }],
+  ] as const)("maps %s to its tank-control axis", (code, expected) => {
     expect(isKeyboardMovementCode(code)).toBe(true);
-    expect(getKeyboardDirection(new Set([code]))).toEqual(expected);
+    expect(getTankInput(new Set([code]))).toEqual(expected);
   });
 
-  it("normalizes diagonal movement so it is not faster than a cardinal direction", () => {
-    const direction = getKeyboardDirection(new Set(["KeyW", "KeyD"]));
-
-    expect(direction).not.toBeNull();
-    expect(direction?.x).toBeCloseTo(SQRT_HALF, 10);
-    expect(direction?.y).toBeCloseTo(-SQRT_HALF, 10);
-    expect(Math.hypot(direction?.x ?? 0, direction?.y ?? 0)).toBeCloseTo(1, 10);
+  it("keeps throttle and steering independent for a moving turn", () => {
+    expect(getTankInput(new Set(["KeyW", "KeyD"]))).toEqual({
+      throttle: 1,
+      steering: 1,
+    });
+    expect(getTankInput(new Set(["KeyS", "KeyA"]))).toEqual({
+      throttle: -1,
+      steering: -1,
+    });
   });
 
-  it("treats duplicate aliases as one direction instead of skewing a diagonal", () => {
-    const direction = getKeyboardDirection(
-      new Set(["KeyW", "ArrowUp", "KeyD"]),
-    );
-
-    expect(direction?.x).toBeCloseTo(SQRT_HALF, 10);
-    expect(direction?.y).toBeCloseTo(-SQRT_HALF, 10);
+  it("treats duplicate aliases as one input instead of doubling an axis", () => {
+    expect(getTankInput(new Set(["KeyW", "ArrowUp", "KeyD", "ArrowRight"])))
+      .toEqual({ throttle: 1, steering: 1 });
   });
 
   it("cancels opposing keys per axis while preserving the other axis", () => {
-    expect(getKeyboardDirection(new Set(["KeyW", "KeyS", "KeyD"]))).toEqual({
-      x: 1,
-      y: 0,
+    expect(getTankInput(new Set(["KeyW", "KeyS", "KeyD"]))).toEqual({
+      throttle: 0,
+      steering: 1,
     });
-    expect(getKeyboardDirection(new Set(["KeyA", "KeyD", "ArrowUp"]))).toEqual({
-      x: 0,
-      y: -1,
+    expect(getTankInput(new Set(["KeyA", "KeyD", "ArrowUp"]))).toEqual({
+      throttle: 1,
+      steering: 0,
     });
     expect(
-      getKeyboardDirection(new Set(["KeyW", "KeyS", "KeyA", "KeyD"])),
-    ).toBeNull();
+      getTankInput(new Set(["KeyW", "KeyS", "KeyA", "KeyD"])),
+    ).toEqual({ throttle: 0, steering: 0 });
   });
 
-  it("ignores unknown codes and returns null when no movement remains", () => {
+  it("ignores unknown codes and returns neutral axes when no input remains", () => {
     expect(isKeyboardMovementCode("Space")).toBe(false);
     expect(isKeyboardMovementCode("w")).toBe(false);
     expect(isKeyboardMovementCode("toString")).toBe(false);
-    expect(getKeyboardDirection(new Set(["Space", "ShiftLeft"]))).toBeNull();
-    expect(getKeyboardDirection(new Set(["Space", "ArrowRight"]))).toEqual({
-      x: 1,
-      y: 0,
+    expect(getTankInput(new Set(["Space", "ShiftLeft"]))).toEqual({
+      throttle: 0,
+      steering: 0,
+    });
+    expect(getTankInput(new Set(["Space", "ArrowRight"]))).toEqual({
+      throttle: 0,
+      steering: 1,
     });
   });
+
+  it.each(["INPUT", "TEXTAREA", "SELECT"])(
+    "blocks gameplay shortcuts from a %s field",
+    (tagName) => {
+      expect(isGameplayKeyboardBlockedElement(tagName, false)).toBe(true);
+    },
+  );
+
+  it("blocks editable and textbox-role targets", () => {
+    expect(isGameplayKeyboardBlockedElement("DIV", true)).toBe(true);
+    expect(isGameplayKeyboardBlockedElement("DIV", false, "textbox")).toBe(true);
+  });
+
+  it.each(["BUTTON", "A", "DIV", "SVG"])(
+    "keeps gameplay shortcuts active from a %s target",
+    (tagName) => {
+      expect(isGameplayKeyboardBlockedElement(tagName, false)).toBe(false);
+    },
+  );
+
+  it.each(["KeyW", "ArrowUp", "KeyS", "ArrowDown"])(
+    "allows %s to trigger a tank boost",
+    (code) => expect(isTankBoostCode(code)).toBe(true),
+  );
+
+  it.each(["KeyA", "ArrowLeft", "KeyD", "ArrowRight", "Space"])(
+    "does not allow %s to trigger a tank boost",
+    (code) => expect(isTankBoostCode(code)).toBe(false),
+  );
 
   describe("double-tap boost gesture", () => {
     const tap: KeyboardTap = {
@@ -87,6 +117,16 @@ describe("keyboard movement input", () => {
         .toBe(false);
       expect(isKeyboardBoostDoubleTap(null, "KeyW", tap.releasedAt + 100))
         .toBe(false);
+    });
+
+    it("never arms a boost from a steering key", () => {
+      const steeringTap: KeyboardTap = {
+        code: "KeyA",
+        pressedAt: 1_000,
+        releasedAt: 1_100,
+      };
+
+      expect(isKeyboardBoostDoubleTap(steeringTap, "KeyA", 1_200)).toBe(false);
     });
 
     it.each([

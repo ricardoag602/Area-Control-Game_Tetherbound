@@ -21,12 +21,14 @@ The terminal prints both a local URL and a network URL.
 ## Controls
 
 - Drag anywhere in the arena to walk. Movement accelerates and settles smoothly.
-- On desktop, use **WASD** or the **arrow keys** for directional walking, including normalized diagonals.
-- To boost with the keyboard, tap a direction, press that same key again, and hold the second press to charge. Release to launch.
+- On desktop, use **W/S** or **up/down** to drive along the astronaut's facing. Use **A/D** or **left/right** to turn. These controls stay active throughout the match, even after using a HUD button.
+- To boost with the keyboard, tap **W** or **S**, press that same key again, and hold the second press to charge. You can steer during the charge, but the turn eases to a stop with your movement. Release to launch.
+- The charge radar shows your remaining turn envelope and projected launch reach; it narrows as rotational control settles.
 - Keyboard and pointer controls hand off automatically to whichever one you use most recently.
 - Press and hold your astronaut, then drag to aim a momentum burst.
-- The astronaut lunges briefly, then slows during the first second of the hold. Release after the ring flashes at two seconds for maximum distance, or release sooner for a shorter burst.
-- Select **Deploy** while connected to your tether network to place an available anchor.
+- The astronaut lunges briefly, then slows throughout the charge. Release when the ring flashes after one second for maximum distance, or release sooner for a shorter burst.
+- The camera follows your astronaut, eases closer during a charge, and springs back when you launch.
+- Select **Deploy** or press **T** while connected to your tether network to place an available anchor.
 
 ## Test multiplayer
 

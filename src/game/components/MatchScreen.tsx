@@ -1,5 +1,6 @@
 import { canDeployAnchor, getTerritoryScore, isInsideSafeZone } from "../simulation";
 import { MOVEMENT_RULES } from "../movement";
+import { useDeployShortcut } from "../input/useDeployShortcut";
 import type { GameState, MovementCommand, PlayerId } from "../types";
 import { ArenaRenderer } from "./ArenaRenderer";
 
@@ -35,10 +36,12 @@ export function MatchScreen({ state, localPlayerId, opponentName, statusText, la
     : astronaut.movement.mode === "charging"
       ? chargePercent >= 100
         ? "Burst ready · release"
-        : `Charging ${chargePercent}% · aim, then release`
+        : `Charging ${chargePercent}% · movement settling`
       : astronaut.movement.mode === "burst"
         ? "Momentum burst"
         : null;
+  const deployDisabled = controlsDisabled || !canDeployAnchor(state, localPlayerId);
+  useDeployShortcut({ disabled: deployDisabled, onDeploy });
 
   return (
     <div className="screen screen--game">
@@ -66,10 +69,7 @@ export function MatchScreen({ state, localPlayerId, opponentName, statusText, la
           {controlHint ?? (
             <>
               <span className="control-hint__keyboard control-hint__keyboard--active">
-                Move: WASD / arrows or drag · Boost: tap, then hold the same key
-              </span>
-              <span className="control-hint__keyboard control-hint__keyboard--inactive">
-                Focus arena for keys · drag to move · hold astronaut to boost
+                Drive: W/S · Turn: A/D · Boost: tap, then hold W or S · T: tether
               </span>
               <span className="control-hint__pointer">
                 drag to move · hold your astronaut to charge
@@ -88,7 +88,10 @@ export function MatchScreen({ state, localPlayerId, opponentName, statusText, la
           <div className="resource-pill" title="Carried salvage"><span>◆</span><strong>{astronaut.carriedSalvage} / 3</strong></div>
           <small>{astronaut.tetherKits} tethers</small>
         </div>
-        <button className="deploy-button" disabled={controlsDisabled || !canDeployAnchor(state, localPlayerId)} onClick={onDeploy}>Deploy</button>
+        <button className="deploy-button" disabled={deployDisabled} onClick={onDeploy}
+          aria-label="Deploy tether" aria-keyshortcuts="T" title="Deploy tether (T)">
+          Deploy <kbd className="deploy-button__shortcut">T</kbd>
+        </button>
       </div>
     </div>
   );

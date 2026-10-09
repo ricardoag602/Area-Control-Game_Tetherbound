@@ -47,7 +47,11 @@ Build one local arena with two simulated players and no networking.
 - Portrait phone layout
 - One-thumb controls and contextual action button
 - Smooth walking plus a hold, aim, and release momentum burst
-- Automatic WASD and arrow-key walking with tap-then-hold boosts on the same key
+- Desktop tank controls: W/S drive, A/D turn, and tap-then-hold thrust boosts
+- Match-wide desktop shortcuts, including T to deploy a tether
+- Continuous unwrapped astronaut heading for seamless full rotations
+- A charge radar showing projected reach and the remaining turn envelope
+- A local-player follow camera with charge zoom and spring release
 - Action previews and costs
 - Legible oxygen, salvage, tether, score, and connection status
 - Haptics, sound controls, reduced motion, and color-safe palettes

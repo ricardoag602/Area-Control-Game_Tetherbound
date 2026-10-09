@@ -1,6 +1,7 @@
 import { once } from "node:events";
 import { afterEach, describe, expect, it } from "vitest";
 import WebSocket from "ws";
+import { MOVEMENT_RULES } from "../src/game/movement";
 import type { ClientMessage, ServerMessage } from "../src/network/protocol";
 import { RoomServer } from "./RoomServer";
 
@@ -366,10 +367,9 @@ describe("RoomServer", () => {
     await waitUntil(() => (room?.gameState?.remainingMs ?? resumedAt) < resumedAt);
   });
 
-  it("orders charge and release inputs once and broadcasts identical burst snapshots", async () => {
+  it("orders tank charge and release once and broadcasts identical turning snapshots", async () => {
     const server = await createServer();
     const { host, guest, hostInitial } = await createStartedRoom(server);
-    const direction = { x: 0, y: -1 };
 
     const chargedOnHostPromise = waitForMessage(
       host,
@@ -377,7 +377,8 @@ describe("RoomServer", () => {
         message.type === "game_state" &&
         message.lastProcessedInput.player === 10 &&
         message.state.players.player.astronaut.movement.mode === "charging" &&
-        message.state.players.player.astronaut.movement.chargeSeconds >= 0.8,
+        message.state.players.player.astronaut.movement.chargeSeconds >=
+          MOVEMENT_RULES.fullChargeSeconds - 0.000001,
       3_000,
     );
     const chargedOnGuestPromise = waitForMessage(
@@ -386,13 +387,14 @@ describe("RoomServer", () => {
         message.type === "game_state" &&
         message.lastProcessedInput.player === 10 &&
         message.state.players.player.astronaut.movement.mode === "charging" &&
-        message.state.players.player.astronaut.movement.chargeSeconds >= 0.8,
+        message.state.players.player.astronaut.movement.chargeSeconds >=
+          MOVEMENT_RULES.fullChargeSeconds - 0.000001,
       3_000,
     );
     send(host, {
       type: "movement_input",
       seq: 10,
-      command: { type: "charge_direction", direction },
+      command: { type: "tank_charge", throttle: 1, steering: 1 },
     });
     const [chargedOnHost, chargedOnGuest] = await Promise.all([
       chargedOnHostPromise,
@@ -400,6 +402,9 @@ describe("RoomServer", () => {
     ]);
     expect(chargedOnHost.stateVersion).toBe(chargedOnGuest.stateVersion);
     expect(chargedOnHost.state).toEqual(chargedOnGuest.state);
+    expect(
+      chargedOnHost.state.players.player.astronaut.movement.facing.x,
+    ).toBeGreaterThan(0);
 
     const burstOnHostPromise = waitForMessage(
       host,
@@ -418,17 +423,17 @@ describe("RoomServer", () => {
     send(host, {
       type: "movement_input",
       seq: 12,
-      command: { type: "release_direction", direction },
+      command: { type: "tank_release" },
     });
     send(host, {
       type: "movement_input",
       seq: 11,
-      command: { type: "charge_direction", direction: { x: 1, y: 0 } },
+      command: { type: "tank_charge", throttle: -1, steering: -1 },
     });
     send(host, {
       type: "movement_input",
       seq: 12,
-      command: { type: "release_direction", direction },
+      command: { type: "tank_release" },
     });
     const [burstOnHost, burstOnGuest] = await Promise.all([
       burstOnHostPromise,
@@ -444,8 +449,12 @@ describe("RoomServer", () => {
         message.type === "game_state" &&
         message.lastProcessedInput.player === 12 &&
         message.state.players.player.astronaut.movement.mode === "idle" &&
-        message.state.players.player.astronaut.position.y <
-          hostInitial.state.players.player.astronaut.position.y,
+        Math.hypot(
+          message.state.players.player.astronaut.position.x -
+            hostInitial.state.players.player.astronaut.position.x,
+          message.state.players.player.astronaut.position.y -
+            hostInitial.state.players.player.astronaut.position.y,
+        ) > 1,
     );
     const settled = await settledPromise;
     const settledPosition = settled.state.players.player.astronaut.position;

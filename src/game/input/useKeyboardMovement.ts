@@ -1,13 +1,19 @@
-import { useCallback, useEffect, useRef, type RefObject } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { MOVEMENT_RULES } from "../movement";
-import type { MovementCommand, MovementMode, Vec2 } from "../types";
+import type {
+  MovementCommand,
+  MovementMode,
+  TankInput,
+} from "../types";
 import {
-  getKeyboardDirection,
+  getTankInput,
   isKeyboardBoostDoubleTap,
-  isKeyboardMovementBlockedTarget,
+  isGameplayKeyboardBlockedTarget,
   isKeyboardMovementCode,
+  isTankBoostCode,
   type KeyboardMovementCode,
   type KeyboardTap,
+  type TankBoostCode,
 } from "./keyboardMovement";
 
 interface KeyboardMovementOptions {
@@ -15,26 +21,27 @@ interface KeyboardMovementOptions {
   movementMode: MovementMode;
   onMovementCommand: (command: MovementCommand) => void;
   onKeyboardTakeover: () => void;
-  targetRef: RefObject<SVGSVGElement | null>;
+  onChargeIntentChange: (active: boolean) => void;
 }
 
 interface KeyboardBoostGesture {
-  triggerCode: KeyboardMovementCode;
+  triggerCode: TankBoostCode;
+  throttle: -1 | 1;
   phase: "candidate" | "charging";
-  direction: Vec2;
 }
 
+const NEUTRAL_INPUT: TankInput = { throttle: 0, steering: 0 };
+
 /**
- * Owns focused desktop movement keys without coupling keyboard events to
- * rendering. A short tap followed by the same held key becomes a directional
- * charge; pointer input can still take ownership immediately.
+ * Owns match-wide desktop tank controls without coupling keyboard events to
+ * the renderer. W/S drive along the authoritative facing while A/D steer it.
  */
 export function useKeyboardMovement({
   disabled,
   movementMode,
   onMovementCommand,
   onKeyboardTakeover,
-  targetRef,
+  onChargeIntentChange,
 }: KeyboardMovementOptions) {
   const pressedCodes = useRef(new Set<string>());
   const pressedAt = useRef(new Map<KeyboardMovementCode, number>());
@@ -45,12 +52,14 @@ export function useKeyboardMovement({
   const resumeAfterBoost = useRef(false);
   const commandRef = useRef(onMovementCommand);
   const takeoverRef = useRef(onKeyboardTakeover);
+  const chargeIntentRef = useRef(onChargeIntentChange);
   const disabledRef = useRef(disabled);
   const movementModeRef = useRef(movementMode);
-  const lastDirection = useRef<Vec2 | null>(null);
+  const lastInput = useRef<TankInput>(NEUTRAL_INPUT);
   const previousMode = useRef(movementMode);
   commandRef.current = onMovementCommand;
   takeoverRef.current = onKeyboardTakeover;
+  chargeIntentRef.current = onChargeIntentChange;
   disabledRef.current = disabled;
   movementModeRef.current = movementMode;
 
@@ -59,54 +68,69 @@ export function useKeyboardMovement({
     boostArmTimer.current = null;
   }, []);
 
-  const emitCurrentDirection = useCallback((force = false) => {
+  const emitCurrentInput = useCallback((force = false) => {
     if (disabledRef.current) return;
-    const direction = getKeyboardDirection(pressedCodes.current);
+    const input = getTankInput(pressedCodes.current);
     const boost = boostGesture.current;
 
     if (boost?.phase === "charging") {
-      if (!direction) {
+      if (input.throttle !== boost.throttle) {
         clearBoostArmTimer();
         boostGesture.current = null;
         lastTap.current = null;
-        lastDirection.current = null;
+        lastInput.current = input;
         requireNeutralForBoost.current = pressedCodes.current.size > 0;
         resumeAfterBoost.current = false;
+        chargeIntentRef.current(false);
         commandRef.current({ type: "stop" });
+        if (!isNeutralInput(input)) {
+          commandRef.current({ type: "tank_drive", ...input });
+        }
         return;
       }
-      if (!force && sameDirection(direction, boost.direction)) return;
-      boost.direction = direction;
-      lastDirection.current = direction;
-      commandRef.current({ type: "charge_direction", direction });
+      if (!force && sameInput(input, lastInput.current)) return;
+      lastInput.current = input;
+      commandRef.current({
+        type: "tank_charge",
+        throttle: boost.throttle,
+        steering: input.steering,
+      });
       return;
     }
 
-    if (!force && sameDirection(direction, lastDirection.current)) return;
-    lastDirection.current = direction;
-    commandRef.current(direction
-      ? { type: "walk_direction", direction }
-      : { type: "stop" });
+    if (!force && sameInput(input, lastInput.current)) return;
+    lastInput.current = input;
+    commandRef.current(
+      isNeutralInput(input)
+        ? { type: "stop" }
+        : { type: "tank_drive", ...input },
+    );
   }, [clearBoostArmTimer]);
 
   const clearKeyboardMovement = useCallback((sendStop = true) => {
     const wasActive = pressedCodes.current.size > 0 ||
-      lastDirection.current !== null ||
+      !isNeutralInput(lastInput.current) ||
       boostGesture.current !== null;
     clearBoostArmTimer();
     pressedCodes.current.clear();
     pressedAt.current.clear();
     lastTap.current = null;
     boostGesture.current = null;
+    chargeIntentRef.current(false);
     requireNeutralForBoost.current = false;
     resumeAfterBoost.current = false;
-    lastDirection.current = null;
+    lastInput.current = NEUTRAL_INPUT;
     if (sendStop && wasActive) commandRef.current({ type: "stop" });
   }, [clearBoostArmTimer]);
 
   useEffect(() => {
-    function armKeyboardBoost(triggerCode: KeyboardMovementCode, direction: Vec2) {
-      boostGesture.current = { triggerCode, phase: "candidate", direction };
+    function armKeyboardBoost(triggerCode: TankBoostCode) {
+      const throttle = boostThrottle(triggerCode);
+      boostGesture.current = {
+        triggerCode,
+        throttle,
+        phase: "candidate",
+      };
       clearBoostArmTimer();
       boostArmTimer.current = window.setTimeout(() => {
         boostArmTimer.current = null;
@@ -116,34 +140,36 @@ export function useKeyboardMovement({
           boost.phase !== "candidate" ||
           !pressedCodes.current.has(boost.triggerCode) ||
           disabledRef.current ||
-          document.activeElement !== targetRef.current ||
           movementModeRef.current === "burst"
         ) {
           boostGesture.current = null;
           return;
         }
 
-        const chargedDirection = getKeyboardDirection(pressedCodes.current);
-        if (!chargedDirection) {
+        const input = getTankInput(pressedCodes.current);
+        if (input.throttle !== boost.throttle) {
           boostGesture.current = null;
-          lastDirection.current = null;
+          lastTap.current = null;
           requireNeutralForBoost.current = pressedCodes.current.size > 0;
-          commandRef.current({ type: "stop" });
           return;
         }
 
         boost.phase = "charging";
-        boost.direction = chargedDirection;
         lastTap.current = null;
-        lastDirection.current = chargedDirection;
+        lastInput.current = input;
         requireNeutralForBoost.current = true;
-        commandRef.current({ type: "charge_direction", direction: chargedDirection });
+        chargeIntentRef.current(true);
+        commandRef.current({
+          type: "tank_charge",
+          throttle: boost.throttle,
+          steering: input.steering,
+        });
       }, MOVEMENT_RULES.gestureArmMs);
     }
 
     function handleKeyDown(event: KeyboardEvent) {
-      const arenaHasFocus = document.activeElement === targetRef.current;
-      if (event.code === "Escape" && arenaHasFocus) {
+      const blockedTarget = isGameplayKeyboardBlockedTarget(event.target);
+      if (event.code === "Escape" && !blockedTarget) {
         if (pressedCodes.current.size > 0 || boostGesture.current || lastTap.current) {
           event.preventDefault();
           clearKeyboardMovement(true);
@@ -153,13 +179,12 @@ export function useKeyboardMovement({
 
       if (
         disabledRef.current ||
-        !arenaHasFocus ||
         !isKeyboardMovementCode(event.code) ||
         event.metaKey ||
         event.ctrlKey ||
         event.altKey ||
         event.isComposing ||
-        isKeyboardMovementBlockedTarget(event.target)
+        blockedTarget
       ) return;
 
       event.preventDefault();
@@ -167,17 +192,18 @@ export function useKeyboardMovement({
 
       const now = performance.now();
       const canStartBoost =
+        isTankBoostCode(event.code) &&
         !requireNeutralForBoost.current &&
         movementModeRef.current !== "burst" &&
         isKeyboardBoostDoubleTap(lastTap.current, event.code, now);
-      // Any intervening movement key breaks the double-tap sequence.
-      lastTap.current = null;
+      // Steering may change between the thrust tap and second press. A
+      // different thrust key intentionally breaks the sequence.
+      if (isTankBoostCode(event.code)) lastTap.current = null;
       takeoverRef.current();
       pressedCodes.current.add(event.code);
       pressedAt.current.set(event.code, now);
-      const direction = getKeyboardDirection(pressedCodes.current);
-      emitCurrentDirection();
-      if (canStartBoost && direction) armKeyboardBoost(event.code, direction);
+      emitCurrentInput();
+      if (canStartBoost) armKeyboardBoost(event.code);
     }
 
     function handleKeyUp(event: KeyboardEvent) {
@@ -196,36 +222,35 @@ export function useKeyboardMovement({
         clearBoostArmTimer();
         boostGesture.current = null;
         lastTap.current = null;
+        chargeIntentRef.current(false);
 
         if (boost.phase === "charging") {
-          const remainingDirection = getKeyboardDirection(pressedCodes.current);
-          commandRef.current({
-            type: "release_direction",
-            direction: boost.direction,
-          });
-          lastDirection.current = remainingDirection;
-          resumeAfterBoost.current = remainingDirection !== null;
+          const remainingInput = getTankInput(pressedCodes.current);
+          commandRef.current({ type: "tank_release" });
+          lastInput.current = remainingInput;
+          resumeAfterBoost.current = !isNeutralInput(remainingInput);
           requireNeutralForBoost.current = pressedCodes.current.size > 0;
-          if (remainingDirection) {
-            commandRef.current({ type: "walk_direction", direction: remainingDirection });
+          if (!isNeutralInput(remainingInput)) {
+            commandRef.current({ type: "tank_drive", ...remainingInput });
           }
           return;
         }
 
         // Releasing before the arm delay keeps the second press as an ordinary
-        // movement tap instead of swallowing it.
+        // tank-control tap instead of swallowing it.
         if (pressedCodes.current.size === 0) requireNeutralForBoost.current = false;
-        emitCurrentDirection();
+        emitCurrentInput();
         return;
       }
 
       if (boost) {
-        // A non-trigger key only changes the directional charge aim.
-        emitCurrentDirection();
+        // A steering key only adjusts the authoritative turn during charging.
+        emitCurrentInput();
         return;
       }
 
       if (
+        isTankBoostCode(event.code) &&
         !requireNeutralForBoost.current &&
         movementModeRef.current !== "burst" &&
         keyPressedAt !== undefined &&
@@ -236,14 +261,12 @@ export function useKeyboardMovement({
           pressedAt: keyPressedAt,
           releasedAt,
         };
-      } else {
-        lastTap.current = null;
       }
 
       if (requireNeutralForBoost.current && pressedCodes.current.size === 0) {
         requireNeutralForBoost.current = false;
       }
-      emitCurrentDirection();
+      emitCurrentInput();
     }
 
     function stopKeyboardMovement() {
@@ -258,14 +281,11 @@ export function useKeyboardMovement({
     window.addEventListener("keyup", handleKeyUp);
     window.addEventListener("blur", stopKeyboardMovement);
     document.addEventListener("visibilitychange", stopWhenHidden);
-    const target = targetRef.current;
-    target?.addEventListener("blur", stopKeyboardMovement);
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
       window.removeEventListener("blur", stopKeyboardMovement);
       document.removeEventListener("visibilitychange", stopWhenHidden);
-      target?.removeEventListener("blur", stopKeyboardMovement);
       // Strict Mode mounts effects twice in development; cleanup must not
       // inject a gameplay command during that probe cycle.
       clearKeyboardMovement(false);
@@ -273,8 +293,7 @@ export function useKeyboardMovement({
   }, [
     clearBoostArmTimer,
     clearKeyboardMovement,
-    emitCurrentDirection,
-    targetRef,
+    emitCurrentInput,
   ]);
 
   useEffect(() => {
@@ -290,15 +309,24 @@ export function useKeyboardMovement({
       (priorMode === "burst" ||
         (resumeAfterBoost.current && priorMode === "charging"));
     if (finishedCommittedMovement && pressedCodes.current.size > 0) {
-      emitCurrentDirection(true);
+      emitCurrentInput(true);
     }
     if (finishedCommittedMovement) resumeAfterBoost.current = false;
-  }, [emitCurrentDirection, movementMode]);
+  }, [emitCurrentInput, movementMode]);
 
   return { clearKeyboardMovement };
 }
 
-function sameDirection(a: Vec2 | null, b: Vec2 | null) {
-  if (a === null || b === null) return a === b;
-  return Math.abs(a.x - b.x) < 0.000001 && Math.abs(a.y - b.y) < 0.000001;
+function boostThrottle(code: TankBoostCode): -1 | 1 {
+  return (getTankInput([code]).throttle || 1) as -1 | 1;
+}
+
+function sameInput(a: TankInput, b: TankInput | null | undefined) {
+  return b !== null && b !== undefined &&
+    a.throttle === b.throttle && a.steering === b.steering;
+}
+
+function isNeutralInput(input: TankInput | null | undefined) {
+  return input === null || input === undefined ||
+    (input.throttle === 0 && input.steering === 0);
 }

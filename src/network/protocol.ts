@@ -148,6 +148,30 @@ function validTarget(value: unknown): value is Vec2 | null {
 function parseMovementCommand(value: unknown): MovementCommand | null {
   if (!isRecord(value) || typeof value.type !== "string") return null;
   if (value.type === "stop") return { type: "stop" };
+  if (value.type === "tank_release") return { type: "tank_release" };
+  if (
+    value.type === "tank_drive" &&
+    validTankAxis(value.throttle) &&
+    validTankAxis(value.steering) &&
+    (value.throttle !== 0 || value.steering !== 0)
+  ) {
+    return {
+      type: "tank_drive",
+      throttle: value.throttle,
+      steering: value.steering,
+    };
+  }
+  if (
+    value.type === "tank_charge" &&
+    (value.throttle === -1 || value.throttle === 1) &&
+    validTankAxis(value.steering)
+  ) {
+    return {
+      type: "tank_charge",
+      throttle: value.throttle,
+      steering: value.steering,
+    };
+  }
   if (value.type === "walk_direction" && validDirection(value.direction)) {
     return { type: "walk_direction", direction: value.direction };
   }
@@ -167,6 +191,10 @@ function parseMovementCommand(value: unknown): MovementCommand | null {
     return { type: value.type, target: value.target };
   }
   return null;
+}
+
+function validTankAxis(value: unknown): value is -1 | 0 | 1 {
+  return value === -1 || value === 0 || value === 1;
 }
 
 function validDirection(value: unknown): value is Vec2 {

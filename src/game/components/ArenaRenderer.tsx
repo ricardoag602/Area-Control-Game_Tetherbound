@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent } from "react";
 import { GAME_RULES, WORLD } from "../constants";
+import {
+  buildChargeRadarPath,
+  calculateChargeRadar,
+  chargeRadarEndpoint,
+} from "../chargeRadar";
 import { MOVEMENT_RULES } from "../movement";
 import { baseId } from "../state";
 import { useKeyboardMovement } from "../input/useKeyboardMovement";
@@ -10,6 +15,7 @@ import type {
   PlayerId,
   Vec2,
 } from "../types";
+import { useFollowCamera } from "./useFollowCamera";
 import { useSmoothedPositions } from "./useSmoothedPositions";
 
 interface ArenaRendererProps {
@@ -40,6 +46,13 @@ export function ArenaRenderer({
   const renderPositions = useSmoothedPositions(state, interpolatePositions);
   const localAstronaut = state.players[localPlayerId].astronaut;
   const arenaRef = useRef<SVGSVGElement>(null);
+  const [chargeIntentActive, setChargeIntentActive] = useState(false);
+  const camera = useFollowCamera(
+    arenaRef,
+    renderPositions[localPlayerId],
+    localAstronaut.movement,
+    chargeIntentActive,
+  );
   const commandRef = useRef(onMovementCommand);
   const gestureRef = useRef<ActiveGesture | null>(null);
   const chargeTimerRef = useRef<number | null>(null);
@@ -51,26 +64,48 @@ export function ArenaRenderer({
     chargeTimerRef.current = null;
   }, []);
 
-  const cancelGesture = useCallback(() => {
+  const clearPointerGesture = useCallback((sendStop: boolean) => {
     const gesture = gestureRef.current;
     if (!gesture) return;
 
+    setChargeIntentActive(false);
     gestureRef.current = null;
     clearChargeTimer();
     setGestureAim(null);
     if (gesture.element.hasPointerCapture(gesture.pointerId)) {
       gesture.element.releasePointerCapture(gesture.pointerId);
     }
-    commandRef.current({ type: "stop" });
+    if (sendStop) commandRef.current({ type: "stop" });
   }, [clearChargeTimer]);
+
+  const cancelGesture = useCallback(() => {
+    clearPointerGesture(true);
+  }, [clearPointerGesture]);
 
   const { clearKeyboardMovement } = useKeyboardMovement({
     disabled,
     movementMode: localAstronaut.movement.mode,
     onMovementCommand,
     onKeyboardTakeover: cancelGesture,
-    targetRef: arenaRef,
+    onChargeIntentChange: setChargeIntentActive,
   });
+  const previousRespawns = useRef(localAstronaut.respawns);
+
+  useEffect(() => {
+    const respawns = localAstronaut.respawns;
+    if (respawns > previousRespawns.current) {
+      // The authoritative respawn already stopped movement. Only discard the
+      // client-side owners so releasing a pre-respawn hold cannot launch later.
+      clearPointerGesture(false);
+      clearKeyboardMovement(false);
+      setChargeIntentActive(false);
+    }
+    previousRespawns.current = respawns;
+  }, [
+    clearKeyboardMovement,
+    clearPointerGesture,
+    localAstronaut.respawns,
+  ]);
 
   useEffect(() => {
     if (document.activeElement === document.body) {
@@ -137,6 +172,7 @@ export function ArenaRenderer({
       const gesture = gestureRef.current;
       if (!gesture || gesture.mode !== "charge-candidate") return;
       gesture.mode = "charging";
+      setChargeIntentActive(true);
       const target = relativeChargeTarget(
         gesture,
         localAstronaut,
@@ -198,6 +234,7 @@ export function ArenaRenderer({
 
     gestureRef.current = null;
     clearChargeTimer();
+    setChargeIntentActive(false);
     setGestureAim(null);
     if (gesture.element.hasPointerCapture(gesture.pointerId)) {
       gesture.element.releasePointerCapture(gesture.pointerId);
@@ -219,12 +256,12 @@ export function ArenaRenderer({
     <svg
       ref={arenaRef}
       className="world"
-      viewBox={`0 0 ${WORLD.width} ${WORLD.height}`}
+      viewBox={`${camera.x} ${camera.y} ${camera.width} ${camera.height}`}
       role="application"
       tabIndex={0}
       aria-roledescription="game arena"
-      aria-label="Tetherbound game arena. Use W A S D or the arrow keys to move. Tap a movement key, then press and hold that same key to charge; release it to burst. Press Escape to cancel keyboard movement or Tab to leave the arena controls. Drag to move with a pointer. Hold the astronaut, drag to aim, and release to burst."
-      aria-keyshortcuts="W A S D ArrowUp ArrowDown ArrowLeft ArrowRight"
+      aria-label="Tetherbound game arena. Keyboard controls stay active throughout the match. Use W and S or the up and down arrows to drive forward and reverse. Use A and D or the left and right arrows to turn. Tap W or S, then press and hold that same key to charge; release it to burst. Press T to deploy a tether and Escape to cancel keyboard movement. Drag to move with a pointer. Hold the astronaut, drag to aim, and release to burst."
+      aria-keyshortcuts="W A S D T ArrowUp ArrowDown ArrowLeft ArrowRight"
       aria-disabled={disabled}
       onContextMenu={(event) => event.preventDefault()}
       onPointerDown={beginGesture}
@@ -238,8 +275,11 @@ export function ArenaRenderer({
           <circle cx="1" cy="1" r="0.22" fill="#76909b" opacity=".22" />
         </pattern>
       </defs>
-      <rect width="100" height="160" fill="#111b22" />
-      <rect width="100" height="160" fill="url(#world-grid)" />
+      <rect className="world__void" x={-WORLD.width} y={-WORLD.height}
+        width={WORLD.width * 3} height={WORLD.height * 3} />
+      <rect className="world__surface" width={WORLD.width} height={WORLD.height} />
+      <rect width={WORLD.width} height={WORLD.height} fill="url(#world-grid)" />
+      <rect className="world__boundary" width={WORLD.width} height={WORLD.height} />
 
       <Network state={state} playerId="rival" />
       <Network state={state} playerId="player" />
@@ -340,24 +380,41 @@ function ChargeFeedback({
   if (!charging) return null;
 
   const progress = Math.min(1, movement.chargeSeconds / MOVEMENT_RULES.fullChargeSeconds);
-  const target = gestureAim ?? movement.target ?? (
-    movement.mode === "charging"
-      ? {
-          x: position.x + movement.direction.x * MOVEMENT_RULES.aimVectorDistance,
-          y: position.y + movement.direction.y * MOVEMENT_RULES.aimVectorDistance,
-        }
-      : null
-  );
-  const hasAim = target !== null && pointDistance(target, position) > 0.1;
+  const gestureDirection = gestureAim
+    ? normalizeDirection(
+        {
+          x: gestureAim.x - position.x,
+          y: gestureAim.y - position.y,
+        },
+        movement.direction,
+      )
+    : movement.direction;
+  const radar = calculateChargeRadar({
+    ...movement,
+    direction: gestureDirection,
+  });
+  const target = chargeRadarEndpoint(position, radar);
+  const radarPath = buildChargeRadarPath(position, radar);
   const isFull = progress >= 1;
+  const rangeClipped = pointDistance(position, target) <
+    radar.burstDistance - 0.001;
 
   return (
     <g className={`world__charge-feedback world__charge-feedback--${playerId}`} aria-hidden="true">
-      {hasAim && target && (
+      <path
+        className={`world__charge-radar${radar.canRelease ? "" : " world__charge-radar--arming"}`}
+        d={radarPath}
+      />
+      {radar.canRelease && (
         <>
           <line className="world__charge-aim" x1={position.x} y1={position.y}
             x2={target.x} y2={target.y} />
-          <circle className="world__charge-target" cx={target.x} cy={target.y} r="1.35" />
+          <circle
+            className={`world__charge-target${rangeClipped ? " world__charge-target--blocked" : ""}`}
+            cx={target.x}
+            cy={target.y}
+            r="1.35"
+          />
         </>
       )}
       <g transform={`translate(${position.x} ${position.y})`}>
@@ -383,10 +440,14 @@ function Astronaut({
   const speed = Math.hypot(movement.velocity.x, movement.velocity.y);
   const moving = movement.mode !== "burst" && speed > 0.01;
   const movementBlend = Math.min(1, speed / MOVEMENT_RULES.walkMaximumSpeed);
-  const directionLength = Math.hypot(movement.direction.x, movement.direction.y);
+  const directionLength = Math.hypot(movement.facing.x, movement.facing.y);
   const direction = directionLength > 0
-    ? { x: movement.direction.x / directionLength, y: movement.direction.y / directionLength }
+    ? { x: movement.facing.x / directionLength, y: movement.facing.y / directionLength }
     : { x: 0, y: -1 };
+  const headingRadians = Number.isFinite(movement.headingRadians)
+    ? movement.headingRadians
+    : Math.atan2(direction.y, direction.x);
+  const headingDegrees = headingRadians * 180 / Math.PI + 90;
   const sway = moving
     ? Math.sin(movement.gaitPhase) * MOVEMENT_RULES.visualSwayDistance * movementBlend
     : 0;
@@ -397,16 +458,16 @@ function Astronaut({
   const lean = moving
     ? Math.sin(movement.gaitPhase) * MOVEMENT_RULES.visualLeanDegrees * movementBlend
     : 0;
-  const swayX = -direction.y * sway + direction.x * bob;
-  const swayY = direction.x * sway + direction.y * bob;
-
   return (
     <g className={`world__astronaut world__astronaut--${playerId}`}
       transform={`translate(${position.x} ${position.y})`}>
-      <g className="world__astronaut-body"
-        transform={`translate(${swayX} ${swayY}) rotate(${lean})`}>
-        <circle r="3" />
-        <rect x="-1.6" y="-.9" width="3.2" height="1.8" rx=".9" />
+      <g className="world__astronaut-facing" transform={`rotate(${headingDegrees})`}>
+        <g className="world__astronaut-body"
+          transform={`translate(${sway} ${-bob}) rotate(${lean})`}>
+          <circle r="3" />
+          <rect x="-1.6" y="-.9" width="3.2" height="1.8" rx=".9" />
+          <path className="world__astronaut-nose" d="M 0 -4 L 1 -2.3 L -1 -2.3 Z" />
+        </g>
       </g>
     </g>
   );
@@ -435,10 +496,24 @@ function clientToWorldUnclamped(
   }
 
   const rect = element.getBoundingClientRect();
-  if (rect.width === 0 || rect.height === 0) return { x: 0, y: 0 };
+  const viewBox = element.viewBox.baseVal;
+  if (
+    rect.width === 0 ||
+    rect.height === 0 ||
+    viewBox.width === 0 ||
+    viewBox.height === 0
+  ) return { x: viewBox.x, y: viewBox.y };
+  const scale = Math.min(
+    rect.width / viewBox.width,
+    rect.height / viewBox.height,
+  );
+  const renderedWidth = viewBox.width * scale;
+  const renderedHeight = viewBox.height * scale;
+  const offsetX = (rect.width - renderedWidth) / 2;
+  const offsetY = (rect.height - renderedHeight) / 2;
   return {
-    x: ((clientX - rect.left) / rect.width) * WORLD.width,
-    y: ((clientY - rect.top) / rect.height) * WORLD.height,
+    x: viewBox.x + (clientX - rect.left - offsetX) / scale,
+    y: viewBox.y + (clientY - rect.top - offsetY) / scale,
   };
 }
 
@@ -454,6 +529,15 @@ function worldToClient(element: SVGSVGElement, position: Vec2): Vec2 | null {
 
 function pointDistance(a: Vec2, b: Vec2) {
   return Math.hypot(b.x - a.x, b.y - a.y);
+}
+
+function normalizeDirection(value: Vec2, fallback: Vec2): Vec2 {
+  const length = Math.hypot(value.x, value.y);
+  if (length > 0.000001) return { x: value.x / length, y: value.y / length };
+  const fallbackLength = Math.hypot(fallback.x, fallback.y);
+  return fallbackLength > 0.000001
+    ? { x: fallback.x / fallbackLength, y: fallback.y / fallbackLength }
+    : { x: 0, y: -1 };
 }
 
 function relativeChargeTarget(gesture: ActiveGesture, astronaut: AstronautState): Vec2 {
