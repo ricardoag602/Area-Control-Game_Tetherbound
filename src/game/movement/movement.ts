@@ -1,10 +1,10 @@
-import { clampToWorld, distance } from "./geometry";
+import { clampToWorld, distance } from "../geometry";
 import type {
   GameInput,
   MovementState,
   TankInput,
   Vec2,
-} from "./types";
+} from "../types";
 
 const TAU = Math.PI * 2;
 const ZERO: Vec2 = { x: 0, y: 0 };
@@ -28,9 +28,19 @@ export const MOVEMENT_RULES = {
   visualBobDistance: 0.12,
   visualLeanDegrees: 2.5,
 
-  gestureArmMs: 200,
+  // Brief enough to feel immediate, but long enough to distinguish a tap or
+  // drag from an intentional hold on both touch and keyboard controls.
+  gestureArmMs: 120,
+  // Measured from the first key-down to the second key-down. Time spent holding
+  // the first press consumes this window instead of extending it.
   keyboardBoostDoubleTapMs: 300,
-  keyboardBoostTapMaximumMs: 220,
+  keyboardBoostTapMaximumMs: 140,
+  // Touch allows slightly more time than a physical key, but still requires a
+  // short first tap followed by a nearby second press-and-hold.
+  touchBoostDoubleTapMs: 360,
+  touchBoostTapMaximumMs: 180,
+  touchBoostDoubleTapDistancePx: 64,
+  touchBoostRearmLeadSeconds: 0.16,
   gestureSlopPx: 12,
   touchGestureSlopPx: 20,
   astronautHitRadiusPx: 24,
@@ -38,8 +48,8 @@ export const MOVEMENT_RULES = {
   aimDeadZonePx: 16,
   aimVectorDistance: 12,
 
-  // The 200 ms gesture arm plus 0.8 seconds of authoritative charging equals
-  // one second before the ready flash appears.
+  // The 120 ms gesture arm plus 0.8 seconds of authoritative charging puts the
+  // ready flash just under one second after the player prompts the action.
   fullChargeSeconds: 0.8,
   chargeSlowdownSeconds: 1,
   minimumBurstChargeSeconds: 0.2,
@@ -71,7 +81,7 @@ export function stepChargingTurn(
   deltaSeconds: number,
   turnRateMultiplier = 1,
 ): ChargingTurnStep {
-  const seconds = Math.max(0, deltaSeconds);
+  const seconds = sanitizeDeltaSeconds(deltaSeconds);
   const nextCharge = Math.min(
     MOVEMENT_RULES.fullChargeSeconds,
     Math.max(0, chargeSeconds) + seconds,
@@ -220,7 +230,7 @@ export function advanceMovement(
       }
     : step;
 
-  const seconds = Math.max(0, deltaSeconds);
+  const seconds = sanitizeDeltaSeconds(deltaSeconds);
   const speedMultiplier = sanitizeMultiplier(environment.speedMultiplier ?? 1);
   const turnRateMultiplier = sanitizeMultiplier(
     environment.turnRateMultiplier ?? 1,
@@ -874,6 +884,10 @@ function smoothstep(value: number) {
 
 function clamp(value: number, minimum: number, maximum: number) {
   return Math.min(maximum, Math.max(minimum, value));
+}
+
+function sanitizeDeltaSeconds(deltaSeconds: number) {
+  return Number.isFinite(deltaSeconds) ? Math.max(0, deltaSeconds) : 0;
 }
 
 function sanitizeMultiplier(value: number) {

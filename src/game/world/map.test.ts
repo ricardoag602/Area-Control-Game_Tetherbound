@@ -11,7 +11,7 @@ import {
   isInsideWorld,
   sampleWorld,
   type BiomeId,
-} from "./world";
+} from "./map";
 
 describe("deterministic world model", () => {
   it("grows the prototype arena by four to five times its area", () => {

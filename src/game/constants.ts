@@ -1,4 +1,4 @@
-import { WORLD_BOUNDS } from "./world";
+import { WORLD_BOUNDS } from "./world/map";
 
 /** Shared alias retained for movement, protocol, and renderer consumers. */
 export const WORLD = WORLD_BOUNDS;

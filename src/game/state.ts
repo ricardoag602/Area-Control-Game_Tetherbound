@@ -1,11 +1,11 @@
 import { GAME_RULES, SIMULATION_RULES, WORLD } from "./constants";
-import { createMovementState } from "./movement";
+import { createMovementState } from "./movement/movement";
 import type { GameState, PlayerId } from "./types";
-import { WORLD_BASE_SLOTS } from "./world";
+import { WORLD_BASE_SLOTS } from "./world/map";
 import {
   createWorldTimeline,
   type BiomeRegion as TimelineBiomeRegion,
-} from "./worldEvents";
+} from "./world/timeline";
 
 const PLAYER_BASE = WORLD_BASE_SLOTS.south.basePosition;
 const RIVAL_BASE = WORLD_BASE_SLOTS.north.basePosition;

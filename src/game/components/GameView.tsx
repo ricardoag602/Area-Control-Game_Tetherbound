@@ -1,4 +1,4 @@
-import { useLocalMatch } from "../useLocalMatch";
+import { useLocalMatch } from "../hooks/useLocalMatch";
 import { MatchScreen } from "./MatchScreen";
 
 interface GameViewProps {

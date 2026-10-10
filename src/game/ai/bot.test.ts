@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { getBotCommand } from "./bot";
-import { applyPlayerCommands } from "./playerController";
-import { createInitialGameState } from "./state";
+import { applyPlayerCommands } from "../simulation/playerController";
+import { createInitialGameState } from "../state";
 
 describe("basic bot controller", () => {
   it("moves toward the nearest available salvage", () => {

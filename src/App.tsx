@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { GameView } from "./game/components/GameView";
-import { NetworkGameView } from "./game/components/NetworkGameView";
+import { NetworkGameView } from "./network/components/NetworkGameView";
 import type { GameMode } from "./game/types";
 import { getRoomServerUrl, RoomClient } from "./network/RoomClient";
 import {

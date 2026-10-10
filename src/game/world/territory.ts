@@ -1,5 +1,5 @@
-import { GAME_RULES, WORLD } from "./constants";
-import type { GameState, PlayerId, Vec2 } from "./types";
+import { GAME_RULES, WORLD } from "../constants";
+import type { GameState, PlayerId, Vec2 } from "../types";
 
 export type TerritoryOwner = PlayerId | "neutral" | "contested";
 

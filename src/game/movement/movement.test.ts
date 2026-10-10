@@ -4,7 +4,7 @@ import {
   createMovementState,
   MOVEMENT_RULES,
 } from "./movement";
-import type { GameInput, MovementState, Vec2 } from "./types";
+import type { GameInput, MovementState, Vec2 } from "../types";
 
 const WORLD_WIDTH = 100;
 const WORLD_HEIGHT = 160;
@@ -642,10 +642,114 @@ describe("astronaut movement", () => {
       MOVEMENT_RULES.fullChargeSeconds,
     );
     const overheld = advance(full.position, full.movement, [], 5);
-    expect(MOVEMENT_RULES.gestureArmMs / 1_000 + MOVEMENT_RULES.fullChargeSeconds).toBe(1);
+    const promptToReadySeconds =
+      MOVEMENT_RULES.gestureArmMs / 1_000 + MOVEMENT_RULES.fullChargeSeconds;
+    expect(promptToReadySeconds).toBeCloseTo(0.92, 10);
+    expect(promptToReadySeconds).toBeLessThan(1);
     expect(full.movement.chargeSeconds).toBe(MOVEMENT_RULES.fullChargeSeconds);
     expect(overheld.movement.chargeSeconds).toBe(MOVEMENT_RULES.fullChargeSeconds);
     expect(overheld.movement.velocity).toEqual({ x: 0, y: 0 });
+  });
+
+  it.each([Number.NaN, Number.POSITIVE_INFINITY, -0.1])(
+    "does not advance a new charge with an invalid elapsed time of %s",
+    (deltaSeconds) => {
+      const start = { x: 20, y: 80 };
+      const charging = advance(
+        start,
+        createMovementState({ x: 1, y: 0 }),
+        [input(1, { type: "tank_charge", throttle: 1, steering: 0 })],
+        deltaSeconds,
+      );
+
+      expect(charging.position).toEqual(start);
+      expect(charging.movement.mode).toBe("charging");
+      expect(charging.movement.chargeSeconds).toBe(0);
+      expect(Object.values(charging.movement.velocity).every(Number.isFinite))
+        .toBe(true);
+    },
+  );
+
+  it("preserves accumulated charge when steering updates arrive", () => {
+    const start = { x: 20, y: 80 };
+    const began = advance(
+      start,
+      createMovementState({ x: 1, y: 0 }),
+      [input(1, { type: "tank_charge", throttle: 1, steering: 0 })],
+      0.1,
+    );
+    const steered = advance(
+      began.position,
+      began.movement,
+      [input(2, { type: "tank_charge", throttle: 1, steering: 1 })],
+      0.1,
+    );
+
+    expect(steered.movement.mode).toBe("charging");
+    expect(steered.movement.chargeSeconds).toBeCloseTo(0.2, 10);
+    expect(steered.movement.tankSteering).toBe(1);
+  });
+
+  it("cannot create an accidental burst from charge and release in one tick", () => {
+    const start = { x: 20, y: 80 };
+    const result = advance(
+      start,
+      createMovementState({ x: 1, y: 0 }),
+      [
+        input(1, { type: "tank_charge", throttle: 1, steering: 0 }),
+        input(2, { type: "tank_release" }),
+      ],
+      0.05,
+    );
+
+    expect(result.position).toEqual(start);
+    expect(result.movement.mode).toBe("idle");
+    expect(result.movement.chargeSeconds).toBe(0);
+    expect(result.movement.burstDistanceRemaining).toBe(0);
+  });
+
+  it("releases at the inclusive minimum-charge boundary", () => {
+    const start = { x: 20, y: 80 };
+    const charged = chargeAt(
+      start,
+      { x: 100, y: 80 },
+      MOVEMENT_RULES.minimumBurstChargeSeconds,
+    );
+    const released = advance(
+      charged.position,
+      charged.movement,
+      [input(2, { type: "release", target: { x: 100, y: 80 } })],
+      0,
+    );
+
+    expect(released.movement.mode).toBe("burst");
+    expect(released.movement.burstDistanceRemaining).toBeGreaterThanOrEqual(
+      MOVEMENT_RULES.minimumBurstDistance,
+    );
+  });
+
+  it("launches along the final direct-target vector supplied at release", () => {
+    const start = { x: 50, y: 80 };
+    const initiallyAimedRight = chargeAt(
+      start,
+      { x: 90, y: 80 },
+      MOVEMENT_RULES.fullChargeSeconds,
+    );
+    const releasedTowardTouch = advance(
+      initiallyAimedRight.position,
+      initiallyAimedRight.movement,
+      [input(2, { type: "release", target: { x: 50, y: 120 } })],
+      0,
+    );
+
+    expect(releasedTowardTouch.movement.mode).toBe("burst");
+    expect(releasedTowardTouch.movement.direction.x).toBeCloseTo(0, 10);
+    expect(releasedTowardTouch.movement.direction.y).toBeCloseTo(1, 10);
+    expect(releasedTowardTouch.movement.velocity.x).toBeCloseTo(0, 10);
+    expect(releasedTowardTouch.movement.velocity.y).toBeCloseTo(
+      MOVEMENT_RULES.burstSpeed,
+      10,
+    );
   });
 
   it.each([
@@ -862,10 +966,47 @@ describe("astronaut movement", () => {
       tankThrottle: 0,
       tankSteering: 1,
       queuedTankInput: null,
+      chargeSeconds: 0,
     });
     const turning = advance(landed.position, landed.movement, [], 0.1);
     expect(turning.position).toEqual(landed.position);
     expect(turning.movement.angularVelocity).toBeGreaterThan(0);
+  });
+
+  it("never turns a stale charge command during a burst into a chained charge", () => {
+    const start = { x: 50, y: 100 };
+    const charged = advance(
+      start,
+      createMovementState({ x: 0, y: -1 }),
+      [input(1, { type: "tank_charge", throttle: 1, steering: 0 })],
+      MOVEMENT_RULES.fullChargeSeconds,
+    );
+    const released = advance(
+      charged.position,
+      charged.movement,
+      [input(2, { type: "tank_release" })],
+      0,
+    );
+    const staleCharge = advance(
+      released.position,
+      released.movement,
+      [input(3, { type: "tank_charge", throttle: 1, steering: 1 })],
+      0,
+    );
+    const landed = advance(
+      staleCharge.position,
+      staleCharge.movement,
+      [],
+      MOVEMENT_RULES.maximumBurstDistance / MOVEMENT_RULES.burstSpeed,
+    );
+
+    expect(staleCharge.movement.mode).toBe("burst");
+    expect(staleCharge.movement.queuedTankInput).toBeNull();
+    expect(landed.movement).toMatchObject({
+      mode: "idle",
+      chargeSeconds: 0,
+      queuedTankInput: null,
+    });
   });
 
   it("clears a queued keyboard direction when the held key is released in flight", () => {

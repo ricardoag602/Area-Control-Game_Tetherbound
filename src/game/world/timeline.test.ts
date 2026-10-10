@@ -8,7 +8,7 @@ import {
   WORLD_EVENT_KINDS,
   type WorldTimelineEvent,
   type WorldTimelineState,
-} from "./worldEvents";
+} from "./timeline";
 
 function collectThrough(
   initial: WorldTimelineState,

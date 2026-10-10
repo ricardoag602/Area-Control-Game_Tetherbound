@@ -11,8 +11,8 @@ import {
   chargeZoomTarget,
   stepCameraZoomSpring,
   type CameraZoomSpring,
-} from "../camera";
-import { MOVEMENT_RULES } from "../movement";
+} from "../presentation/camera";
+import { MOVEMENT_RULES } from "../movement/movement";
 import type { MovementState, Vec2 } from "../types";
 
 export function useFollowCamera(

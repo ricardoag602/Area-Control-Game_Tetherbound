@@ -6,21 +6,21 @@ import {
   stepCameraZoomSpring,
   type CameraZoomSpring,
 } from "./camera";
-import { WORLD } from "./constants";
+import { WORLD } from "../constants";
 
 describe("camera framing", () => {
   it("uses a responsive view centered directly on the local player", () => {
     const view = calculateCameraViewBox({ x: 50, y: 80 }, 0.5, 1);
 
-    expect(view).toEqual({ x: 30, y: 40, width: 40, height: 80 });
+    expect(view).toEqual({ x: 28.5, y: 37, width: 43, height: 86 });
   });
 
   it("keeps the player center-locked by allowing overscan at world edges", () => {
     const center = { x: WORLD.width / 2, y: WORLD.height - 15 };
     const view = calculateCameraViewBox(center, 0.5, 1);
 
-    expect(view.y).toBe(center.y - 40);
-    expect(view.y + view.height).toBe(WORLD.height + 25);
+    expect(view.y).toBe(center.y - 43);
+    expect(view.y + view.height).toBe(WORLD.height + 28);
   });
 
   it("fits very wide viewports to the world width", () => {
@@ -46,10 +46,10 @@ describe("camera framing", () => {
     );
 
     expect(view).toEqual({
-      x: WORLD.width / 2 - 24,
-      y: WORLD.height / 2 - 40,
-      width: 48,
-      height: 80,
+      x: WORLD.width / 2 - 25.8,
+      y: WORLD.height / 2 - 43,
+      width: 51.6,
+      height: 86,
     });
     expect(Object.values(view).every(Number.isFinite)).toBe(true);
   });
@@ -68,21 +68,29 @@ describe("camera framing", () => {
 describe("charge zoom curve", () => {
   it("has exact resting and fully charged endpoints", () => {
     expect(chargeZoomTarget(0)).toBe(1);
-    expect(chargeZoomTarget(1)).toBe(1 + CAMERA_RULES.maximumChargeZoom);
+    expect(chargeZoomTarget(1)).toBeCloseTo(
+      1 - CAMERA_RULES.maximumChargeZoomOut,
+      12,
+    );
   });
 
   it("clamps invalid and out-of-range progress", () => {
     expect(chargeZoomTarget(Number.NaN)).toBe(1);
     expect(chargeZoomTarget(-1)).toBe(1);
-    expect(chargeZoomTarget(2)).toBe(1 + CAMERA_RULES.maximumChargeZoom);
+    expect(chargeZoomTarget(2)).toBeCloseTo(
+      1 - CAMERA_RULES.maximumChargeZoomOut,
+      12,
+    );
   });
 
-  it("rises monotonically with diminishing increments", () => {
+  it("falls monotonically with diminishing outward increments", () => {
     const samples = [0, 0.25, 0.5, 0.75, 1].map(chargeZoomTarget);
-    const increments = samples.slice(1).map((sample, index) => sample - samples[index]);
+    const increments = samples.slice(1).map(
+      (sample, index) => samples[index] - sample,
+    );
 
     for (let index = 1; index < samples.length; index += 1) {
-      expect(samples[index]).toBeGreaterThan(samples[index - 1]);
+      expect(samples[index]).toBeLessThan(samples[index - 1]);
     }
     for (let index = 1; index < increments.length; index += 1) {
       expect(increments[index]).toBeLessThan(increments[index - 1]);

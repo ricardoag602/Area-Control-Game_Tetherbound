@@ -1,10 +1,10 @@
-import { SIMULATION_RULES, WORLD } from "./constants";
+import { SIMULATION_RULES, WORLD } from "../constants";
 import {
   MOVEMENT_RULES,
   getBurstDistance,
   stepChargingTurn,
-} from "./movement";
-import type { MovementState, TankAxis, Vec2 } from "./types";
+} from "../movement/movement";
+import type { MovementState, TankAxis, Vec2 } from "../types";
 
 export const CHARGE_RADAR_RULES = {
   innerRadius: 4.25,

@@ -1,4 +1,4 @@
-import { MOVEMENT_RULES } from "../movement";
+import { MOVEMENT_RULES } from "../movement/movement";
 import type { TankAxis, TankInput } from "../types";
 
 const KEY_CONTROLS = {
@@ -53,12 +53,19 @@ export function isKeyboardBoostDoubleTap(
   if (!isTankBoostCode(code) || !previousTap || previousTap.code !== code) {
     return false;
   }
-  const heldFor = previousTap.releasedAt - previousTap.pressedAt;
   const pauseBeforeSecondPress = pressedAt - previousTap.releasedAt;
-  return heldFor >= 0 &&
-    heldFor <= MOVEMENT_RULES.keyboardBoostTapMaximumMs &&
+  const elapsedSinceFirstPress = pressedAt - previousTap.pressedAt;
+  return isKeyboardBoostTap(previousTap.pressedAt, previousTap.releasedAt) &&
     pauseBeforeSecondPress >= 0 &&
-    pauseBeforeSecondPress <= MOVEMENT_RULES.keyboardBoostDoubleTapMs;
+    elapsedSinceFirstPress >= 0 &&
+    elapsedSinceFirstPress <= MOVEMENT_RULES.keyboardBoostDoubleTapMs;
+}
+
+export function isKeyboardBoostTap(pressedAt: number, releasedAt: number) {
+  if (!Number.isFinite(pressedAt) || !Number.isFinite(releasedAt)) return false;
+  const heldFor = releasedAt - pressedAt;
+  return heldFor >= 0 &&
+    heldFor <= MOVEMENT_RULES.keyboardBoostTapMaximumMs;
 }
 
 export function isGameplayKeyboardBlockedElement(

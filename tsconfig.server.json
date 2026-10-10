@@ -14,13 +14,18 @@
     "server",
     "src/game/constants.ts",
     "src/game/geometry.ts",
-    "src/game/movement.ts",
-    "src/game/simulation.ts",
+    "src/game/movement/movement.ts",
+    "src/game/simulation/environment.ts",
+    "src/game/simulation/match.ts",
+    "src/game/simulation/playerController.ts",
+    "src/game/simulation/scoring.ts",
+    "src/game/simulation/tetherNetwork.ts",
+    "src/game/simulation/worldSystems.ts",
     "src/game/state.ts",
-    "src/game/territory.ts",
     "src/game/types.ts",
-    "src/game/world.ts",
-    "src/game/worldEvents.ts",
+    "src/game/world/map.ts",
+    "src/game/world/territory.ts",
+    "src/game/world/timeline.ts",
     "src/network/protocol.ts"
   ]
 }

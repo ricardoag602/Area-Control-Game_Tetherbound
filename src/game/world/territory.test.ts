@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { WORLD } from "./constants";
-import { createInitialGameState } from "./state";
+import { WORLD } from "../constants";
+import { createInitialGameState } from "../state";
 import { sampleTerritoryGrid, type TerritoryGrid } from "./territory";
-import type { Anchor, GameState, PlayerId, Vec2 } from "./types";
+import type { Anchor, GameState, PlayerId, Vec2 } from "../types";
 
 describe("territory grid", () => {
   it("uses ten-unit pixel blocks across the full enlarged arena", () => {

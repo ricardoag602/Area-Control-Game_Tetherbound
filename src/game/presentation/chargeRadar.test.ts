@@ -9,8 +9,9 @@ import {
   advanceMovement,
   createMovementState,
   MOVEMENT_RULES,
-} from "./movement";
-import { WORLD } from "./constants";
+} from "../movement/movement";
+import { WORLD } from "../constants";
+import { getScreenTouchChargeInput } from "../input/touchCharge";
 
 function chargingMovement(chargeSeconds: number) {
   return {
@@ -170,6 +171,82 @@ describe("charge radar", () => {
     expect(Number.isFinite(endpoint.y)).toBe(true);
     expect(path.startsWith("M ")).toBe(true);
     expect(path.endsWith("Z")).toBe(true);
+  });
+
+  it("forces a screen-aimed touch charge to stop and exhaust its turn authority", () => {
+    let position = { x: WORLD.width / 2, y: WORLD.height / 2 };
+    let movement = createMovementState({ x: 0, y: -1 });
+    let sequence = 1;
+    let step = advanceMovement(
+      position,
+      movement,
+      [{
+        sequence: sequence++,
+        command: { type: "tank_drive", throttle: 1, steering: 1 },
+      }],
+      0.25,
+      WORLD.width,
+      WORLD.height,
+    );
+    position = step.position;
+    movement = step.movement;
+
+    for (let index = 0; index < 20; index += 1) {
+      const touch = index % 2 === 0
+        ? { x: WORLD.width, y: position.y }
+        : { x: 0, y: position.y };
+      const input = getScreenTouchChargeInput(
+        movement.facing,
+        position,
+        touch,
+        movement.direction,
+      );
+      step = advanceMovement(
+        position,
+        movement,
+        [{
+          sequence: sequence++,
+          command: { type: "tank_charge", ...input },
+        }],
+        0.05,
+        WORLD.width,
+        WORLD.height,
+      );
+      position = step.position;
+      movement = step.movement;
+    }
+
+    expect(movement.chargeSeconds).toBe(MOVEMENT_RULES.fullChargeSeconds);
+    expect(movement.forwardSpeed).toBeCloseTo(0, 10);
+    expect(movement.angularVelocity).toBeCloseTo(0, 10);
+    expect(movement.velocity.x).toBeCloseTo(0, 10);
+    expect(movement.velocity.y).toBeCloseTo(0, 10);
+
+    const fullyChargedPosition = { ...position };
+    const fullyChargedHeading = movement.headingRadians;
+    const twistInput = getScreenTouchChargeInput(
+      movement.facing,
+      position,
+      { x: 0, y: WORLD.height },
+      movement.direction,
+    );
+    const twisted = advanceMovement(
+      position,
+      movement,
+      [{
+        sequence: sequence++,
+        command: { type: "tank_charge", ...twistInput },
+      }],
+      0.2,
+      WORLD.width,
+      WORLD.height,
+    );
+    const radar = calculateChargeRadar(twisted.movement);
+
+    expect(twisted.position.x).toBeCloseTo(fullyChargedPosition.x, 10);
+    expect(twisted.position.y).toBeCloseTo(fullyChargedPosition.y, 10);
+    expect(twisted.movement.headingRadians).toBeCloseTo(fullyChargedHeading, 10);
+    expect(radar.maximumTurnRadians - radar.minimumTurnRadians).toBeCloseTo(0, 8);
   });
 
   it("clips the projected endpoint to the arena boundary", () => {

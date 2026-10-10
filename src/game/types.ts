@@ -2,7 +2,7 @@ import type {
   BiomeWeatherEvent,
   WorldTimelineEvent,
   WorldTimelineState,
-} from "./worldEvents";
+} from "./world/timeline";
 
 export type PlayerId = "player" | "rival";
 export type GameMode = "bot" | "multiplayer";

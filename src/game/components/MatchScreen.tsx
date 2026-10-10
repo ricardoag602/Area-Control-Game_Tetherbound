@@ -1,17 +1,17 @@
 import { useMemo, type CSSProperties } from "react";
 import { GAME_RULES } from "../constants";
+import { strongestWeatherForBiome } from "../simulation/environment";
 import {
   canDeployAnchor,
   isInsideSafeZone,
-  strongestWeatherForBiome,
-} from "../simulation";
-import { MOVEMENT_RULES } from "../movement";
-import { calculateOxygenPresentation } from "../oxygen";
+} from "../simulation/tetherNetwork";
+import { MOVEMENT_RULES } from "../movement/movement";
+import { calculateOxygenPresentation } from "../presentation/oxygen";
 import { useDeployShortcut } from "../input/useDeployShortcut";
 import type { GameState, MovementCommand, PlayerId } from "../types";
-import { sampleTerritoryGrid } from "../territory";
-import { sampleWorld } from "../world";
-import type { WorldTimelineEvent } from "../worldEvents";
+import { sampleTerritoryGrid } from "../world/territory";
+import { sampleWorld } from "../world/map";
+import type { WorldTimelineEvent } from "../world/timeline";
 import { ArenaRenderer } from "./ArenaRenderer";
 import { Minimap } from "./Minimap";
 
@@ -127,7 +127,7 @@ export function MatchScreen({ state, localPlayerId, opponentName, statusText, la
                 Drive: W/S · Turn: A/D · Boost: tap, then hold W or S · T: tether
               </span>
               <span className="control-hint__pointer">
-                drag to move · hold your astronaut to charge
+                drag to move · tap, then hold nearby to charge
               </span>
             </>
           )}

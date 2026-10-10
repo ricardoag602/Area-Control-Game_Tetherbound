@@ -1,8 +1,8 @@
-import { GAME_RULES } from "./constants";
-import { distance } from "./geometry";
-import { canDeployAnchor, getPoweredNodes } from "./simulation";
-import type { PlayerCommand } from "./playerController";
-import type { GameState, PlayerId, Vec2 } from "./types";
+import { GAME_RULES } from "../constants";
+import { distance } from "../geometry";
+import { canDeployAnchor, getPoweredNodes } from "../simulation/tetherNetwork";
+import type { PlayerCommand } from "../simulation/playerController";
+import type { GameState, PlayerId, Vec2 } from "../types";
 
 const LOW_OXYGEN_THRESHOLD = 35;
 

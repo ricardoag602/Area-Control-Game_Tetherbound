@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { WORLD } from "../constants";
-import type { TerritoryGrid } from "../territory";
+import type { TerritoryGrid } from "../world/territory";
 import type { GameState, PlayerId } from "../types";
 import { BiomeLayer } from "./BiomeLayer";
 

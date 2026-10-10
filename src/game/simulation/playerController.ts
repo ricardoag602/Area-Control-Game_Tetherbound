@@ -1,5 +1,6 @@
-import { advanceMatch, deployAnchor } from "./simulation";
-import type { GameInput, GameState, MovementCommand, PlayerId } from "./types";
+import { advanceMatch } from "./match";
+import { deployAnchor } from "./tetherNetwork";
+import type { GameInput, GameState, MovementCommand, PlayerId } from "../types";
 
 export interface PlayerCommand {
   movementCommands: MovementCommand[];

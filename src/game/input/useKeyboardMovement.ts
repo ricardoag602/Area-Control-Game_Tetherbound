@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
-import { MOVEMENT_RULES } from "../movement";
+import { MOVEMENT_RULES } from "../movement/movement";
+import { canArmBoostCharge } from "./chargeActivation";
 import type {
   MovementCommand,
   MovementMode,
@@ -8,6 +9,7 @@ import type {
 import {
   getTankInput,
   isKeyboardBoostDoubleTap,
+  isKeyboardBoostTap,
   isGameplayKeyboardBlockedTarget,
   isKeyboardMovementCode,
   isTankBoostCode,
@@ -48,6 +50,7 @@ export function useKeyboardMovement({
   const lastTap = useRef<KeyboardTap | null>(null);
   const boostGesture = useRef<KeyboardBoostGesture | null>(null);
   const boostArmTimer = useRef<number | null>(null);
+  const pressedDuringCommittedBoost = useRef(new Set<KeyboardMovementCode>());
   const requireNeutralForBoost = useRef(false);
   const resumeAfterBoost = useRef(false);
   const commandRef = useRef(onMovementCommand);
@@ -114,6 +117,7 @@ export function useKeyboardMovement({
     clearBoostArmTimer();
     pressedCodes.current.clear();
     pressedAt.current.clear();
+    pressedDuringCommittedBoost.current.clear();
     lastTap.current = null;
     boostGesture.current = null;
     chargeIntentRef.current(false);
@@ -140,7 +144,7 @@ export function useKeyboardMovement({
           boost.phase !== "candidate" ||
           !pressedCodes.current.has(boost.triggerCode) ||
           disabledRef.current ||
-          movementModeRef.current === "burst"
+          !canArmBoostCharge(movementModeRef.current)
         ) {
           boostGesture.current = null;
           return;
@@ -194,7 +198,7 @@ export function useKeyboardMovement({
       const canStartBoost =
         isTankBoostCode(event.code) &&
         !requireNeutralForBoost.current &&
-        movementModeRef.current !== "burst" &&
+        canArmBoostCharge(movementModeRef.current) &&
         isKeyboardBoostDoubleTap(lastTap.current, event.code, now);
       // Steering may change between the thrust tap and second press. A
       // different thrust key intentionally breaks the sequence.
@@ -202,6 +206,9 @@ export function useKeyboardMovement({
       takeoverRef.current();
       pressedCodes.current.add(event.code);
       pressedAt.current.set(event.code, now);
+      if (!canArmBoostCharge(movementModeRef.current)) {
+        pressedDuringCommittedBoost.current.add(event.code);
+      }
       emitCurrentInput();
       if (canStartBoost) armKeyboardBoost(event.code);
     }
@@ -215,6 +222,8 @@ export function useKeyboardMovement({
       const boost = boostGesture.current;
       const isBoostTrigger = boost?.triggerCode === event.code;
       const keyPressedAt = pressedAt.current.get(event.code);
+      const beganDuringCommittedBoost =
+        pressedDuringCommittedBoost.current.delete(event.code);
       pressedCodes.current.delete(event.code);
       pressedAt.current.delete(event.code);
 
@@ -249,12 +258,28 @@ export function useKeyboardMovement({
         return;
       }
 
+      // A tap made during the committed launch queues ordinary movement after
+      // landing. Releasing that tap before landing must not erase the queue or
+      // become the first half of a future double-tap boost.
+      if (
+        beganDuringCommittedBoost &&
+        !canArmBoostCharge(movementModeRef.current)
+      ) {
+        const remainingInput = getTankInput(pressedCodes.current);
+        if (!isNeutralInput(remainingInput)) emitCurrentInput();
+        if (requireNeutralForBoost.current && pressedCodes.current.size === 0) {
+          requireNeutralForBoost.current = false;
+        }
+        return;
+      }
+
       if (
         isTankBoostCode(event.code) &&
+        !beganDuringCommittedBoost &&
         !requireNeutralForBoost.current &&
-        movementModeRef.current !== "burst" &&
+        canArmBoostCharge(movementModeRef.current) &&
         keyPressedAt !== undefined &&
-        releasedAt - keyPressedAt <= MOVEMENT_RULES.keyboardBoostTapMaximumMs
+        isKeyboardBoostTap(keyPressedAt, releasedAt)
       ) {
         lastTap.current = {
           code: event.code,
@@ -303,6 +328,7 @@ export function useKeyboardMovement({
   useEffect(() => {
     const priorMode = previousMode.current;
     previousMode.current = movementMode;
+    if (!canArmBoostCharge(movementMode)) lastTap.current = null;
     const finishedCommittedMovement =
       movementMode !== "burst" &&
       movementMode !== "charging" &&
@@ -311,7 +337,10 @@ export function useKeyboardMovement({
     if (finishedCommittedMovement && pressedCodes.current.size > 0) {
       emitCurrentInput(true);
     }
-    if (finishedCommittedMovement) resumeAfterBoost.current = false;
+    if (finishedCommittedMovement) {
+      pressedDuringCommittedBoost.current.clear();
+      resumeAfterBoost.current = false;
+    }
   }, [emitCurrentInput, movementMode]);
 
   return { clearKeyboardMovement };

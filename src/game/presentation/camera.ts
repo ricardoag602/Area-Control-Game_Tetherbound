@@ -1,15 +1,17 @@
-import { WORLD } from "./constants";
-import type { Vec2 } from "./types";
+import { WORLD } from "../constants";
+import type { Vec2 } from "../types";
 
 /**
  * Presentation-only camera tuning. Keeping this separate from movement rules
  * lets each client frame its own astronaut without affecting simulation state.
  */
 export const CAMERA_RULES = {
-  baseVisibleHeight: 80,
-  maximumChargeZoom: 0.1,
-  minimumSpringZoom: 0.985,
-  // Allows charge zoom and the subtle low-oxygen zoom to combine safely.
+  // A slightly wider resting frame gives the player more room to read terrain.
+  baseVisibleHeight: 86,
+  maximumChargeZoomOut: 0.1,
+  chargeZoomDecayRate: 4,
+  // Allows charge zoom-out, spring overshoot, and low-oxygen zoom to combine.
+  minimumSpringZoom: 0.88,
   maximumSpringZoom: 1.16,
   springAngularFrequency: 16,
   springDampingRatio: 0.78,
@@ -31,12 +33,15 @@ export interface CameraZoomSpring {
 }
 
 /**
- * Produces a quick initial push-in that gradually tapers as the charge fills.
+ * Produces a quick initial zoom-out that gradually tapers as the charge fills.
+ * Normalizing the exponential curve keeps its endpoints exactly at 0 and 1.
  */
 export function chargeZoomTarget(chargeProgress: number) {
   const progress = clamp(finiteOr(chargeProgress, 0), 0, 1);
-  const eased = 1 - Math.pow(1 - progress, 3);
-  return 1 + CAMERA_RULES.maximumChargeZoom * eased;
+  const decay = CAMERA_RULES.chargeZoomDecayRate;
+  const eased = (1 - Math.exp(-decay * progress)) /
+    (1 - Math.exp(-decay));
+  return 1 - CAMERA_RULES.maximumChargeZoomOut * eased;
 }
 
 /**

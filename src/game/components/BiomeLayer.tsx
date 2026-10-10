@@ -1,4 +1,4 @@
-import { WORLD_REGIONS, type BiomeRegion } from "../world";
+import { WORLD_REGIONS, type BiomeRegion } from "../world/map";
 
 /**
  * Intentionally simple SVG terrain. It consumes the same region data as the

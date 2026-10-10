@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { getBotCommand } from "./bot";
-import { SIMULATION_RULES } from "./constants";
-import { applyPlayerCommands, type PlayerCommand } from "./playerController";
-import { createInitialGameState } from "./state";
-import type { MovementCommand } from "./types";
+import { getBotCommand } from "../ai/bot";
+import { SIMULATION_RULES } from "../constants";
+import { applyPlayerCommands, type PlayerCommand } from "../simulation/playerController";
+import { createInitialGameState } from "../state";
+import type { MovementCommand } from "../types";
 
 export function useLocalMatch() {
   const [state, setState] = useState(createInitialGameState);

@@ -2,8 +2,10 @@ import { randomBytes } from "node:crypto";
 import type { AddressInfo } from "node:net";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
 import { SIMULATION_RULES } from "../src/game/constants";
-import { advanceMatch, deployAnchor, getTerritoryScore } from "../src/game/simulation";
-import { cancelMovement } from "../src/game/movement";
+import { advanceMatch } from "../src/game/simulation/match";
+import { getTerritoryScore } from "../src/game/simulation/scoring";
+import { deployAnchor } from "../src/game/simulation/tetherNetwork";
+import { cancelMovement } from "../src/game/movement/movement";
 import { createInitialGameState } from "../src/game/state";
 import type { GameInput, GameState, PlayerId } from "../src/game/types";
 import {

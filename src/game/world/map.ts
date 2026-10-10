@@ -1,4 +1,4 @@
-import type { Vec2 } from "./types";
+import type { Vec2 } from "../types";
 
 /**
  * The first full-size arena is 4.59 times the area of the 100 x 160 prototype.

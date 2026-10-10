@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { MOVEMENT_RULES } from "../movement";
+import { MOVEMENT_RULES } from "../movement/movement";
 import {
   getTankInput,
   isGameplayKeyboardBlockedElement,
   isKeyboardBoostDoubleTap,
+  isKeyboardBoostTap,
   isKeyboardMovementCode,
   isTankBoostCode,
   type KeyboardTap,
@@ -108,9 +109,49 @@ describe("keyboard movement input", () => {
       expect(isKeyboardBoostDoubleTap(
         tap,
         "KeyW",
-        tap.releasedAt + MOVEMENT_RULES.keyboardBoostDoubleTapMs,
+        tap.pressedAt + MOVEMENT_RULES.keyboardBoostDoubleTapMs,
       )).toBe(true);
     });
+
+    it("only classifies the short opening press as a tap", () => {
+      expect(isKeyboardBoostTap(
+        1_000,
+        1_000 + MOVEMENT_RULES.keyboardBoostTapMaximumMs,
+      )).toBe(true);
+      expect(isKeyboardBoostTap(
+        1_000,
+        1_000 + MOVEMENT_RULES.keyboardBoostTapMaximumMs + 0.001,
+      )).toBe(false);
+      expect(isKeyboardBoostTap(1_000, Number.POSITIVE_INFINITY)).toBe(false);
+    });
+
+    it("does not let holding the first press extend the double-tap window", () => {
+      const secondPress = tap.releasedAt + 170;
+
+      expect(secondPress - tap.releasedAt).toBeLessThan(
+        MOVEMENT_RULES.keyboardBoostDoubleTapMs,
+      );
+      expect(secondPress - tap.pressedAt).toBeGreaterThan(
+        MOVEMENT_RULES.keyboardBoostDoubleTapMs,
+      );
+      expect(isKeyboardBoostDoubleTap(tap, "KeyW", secondPress)).toBe(false);
+    });
+
+    it.each(["KeyW", "ArrowUp", "KeyS", "ArrowDown"] as const)(
+      "accepts a short same-key %s double tap",
+      (code) => {
+        const directionalTap: KeyboardTap = {
+          code,
+          pressedAt: 1_000,
+          releasedAt: 1_080,
+        };
+        expect(isKeyboardBoostDoubleTap(
+          directionalTap,
+          code,
+          directionalTap.releasedAt + 80,
+        )).toBe(true);
+      },
+    );
 
     it("requires the same event code rather than a directional alias", () => {
       expect(isKeyboardBoostDoubleTap(tap, "ArrowUp", tap.releasedAt + 100))
@@ -141,7 +182,7 @@ describe("keyboard movement input", () => {
       {
         label: "second press arrived too late",
         previousTap: tap,
-        pressedAt: tap.releasedAt + MOVEMENT_RULES.keyboardBoostDoubleTapMs + 1,
+        pressedAt: tap.pressedAt + MOVEMENT_RULES.keyboardBoostDoubleTapMs + 1,
       },
       {
         label: "release timestamp predates the first press",
@@ -153,8 +194,42 @@ describe("keyboard movement input", () => {
         previousTap: tap,
         pressedAt: tap.releasedAt - 1,
       },
+      {
+        label: "first press timestamp is not finite",
+        previousTap: { ...tap, pressedAt: Number.NaN },
+        pressedAt: tap.releasedAt + 100,
+      },
+      {
+        label: "first release timestamp is not finite",
+        previousTap: { ...tap, releasedAt: Number.POSITIVE_INFINITY },
+        pressedAt: tap.releasedAt + 100,
+      },
+      {
+        label: "second press timestamp is not finite",
+        previousTap: tap,
+        pressedAt: Number.NaN,
+      },
     ])("rejects when the $label", ({ previousTap, pressedAt }) => {
       expect(isKeyboardBoostDoubleTap(previousTap, "KeyW", pressedAt)).toBe(false);
+    });
+
+    it("rejects both timing windows immediately beyond their boundaries", () => {
+      const tooLongTap: KeyboardTap = {
+        ...tap,
+        releasedAt:
+          tap.pressedAt + MOVEMENT_RULES.keyboardBoostTapMaximumMs + 0.001,
+      };
+
+      expect(isKeyboardBoostDoubleTap(
+        tooLongTap,
+        "KeyW",
+        tooLongTap.releasedAt,
+      )).toBe(false);
+      expect(isKeyboardBoostDoubleTap(
+        tap,
+        "KeyW",
+        tap.pressedAt + MOVEMENT_RULES.keyboardBoostDoubleTapMs + 0.001,
+      )).toBe(false);
     });
   });
 });

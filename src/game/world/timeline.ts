@@ -7,7 +7,7 @@
  * authoritative servers, replays, and reconnect catch-up.
  */
 
-import { WORLD_BOUNDS } from "./world";
+import { WORLD_BOUNDS } from "./map";
 
 export const WORLD_EVENT_KINDS = [
   "salvage_drop",

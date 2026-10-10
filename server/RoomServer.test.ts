@@ -2,8 +2,8 @@ import { once } from "node:events";
 import { afterEach, describe, expect, it } from "vitest";
 import WebSocket from "ws";
 import { WORLD } from "../src/game/constants";
-import { MOVEMENT_RULES } from "../src/game/movement";
-import { createWorldTimeline } from "../src/game/worldEvents";
+import { MOVEMENT_RULES } from "../src/game/movement/movement";
+import { createWorldTimeline } from "../src/game/world/timeline";
 import type { ClientMessage, ServerMessage } from "../src/network/protocol";
 import { RoomServer } from "./RoomServer";
 

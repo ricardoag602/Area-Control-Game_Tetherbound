@@ -1,7 +1,7 @@
-import type { ConnectionStatus } from "../../network/RoomClient";
-import type { RoomSnapshot } from "../../network/protocol";
-import type { GameState, MovementCommand, PlayerId } from "../types";
-import { MatchScreen } from "./MatchScreen";
+import type { GameState, MovementCommand, PlayerId } from "../../game/types";
+import { MatchScreen } from "../../game/components/MatchScreen";
+import type { ConnectionStatus } from "../RoomClient";
+import type { RoomSnapshot } from "../protocol";
 
 interface NetworkGameViewProps {
   state: GameState;

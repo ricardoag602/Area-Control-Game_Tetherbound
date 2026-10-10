@@ -73,15 +73,16 @@ Open the printed **Network** URL on the computer before creating the room. The r
 
 ## Main modules
 
+- `src/game/README.md` — game-folder boundaries and dependency rules
 - `server/RoomServer.ts` — room lifecycle, authoritative simulation, heartbeat, and reconnect handling
 - `src/network/RoomClient.ts` — socket lifecycle, session resume, backoff, and latency tracking
 - `src/network/protocol.ts` — shared network message contracts
-- `src/game/movement.ts` — walking, charge, burst, and movement feel rules
-- `src/game/simulation.ts` — transport-independent game rules
-- `src/game/world.ts` — renderer-independent biome geometry and terrain effects
-- `src/game/worldEvents.ts` — deterministic master event timeline and future system hooks
-- `src/game/territory.ts` — coarse territory sampling shared by scoring and the minimap
-- `src/game/oxygen.ts` — bounded oxygen presentation values for camera and screen effects
+- `src/game/movement/movement.ts` — walking, charge, burst, and movement feel rules
+- `src/game/simulation/` — fixed-step match, tether, environment, event, and scoring systems
+- `src/game/world/map.ts` — renderer-independent biome geometry and terrain effects
+- `src/game/world/timeline.ts` — deterministic master event timeline and future system hooks
+- `src/game/world/territory.ts` — coarse territory sampling shared by scoring and the minimap
+- `src/game/presentation/` — pure camera, charge-radar, and oxygen presentation math
 - `src/game/components/MatchScreen.tsx` — shared bot and multiplayer match presentation
 
 ## Verification

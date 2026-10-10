@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { getTerritoryScore } from "../../game/simulation";
+import { getTerritoryScore } from "../../game/simulation/scoring";
 import type { GameState, PlayerId } from "../../game/types";
 import type { ConnectionStatus } from "../RoomClient";
 import { isValidRoomCode, normalizeRoomCode } from "../connectionInfo";

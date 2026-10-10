@@ -1,17 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { GAME_RULES, SIMULATION_RULES, WORLD } from "./constants";
-import { MOVEMENT_RULES } from "./movement";
+import { GAME_RULES, SIMULATION_RULES, WORLD } from "../constants";
+import { MOVEMENT_RULES } from "../movement/movement";
 import {
   advanceGame,
   advanceMatch,
+} from "./match";
+import { getEnvironmentModifiers } from "./environment";
+import {
   canDeployAnchor,
   deployAnchor,
-  getEnvironmentModifiers,
   isInsideSafeZone,
-} from "./simulation";
-import { createInitialGameState } from "./state";
-import { sampleWorld } from "./world";
-import { createWorldTimeline } from "./worldEvents";
+} from "./tetherNetwork";
+import { createInitialGameState } from "../state";
+import { sampleWorld } from "../world/map";
+import { createWorldTimeline } from "../world/timeline";
 
 describe("Tetherbound simulation", () => {
   it("recognizes the home base as a safe zone", () => {
