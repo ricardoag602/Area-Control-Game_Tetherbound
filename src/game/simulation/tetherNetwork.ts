@@ -35,8 +35,23 @@ export function isAtDeliveryNode(
   playerId: PlayerId,
   position: Vec2,
 ) {
-  return getPoweredNodes(state, playerId).some(
-    (node) => distance(node.position, position) <= GAME_RULES.deliveryRadius,
+  const player = state.players[playerId];
+  // The whole visible home zone accepts salvage. This guarantees recovery when
+  // a player has spent every kit and avoids a hidden precision requirement at
+  // the one node they can always reach.
+  if (
+    distance(player.basePosition, position) <= GAME_RULES.safeZoneRadius
+  ) {
+    return true;
+  }
+
+  // Remote anchors keep a smaller hand-in radius so returning resources still
+  // asks the player to reach the actual tether instead of grazing its zone.
+  return state.anchors.some(
+    (anchor) =>
+      anchor.owner === playerId &&
+      anchor.powered &&
+      distance(anchor.position, position) <= GAME_RULES.deliveryRadius,
   );
 }
 
@@ -62,9 +77,11 @@ export function canDeployAnchor(state: GameState, playerId: PlayerId) {
     player.astronaut.tetherKits > 0 &&
     player.astronaut.movement.mode !== "charging" &&
     player.astronaut.movement.mode !== "burst" &&
-    ownedAnchors.length < GAME_RULES.maximumAnchorsPerPlayer &&
     findConnectionParent(state, playerId, position) !== null &&
-    getPoweredNodes(state, playerId).every(
+    [
+      { position: player.basePosition },
+      ...ownedAnchors,
+    ].every(
       (node) =>
         distance(node.position, position) >= GAME_RULES.minimumAnchorSpacing,
     )
@@ -84,6 +101,10 @@ export function deployAnchor(state: GameState, playerId: PlayerId): GameState {
     position: { ...player.astronaut.position },
     parentId: parent.id,
     powered: true,
+    disruptedUntilMs: null,
+    protectedUntilMs: null,
+    overloadProgress: 0,
+    repairProgress: 0,
   };
 
   return {

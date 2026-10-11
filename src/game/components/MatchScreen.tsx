@@ -1,6 +1,5 @@
 import { useMemo, type CSSProperties } from "react";
 import { GAME_RULES } from "../constants";
-import { strongestWeatherForBiome } from "../simulation/environment";
 import {
   canDeployAnchor,
   isInsideSafeZone,
@@ -14,6 +13,7 @@ import { sampleWorld } from "../world/map";
 import type { WorldTimelineEvent } from "../world/timeline";
 import { ArenaRenderer } from "./ArenaRenderer";
 import { Minimap } from "./Minimap";
+import { TetherResources } from "./TetherResources";
 
 interface MatchScreenProps {
   state: GameState;
@@ -54,10 +54,6 @@ export function MatchScreen({ state, localPlayerId, opponentName, statusText, la
     "--oxygen-wash-opacity": oxygenPresentation.redWashOpacity,
   } as CSSProperties;
   const worldSample = sampleWorld(astronaut.position);
-  const localWeather = strongestWeatherForBiome(
-    state.activeWeather ?? [],
-    worldSample?.biome ?? "neutral",
-  );
   const lastWorldEvent = state.lastWorldEvent ?? null;
   const elapsedMs = Number.isFinite(state.elapsedMs)
     ? state.elapsedMs
@@ -112,7 +108,6 @@ export function MatchScreen({ state, localPlayerId, opponentName, statusText, la
         <div className="biome-status">
           <span>Biome</span>
           <strong>{formatBiome(worldSample?.biome ?? "neutral")}</strong>
-          {localWeather && <small>{formatEffect(localWeather.effect)} · L{localWeather.intensity}</small>}
         </div>
         {eventAnnouncement && (
           <div className="world-event-toast" role="status">{eventAnnouncement}</div>
@@ -139,10 +134,11 @@ export function MatchScreen({ state, localPlayerId, opponentName, statusText, la
           <div className="meter"><span className={oxygenRounded <= 30 ? "meter__fill meter__fill--danger" : "meter__fill"}
             style={{ width: `${oxygenRounded}%` }} /></div>
         </div>
-        <div className="resource-stack">
-          <div className="resource-pill" title="Carried salvage"><span>◆</span><strong>{astronaut.carriedSalvage} / 3</strong></div>
-          <small>{astronaut.tetherKits} tethers</small>
-        </div>
+        <TetherResources
+          bankedSalvage={astronaut.bankedSalvage}
+          carriedSalvage={astronaut.carriedSalvage}
+          tetherKits={astronaut.tetherKits}
+        />
         <button className="deploy-button" disabled={deployDisabled} onClick={onDeploy}
           aria-label="Deploy tether" aria-keyshortcuts="T" title="Deploy tether (T)">
           Deploy <kbd className="deploy-button__shortcut">T</kbd>
@@ -156,16 +152,9 @@ function describeWorldEvent(event: WorldTimelineEvent) {
   if (event.kind === "salvage_drop") {
     return `Supply drop · ${formatBiome(event.biome)} · ${event.amount} salvage`;
   }
-  if (event.kind === "biome_weather") {
-    return `${formatEffect(event.effect)} forming in ${formatBiome(event.biome)}`;
-  }
-  return "World system pulse";
+  return null;
 }
 
 function formatBiome(biome: string) {
   return biome.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
-
-function formatEffect(effect: string) {
-  return effect.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }

@@ -468,7 +468,14 @@ describe("RoomServer", () => {
         message.lastProcessedInput.player === 12 &&
         message.state.players.player.astronaut.movement.mode === "idle",
     );
-    expect(later.state.players.player.astronaut.position).toEqual(settledPosition);
+    const laterPosition = later.state.players.player.astronaut.position;
+    // The longer burst can now cross into taiga, where deterministic ambient
+    // drift continues while idle. A duplicate burst would travel many units;
+    // the normal between-snapshot drift remains well below one.
+    expect(Math.hypot(
+      laterPosition.x - settledPosition.x,
+      laterPosition.y - settledPosition.y,
+    )).toBeLessThan(1);
   });
 
   it("cancels charge on disconnect and accepts the next ordered input after reconnect", async () => {
@@ -603,6 +610,7 @@ describe("RoomServer", () => {
     if (!room?.gameState) throw new Error("Expected a running match");
 
     const ticksPerSecond = 20;
+    const initialDepositCount = room.gameState.salvage.length;
     const startTick = Math.floor(
       room.gameState.elapsedMs / 1_000 * ticksPerSecond,
     );
@@ -610,25 +618,23 @@ describe("RoomServer", () => {
       host,
       (message): message is Extract<ServerMessage, { type: "game_state" }> =>
         message.type === "game_state" &&
-        message.state.lastWorldEvent?.kind === "biome_weather" &&
-        message.state.activeWeather.length > 0,
+        message.state.lastWorldEvent?.kind === "salvage_drop" &&
+        message.state.salvage.length > initialDepositCount,
     );
     const guestEventPromise = waitForMessage(
       guest,
       (message): message is Extract<ServerMessage, { type: "game_state" }> =>
         message.type === "game_state" &&
-        message.state.lastWorldEvent?.kind === "biome_weather" &&
-        message.state.activeWeather.length > 0,
+        message.state.lastWorldEvent?.kind === "salvage_drop" &&
+        message.state.salvage.length > initialDepositCount,
     );
 
-    room.gameState.worldTimeline = createWorldTimeline("server-weather-snapshot", {
+    room.gameState.worldTimeline = createWorldTimeline("server-supply-snapshot", {
       startTick,
       rules: {
         ticksPerSecond,
         minimumIntervalTicks: 1,
         maximumIntervalTicks: 1,
-        minimumWeatherDurationTicks: 100,
-        maximumWeatherDurationTicks: 100,
         bounds: WORLD,
         biomeRegions: [{
           id: "water-snapshot-zone",
@@ -638,7 +644,7 @@ describe("RoomServer", () => {
           width: 30,
           height: 30,
         }],
-        eventWeights: { salvage_drop: 0, biome_weather: 1 },
+        eventWeights: { salvage_drop: 1, biome_weather: 0 },
       },
     });
     room.gameState.activeWeather = [];
@@ -652,10 +658,10 @@ describe("RoomServer", () => {
     expect(hostEvent.state.worldTimeline).toEqual(guestEvent.state.worldTimeline);
     expect(hostEvent.state.activeWeather).toEqual(guestEvent.state.activeWeather);
     expect(hostEvent.state.lastWorldEvent).toEqual(guestEvent.state.lastWorldEvent);
+    expect(hostEvent.state.salvage).toEqual(guestEvent.state.salvage);
     expect(hostEvent.state.worldTimeline.rules.bounds).toEqual(WORLD);
-    expect(hostEvent.state.activeWeather).toContainEqual(
-      hostEvent.state.lastWorldEvent,
-    );
+    expect(hostEvent.state.activeWeather).toEqual([]);
+    expect(hostEvent.state.salvage.length).toBeGreaterThan(initialDepositCount);
 
     const disconnectedPromise = waitForMessage(
       host,
@@ -671,6 +677,7 @@ describe("RoomServer", () => {
       worldTimeline: room.gameState.worldTimeline,
       activeWeather: room.gameState.activeWeather,
       lastWorldEvent: room.gameState.lastWorldEvent,
+      salvage: room.gameState.salvage,
     }));
 
     const resumedGuest = await connect(server);
@@ -695,6 +702,47 @@ describe("RoomServer", () => {
     expect(resumedState.state.lastWorldEvent).toEqual(
       frozenWorldState.lastWorldEvent,
     );
+    expect(resumedState.state.salvage).toEqual(frozenWorldState.salvage);
+  });
+
+  it("synchronizes an authoritative tether overload to both players", async () => {
+    const server = await createServer();
+    const { host, guest, hostWelcome } = await createStartedRoom(server);
+    const room = server.rooms.get(hostWelcome.room.code);
+    if (!room?.gameState) throw new Error("Expected a running match");
+
+    const targetPosition = {
+      ...room.gameState.players.rival.astronaut.position,
+    };
+    room.gameState.anchors = [{
+      id: "shared-overload-target",
+      owner: "player",
+      position: targetPosition,
+      parentId: "player-base",
+      powered: true,
+      disruptedUntilMs: null,
+      protectedUntilMs: null,
+      overloadProgress: 0.99,
+      repairProgress: 0,
+    }];
+
+    const overloaded = (message: ServerMessage): message is Extract<
+      ServerMessage,
+      { type: "game_state" }
+    > => message.type === "game_state" &&
+      typeof message.state.anchors[0]?.disruptedUntilMs === "number";
+    const [hostState, guestState] = await Promise.all([
+      waitForMessage(host, overloaded),
+      waitForMessage(guest, overloaded),
+    ]);
+
+    expect(hostState.stateVersion).toBe(guestState.stateVersion);
+    expect(hostState.state.anchors).toEqual(guestState.state.anchors);
+    expect(hostState.state.anchors[0]).toMatchObject({
+      powered: false,
+      overloadProgress: 0,
+      repairProgress: 0,
+    });
   });
 
   it("awards a timed match to the player controlling more territory", async () => {
@@ -709,6 +757,10 @@ describe("RoomServer", () => {
       position: { x: 105, y: 306 },
       parentId: "player-base",
       powered: true,
+      disruptedUntilMs: null,
+      protectedUntilMs: null,
+      overloadProgress: 0,
+      repairProgress: 0,
     }];
     room.gameState.remainingMs = 1;
 

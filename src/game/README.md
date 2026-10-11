@@ -22,6 +22,11 @@ React, browser APIs, or networking. Hooks and components may consume those
 rules. The server imports only explicitly listed headless modules through
 `tsconfig.server.json`.
 
+Tether conflict is proximity-driven inside the authoritative fixed-step
+simulation. Components may derive rings, hatching, and cable treatments from
+the compact anchor state, but presentation-only geometry must not be serialized
+into `GameState`.
+
 Use direct module imports inside the game rather than a catch-all barrel. This
 keeps client-only code out of the server build and makes dependency cycles
 visible. Keep each test beside the module it protects.

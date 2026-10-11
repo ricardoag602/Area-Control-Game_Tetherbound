@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent } from "react";
-import { GAME_RULES, WORLD } from "../constants";
+import { WORLD } from "../constants";
 import {
   buildChargeRadarPath,
   calculateChargeRadar,
@@ -7,7 +7,6 @@ import {
 } from "../presentation/chargeRadar";
 import { MOVEMENT_RULES } from "../movement/movement";
 import { getEnvironmentModifiers } from "../simulation/environment";
-import { baseId } from "../state";
 import {
   getScreenTouchChargeInput,
   getTankChargeInput,
@@ -33,6 +32,7 @@ import type {
 import { useFollowCamera } from "../hooks/useFollowCamera";
 import { useSmoothedPositions } from "../hooks/useSmoothedPositions";
 import { BiomeLayer } from "./BiomeLayer";
+import { TetherNetworkLayer } from "./TetherNetworkLayer";
 
 interface ArenaRendererProps {
   state: GameState;
@@ -428,8 +428,11 @@ export function ArenaRenderer({
       <rect width={WORLD.width} height={WORLD.height} fill="url(#world-grid)" />
       <rect className="world__boundary" width={WORLD.width} height={WORLD.height} />
 
-      <Network state={state} playerId="rival" />
-      <Network state={state} playerId="player" />
+      <TetherNetworkLayer
+        state={state}
+        renderPositions={renderPositions}
+        localPlayerId={localPlayerId}
+      />
 
       {state.salvage.filter((deposit) => !deposit.collected).map((deposit) => (
         <rect
@@ -463,52 +466,6 @@ export function ArenaRenderer({
         playerId="player"
       />
     </svg>
-  );
-}
-
-function Network({ state, playerId }: { state: GameState; playerId: PlayerId }) {
-  const player = state.players[playerId];
-  const anchors = state.anchors.filter((anchor) => anchor.owner === playerId && anchor.powered);
-  // The lookup lets each anchor draw a cable to its stored parent node by id.
-  const nodes = new Map<string, Vec2>([
-    [baseId(playerId), player.basePosition],
-    ...anchors.map((anchor) => [anchor.id, anchor.position] as [string, Vec2]),
-  ]);
-
-  return (
-    <g className={`world__network world__network--${playerId}`}>
-      <circle
-        className="world__safe-zone"
-        cx={player.basePosition.x}
-        cy={player.basePosition.y}
-        r={GAME_RULES.safeZoneRadius}
-      />
-      {anchors.map((anchor) => {
-        const parent = nodes.get(anchor.parentId);
-        return (
-          <g key={anchor.id}>
-            {parent && (
-              <line
-                className="world__cable"
-                x1={parent.x}
-                y1={parent.y}
-                x2={anchor.position.x}
-                y2={anchor.position.y}
-              />
-            )}
-            <circle
-              className="world__safe-zone"
-              cx={anchor.position.x}
-              cy={anchor.position.y}
-              r={GAME_RULES.safeZoneRadius}
-            />
-            <circle className="world__anchor" cx={anchor.position.x} cy={anchor.position.y} r="2" />
-          </g>
-        );
-      })}
-      <circle className="world__base-ring" cx={player.basePosition.x} cy={player.basePosition.y} r="5" />
-      <circle className="world__base-core" cx={player.basePosition.x} cy={player.basePosition.y} r="2.5" />
-    </g>
   );
 }
 

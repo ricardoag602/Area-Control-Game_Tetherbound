@@ -23,7 +23,7 @@ Tetherbound is a two-player, top-down mobile territory game. Rival astronauts ex
 - Astronauts move normally in safe zones and consume emergency oxygen outside them.
 - Astronauts collect alloy salvage from deposits and can carry up to three pieces.
 - Delivering three salvage pieces to a powered anchor fabricates one new tether anchor.
-- Each player can maintain up to eight deployed anchors.
+- Players can deploy every tether anchor they fabricate; collection and spacing are the limits.
 - Enemy tether connections can be disrupted through a short nearby interaction.
 - Disconnected anchors receive a brief reconnection grace period before shutting down.
 - Active territory generates score over a five-minute match.

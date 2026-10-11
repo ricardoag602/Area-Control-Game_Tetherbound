@@ -12,15 +12,15 @@ describe("camera framing", () => {
   it("uses a responsive view centered directly on the local player", () => {
     const view = calculateCameraViewBox({ x: 50, y: 80 }, 0.5, 1);
 
-    expect(view).toEqual({ x: 28.5, y: 37, width: 43, height: 86 });
+    expect(view).toEqual({ x: 27.5, y: 35, width: 45, height: 90 });
   });
 
   it("keeps the player center-locked by allowing overscan at world edges", () => {
     const center = { x: WORLD.width / 2, y: WORLD.height - 15 };
     const view = calculateCameraViewBox(center, 0.5, 1);
 
-    expect(view.y).toBe(center.y - 43);
-    expect(view.y + view.height).toBe(WORLD.height + 28);
+    expect(view.y).toBe(center.y - 45);
+    expect(view.y + view.height).toBe(WORLD.height + 30);
   });
 
   it("fits very wide viewports to the world width", () => {
@@ -46,10 +46,10 @@ describe("camera framing", () => {
     );
 
     expect(view).toEqual({
-      x: WORLD.width / 2 - 25.8,
-      y: WORLD.height / 2 - 43,
-      width: 51.6,
-      height: 86,
+      x: WORLD.width / 2 - 27,
+      y: WORLD.height / 2 - 45,
+      width: 54,
+      height: 90,
     });
     expect(Object.values(view).every(Number.isFinite)).toBe(true);
   });

@@ -19,6 +19,7 @@
     "src/game/simulation/match.ts",
     "src/game/simulation/playerController.ts",
     "src/game/simulation/scoring.ts",
+    "src/game/simulation/tetherConflict.ts",
     "src/game/simulation/tetherNetwork.ts",
     "src/game/simulation/worldSystems.ts",
     "src/game/state.ts",

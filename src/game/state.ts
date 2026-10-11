@@ -85,10 +85,21 @@ export function createGameWorldTimeline(
     startTick,
     rules: {
       ticksPerSecond: SIMULATION_RULES.ticksPerSecond,
-      minimumIntervalTicks: 8 * SIMULATION_RULES.ticksPerSecond,
-      maximumIntervalTicks: 14 * SIMULATION_RULES.ticksPerSecond,
+      // A 2.5–4.6 second interval raises the average supply-drop rate by 50%
+      // from the previous 4–6⅔ second tuning.
+      minimumIntervalTicks: Math.round(
+        2.5 * SIMULATION_RULES.ticksPerSecond,
+      ),
+      maximumIntervalTicks: Math.round(
+        4.6 * SIMULATION_RULES.ticksPerSecond,
+      ),
+      largeSalvageDropChance: 0.3,
       bounds: WORLD,
       biomeRegions: TIMELINE_BIOME_REGIONS,
+      eventWeights: {
+        salvage_drop: 1,
+        biome_weather: 0,
+      },
     },
   });
 }

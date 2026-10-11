@@ -7,6 +7,7 @@ import {
   getEnvironmentModifiers,
 } from "./environment";
 import { isAtDeliveryNode, isInsideSafeZone } from "./tetherNetwork";
+import { advanceTetherConflict } from "./tetherConflict";
 import { advanceWorldSystems, normalizeWorldSystems } from "./worldSystems";
 
 const DISTANCE_TIE_EPSILON = 1e-9;
@@ -110,6 +111,7 @@ function advanceMatchStep(
     if (!result.respawned) activePlayers.push(playerId);
   }
 
+  nextState = advanceTetherConflict(nextState, deltaSeconds, activePlayers);
   nextState = collectSalvage(nextState, activePlayers, movementPaths);
   nextState = deliverSalvage(nextState, activePlayers);
   return advanceWorldSystems(nextState);

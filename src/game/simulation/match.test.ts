@@ -18,13 +18,61 @@ import { createWorldTimeline } from "../world/timeline";
 describe("Tetherbound simulation", () => {
   it("recognizes the home base as a safe zone", () => {
     const state = createInitialGameState();
+    const base = state.players.player.basePosition;
+
+    expect(GAME_RULES.safeZoneRadius).toBeCloseTo(23.5, 10);
+    expect(
+      GAME_RULES.maximumLinkDistance - GAME_RULES.safeZoneRadius,
+    ).toBeGreaterThanOrEqual(GAME_RULES.deliveryRadius);
     expect(isInsideSafeZone(state, "player", state.players.player.basePosition)).toBe(true);
+    expect(isInsideSafeZone(state, "player", {
+      x: base.x + GAME_RULES.safeZoneRadius,
+      y: base.y,
+    })).toBe(true);
+    expect(isInsideSafeZone(state, "player", {
+      x: base.x + GAME_RULES.safeZoneRadius + 0.001,
+      y: base.y,
+    })).toBe(false);
   });
 
   it("keeps master event zones inside their matching rendered biomes", () => {
     const state = createInitialGameState("world-contract");
 
     expect(state.worldTimeline.rules.bounds).toEqual(WORLD);
+    expect(state.worldTimeline.rules).toMatchObject({
+      minimumIntervalTicks: Math.round(
+        2.5 * SIMULATION_RULES.ticksPerSecond,
+      ),
+      maximumIntervalTicks: Math.round(
+        4.6 * SIMULATION_RULES.ticksPerSecond,
+      ),
+      largeSalvageDropChance: 0.3,
+      eventWeights: {
+        salvage_drop: 1,
+        biome_weather: 0,
+      },
+    });
+
+    const averageIntervalTicks =
+      (state.worldTimeline.rules.minimumIntervalTicks +
+        state.worldTimeline.rules.maximumIntervalTicks) / 2;
+    const totalActiveWeight =
+      state.worldTimeline.rules.eventWeights.salvage_drop +
+      state.worldTimeline.rules.eventWeights.biome_weather;
+    const salvagePerTick =
+      (state.worldTimeline.rules.eventWeights.salvage_drop / totalActiveWeight) /
+      averageIntervalTicks;
+    const weatherPerTick =
+      (state.worldTimeline.rules.eventWeights.biome_weather / totalActiveWeight) /
+      averageIntervalTicks;
+
+    const previousAverageIntervalTicks =
+      (4 * SIMULATION_RULES.ticksPerSecond +
+        Math.floor(20 / 3 * SIMULATION_RULES.ticksPerSecond)) /
+      2;
+    const previousSalvagePerTick = 1 / previousAverageIntervalTicks;
+    expect(salvagePerTick / previousSalvagePerTick).toBeCloseTo(1.5, 2);
+    expect(weatherPerTick).toBe(0);
     for (const region of state.worldTimeline.rules.biomeRegions) {
       const inset = 0.001;
       const samples = [
@@ -288,12 +336,73 @@ describe("Tetherbound simulation", () => {
 
   it("deploys an anchor only within connection range", () => {
     const state = createInitialGameState();
-    state.players.player.astronaut.position = { x: 105, y: 308 };
+    const base = state.players.player.basePosition;
+    expect(GAME_RULES.maximumLinkDistance).toBe(84);
+    state.players.player.astronaut.position = {
+      x: base.x + GAME_RULES.maximumLinkDistance,
+      y: base.y,
+    };
     expect(canDeployAnchor(state, "player")).toBe(true);
 
     const deployed = deployAnchor(state, "player");
     expect(deployed.anchors.filter((anchor) => anchor.owner === "player")).toHaveLength(1);
+    expect(deployed.anchors[0].parentId).toBe("player-base");
     expect(deployed.players.player.astronaut.tetherKits).toBe(1);
+
+    const outsideRange = createInitialGameState();
+    outsideRange.players.player.astronaut.position = {
+      x: outsideRange.players.player.basePosition.x +
+        GAME_RULES.maximumLinkDistance + 0.001,
+      y: outsideRange.players.player.basePosition.y,
+    };
+    expect(canDeployAnchor(outsideRange, "player")).toBe(false);
+    expect(deployAnchor(outsideRange, "player")).toBe(outsideRange);
+  });
+
+  it("chains a maximum-length link through a powered anchor", () => {
+    const state = createInitialGameState();
+    state.anchors = [{
+      id: "long-link-parent",
+      owner: "player",
+      position: { x: 105, y: 250 },
+      parentId: "player-base",
+      powered: true,
+      disruptedUntilMs: null,
+      protectedUntilMs: null,
+      overloadProgress: 0,
+      repairProgress: 0,
+    }];
+    state.players.player.astronaut.position = { x: 105, y: 166 };
+
+    const deployed = deployAnchor(state, "player");
+
+    expect(deployed.anchors).toHaveLength(2);
+    expect(deployed.anchors[1].parentId).toBe("long-link-parent");
+  });
+
+  it("allows every collected tether kit to become an anchor without a cap", () => {
+    const state = createInitialGameState();
+    state.anchors = Array.from({ length: 12 }, (_, index) => ({
+      id: `uncapped-anchor-${index + 1}`,
+      owner: "player" as const,
+      position: { x: 20 + index * 8, y: 175 },
+      parentId: index === 0
+        ? "player-base"
+        : `uncapped-anchor-${index}`,
+      powered: true,
+      disruptedUntilMs: null,
+      protectedUntilMs: null,
+      overloadProgress: 0,
+      repairProgress: 0,
+    }));
+    state.players.player.astronaut.position = { x: 20 + 12 * 8, y: 175 };
+    state.players.player.astronaut.tetherKits = 1;
+
+    expect(canDeployAnchor(state, "player")).toBe(true);
+    const deployed = deployAnchor(state, "player");
+    expect(deployed.anchors.filter((anchor) => anchor.owner === "player"))
+      .toHaveLength(13);
+    expect(deployed.players.player.astronaut.tetherKits).toBe(0);
   });
 
   it("respawns at the base when oxygen is exhausted", () => {
@@ -359,6 +468,31 @@ describe("Tetherbound simulation", () => {
     expect(next.players.rival.astronaut.carriedSalvage).toBe(1);
   });
 
+  it("collects a six-item load while leaving a seventh deposit available", () => {
+    const state = createInitialGameState();
+    const pickupPosition = { x: 105, y: 175 };
+    state.players.player.astronaut.position = pickupPosition;
+    state.players.rival.astronaut.position = { x: 180, y: 175 };
+    state.salvage = Array.from(
+      { length: GAME_RULES.salvageCarryLimit + 1 },
+      (_, index) => ({
+        id: `capacity-${index + 1}`,
+        position: { ...pickupPosition },
+        collected: false,
+      }),
+    );
+
+    const next = advanceMatch(state, {}, 0);
+
+    expect(next.players.player.astronaut.carriedSalvage).toBe(
+      GAME_RULES.salvageCarryLimit,
+    );
+    expect(next.salvage.filter((deposit) => deposit.collected)).toHaveLength(
+      GAME_RULES.salvageCarryLimit,
+    );
+    expect(next.salvage.filter((deposit) => !deposit.collected)).toHaveLength(1);
+  });
+
   it("still delivers newly collected salvage at a powered node", () => {
     const state = createInitialGameState();
     const base = state.players.player.basePosition;
@@ -374,6 +508,70 @@ describe("Tetherbound simulation", () => {
     expect(next.salvage[0].collected).toBe(true);
     expect(next.players.player.astronaut.carriedSalvage).toBe(0);
     expect(next.players.player.astronaut.bankedSalvage).toBe(1);
+  });
+
+  it("collects and fabricates a recovery tether anywhere in the visible home zone", () => {
+    const state = createInitialGameState();
+    const astronaut = state.players.player.astronaut;
+    astronaut.tetherKits = 0;
+    astronaut.bankedSalvage = 2;
+    astronaut.position = {
+      x: state.players.player.basePosition.x + GAME_RULES.safeZoneRadius,
+      y: state.players.player.basePosition.y,
+    };
+    state.salvage = [{
+      id: "zero-tether-recovery",
+      position: { ...astronaut.position },
+      collected: false,
+    }];
+
+    const next = advanceMatch(state, {}, 0);
+
+    expect(next.salvage[0].collected).toBe(true);
+    expect(next.players.player.astronaut).toMatchObject({
+      carriedSalvage: 0,
+      bankedSalvage: 0,
+      tetherKits: 1,
+    });
+  });
+
+  it("keeps remote anchor delivery inside its smaller hand-in radius", () => {
+    const state = createInitialGameState();
+    const anchorPosition = { x: 105, y: 306 };
+    state.anchors = [{
+      id: "player-anchor-delivery-test",
+      owner: "player",
+      position: anchorPosition,
+      parentId: "player-base",
+      powered: true,
+      disruptedUntilMs: null,
+      protectedUntilMs: null,
+      overloadProgress: 0,
+      repairProgress: 0,
+    }];
+    state.players.player.astronaut.carriedSalvage = 1;
+    state.players.player.astronaut.position = {
+      x: anchorPosition.x + GAME_RULES.deliveryRadius + 0.01,
+      y: anchorPosition.y,
+    };
+
+    const outsideDeliveryRing = advanceMatch(state, {}, 0);
+
+    expect(outsideDeliveryRing.players.player.astronaut).toMatchObject({
+      carriedSalvage: 1,
+      bankedSalvage: 0,
+    });
+
+    outsideDeliveryRing.players.player.astronaut.position = {
+      x: anchorPosition.x + GAME_RULES.deliveryRadius,
+      y: anchorPosition.y,
+    };
+    const onDeliveryRing = advanceMatch(outsideDeliveryRing, {}, 0);
+
+    expect(onDeliveryRing.players.player.astronaut).toMatchObject({
+      carriedSalvage: 0,
+      bankedSalvage: 1,
+    });
   });
 
   it("collects salvage swept through by a burst without collecting nearby misses", () => {

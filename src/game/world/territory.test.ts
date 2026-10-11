@@ -41,24 +41,25 @@ describe("territory grid", () => {
     expect(ownerNearest(grid, { x: 195, y: 155 })).toBe("neutral");
   });
 
-  it("awards overlapping coverage to the nearest powered node", () => {
+  it("marks all overlapping coverage as contested", () => {
     const state = stateWithDistantBases();
     state.anchors = [
-      anchor("player-anchor", "player", { x: 95, y: 155 }),
+      anchor("player-anchor", "player", { x: 85, y: 155 }),
       anchor("rival-anchor", "rival", { x: 125, y: 155 }),
     ];
 
     const grid = sampleTerritoryGrid(state);
 
-    expect(ownerAt(grid, 105, 155)).toBe("player");
-    expect(ownerAt(grid, 115, 155)).toBe("rival");
+    expect(ownerAt(grid, 105, 155)).toBe("contested");
+    expect(ownerAt(grid, 85, 155)).toBe("player");
+    expect(ownerAt(grid, 125, 155)).toBe("rival");
   });
 
   it("marks exact nearest-node ties as contested", () => {
     const state = stateWithDistantBases();
     state.anchors = [
-      anchor("player-anchor", "player", { x: 95, y: 155 }),
-      anchor("rival-anchor", "rival", { x: 115, y: 155 }),
+      anchor("player-anchor", "player", { x: 85, y: 155 }),
+      anchor("rival-anchor", "rival", { x: 125, y: 155 }),
     ];
 
     const grid = sampleTerritoryGrid(state);
@@ -136,6 +137,10 @@ function anchor(
     position,
     parentId: `${owner}-base`,
     powered,
+    disruptedUntilMs: null,
+    protectedUntilMs: null,
+    overloadProgress: 0,
+    repairProgress: 0,
   };
 }
 

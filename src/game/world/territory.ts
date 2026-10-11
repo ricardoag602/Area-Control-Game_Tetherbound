@@ -35,7 +35,6 @@ export interface TerritoryGridOptions {
 export const TERRITORY_GRID_RULES = {
   /** Ten world units per block keeps the default grid intentionally pixel-like. */
   blockSize: 10,
-  distanceTieEpsilon: 1e-9,
   maximumGridDimension: 256,
 } as const;
 
@@ -46,8 +45,9 @@ interface TerritoryNode {
 
 /**
  * Samples powered tether coverage into a renderer-independent, row-major grid.
- * A block covered by both networks belongs to the closest powered node. Exact
- * distance ties remain contested so neither player receives ordering priority.
+ * Any block covered by both networks is contested. Neither side scores an
+ * overlap until one network pushes the other offline, making pressure legible
+ * and preventing draw order or tiny distance changes from deciding ownership.
  */
 export function sampleTerritoryGrid(
   state: GameState,
@@ -128,14 +128,7 @@ function resolveTerritoryOwner(
   if (!rivalClaims) return "player";
   if (!playerClaims) return "rival";
 
-  if (
-    Math.abs(playerDistanceSquared - rivalDistanceSquared) <=
-    TERRITORY_GRID_RULES.distanceTieEpsilon
-  ) {
-    return "contested";
-  }
-
-  return playerDistanceSquared < rivalDistanceSquared ? "player" : "rival";
+  return "contested";
 }
 
 function normalizeGridDimension(value: number | undefined, fallback: number) {

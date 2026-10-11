@@ -1,10 +1,14 @@
 import { GAME_RULES } from "../constants";
 import { distance } from "../geometry";
 import { canDeployAnchor, getPoweredNodes } from "../simulation/tetherNetwork";
+import { isAnchorDirectlyDisrupted } from "../simulation/tetherConflict";
 import type { PlayerCommand } from "../simulation/playerController";
-import type { GameState, PlayerId, Vec2 } from "../types";
+import type { Anchor, GameState, PlayerId, Vec2 } from "../types";
 
 const LOW_OXYGEN_THRESHOLD = 35;
+const ATTACK_OXYGEN_THRESHOLD = 62;
+const CONFLICT_SEEK_RADIUS = 34;
+const PREFERRED_LINK_DISTANCE_RATIO = 0.75;
 
 /**
  * A deliberately small bot policy. It can only use the same two commands the
@@ -20,20 +24,54 @@ export function getBotCommand(state: GameState, playerId: PlayerId): PlayerComma
     astronaut.position,
     getPoweredNodes(state, playerId).map((node) => node.position),
   );
+  const poweredNodeDistance = poweredNode
+    ? distance(astronaut.position, poweredNode)
+    : Number.POSITIVE_INFINITY;
+  // Save limited kits for meaningful extensions instead of dropping them as
+  // soon as the seven-unit minimum spacing becomes legal.
+  const readyToExtendNetwork = poweredNodeDistance >=
+    GAME_RULES.maximumLinkDistance * PREFERRED_LINK_DISTANCE_RATIO;
   const shouldReturn =
     astronaut.oxygen <= LOW_OXYGEN_THRESHOLD ||
     astronaut.carriedSalvage >= GAME_RULES.salvageCarryLimit;
 
   let moveTarget: Vec2 | null = null;
+  let pursuingConflict = false;
   if (shouldReturn) {
     moveTarget = poweredNode;
   } else {
-    moveTarget = closestPosition(
+    const repairTarget = closestAnchor(
       astronaut.position,
-      state.salvage
-        .filter((deposit) => !deposit.collected)
-        .map((deposit) => deposit.position),
+      state.anchors.filter(
+        (anchor) =>
+          anchor.owner === playerId &&
+          isAnchorDirectlyDisrupted(anchor, state.elapsedMs) &&
+          parentIsPowered(state, anchor),
+      ),
+      CONFLICT_SEEK_RADIUS,
     );
+    const enemyTarget = astronaut.oxygen >= ATTACK_OXYGEN_THRESHOLD
+      ? closestAnchor(
+          astronaut.position,
+          state.anchors.filter(
+            (anchor) => anchor.owner !== playerId && anchor.powered,
+          ),
+          CONFLICT_SEEK_RADIUS,
+        )
+      : null;
+
+    const conflictTarget = repairTarget ?? enemyTarget;
+    if (conflictTarget) {
+      moveTarget = conflictTarget.position;
+      pursuingConflict = true;
+    } else {
+      moveTarget = closestPosition(
+        astronaut.position,
+        state.salvage
+          .filter((deposit) => !deposit.collected)
+          .map((deposit) => deposit.position),
+      );
+    }
 
     // Bank any remaining salvage after the map has been cleared.
     if (!moveTarget && astronaut.carriedSalvage > 0) {
@@ -43,8 +81,29 @@ export function getBotCommand(state: GameState, playerId: PlayerId): PlayerComma
 
   return {
     movementCommands: moveTarget ? [{ type: "walk", target: moveTarget }] : [{ type: "stop" }],
-    deployAnchor: canDeployAnchor(state, playerId),
+    deployAnchor:
+      !pursuingConflict &&
+      readyToExtendNetwork &&
+      canDeployAnchor(state, playerId),
   };
+}
+
+function closestAnchor(
+  origin: Vec2,
+  anchors: Anchor[],
+  maximumDistance: number,
+) {
+  const closest = anchors
+    .map((anchor) => ({ anchor, distance: distance(origin, anchor.position) }))
+    .sort((a, b) => a.distance - b.distance || a.anchor.id.localeCompare(b.anchor.id))[0];
+  return closest && closest.distance <= maximumDistance ? closest.anchor : null;
+}
+
+function parentIsPowered(state: GameState, anchor: Anchor) {
+  if (anchor.parentId === `${anchor.owner}-base`) return true;
+  return state.anchors.some(
+    (candidate) => candidate.id === anchor.parentId && candidate.powered,
+  );
 }
 
 function closestPosition(origin: Vec2, positions: Vec2[]): Vec2 | null {

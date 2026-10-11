@@ -61,6 +61,7 @@ export interface WorldTimelineRules {
   minimumEffectDurationTicks: number;
   maximumEffectDurationTicks: number;
   maximumSalvageAmount: number;
+  largeSalvageDropChance: number;
   bounds: WorldBounds;
   biomeRegions: BiomeRegion[];
   eventWeights: WorldEventWeights;
@@ -76,6 +77,7 @@ export interface WorldTimelineRuleOverrides {
   minimumEffectDurationTicks?: number;
   maximumEffectDurationTicks?: number;
   maximumSalvageAmount?: number;
+  largeSalvageDropChance?: number;
   bounds?: Partial<WorldBounds>;
   biomeRegions?: readonly BiomeRegion[];
   eventWeights?: Partial<WorldEventWeights>;
@@ -208,6 +210,7 @@ export const DEFAULT_WORLD_TIMELINE_RULES: Readonly<WorldTimelineRules> = {
   minimumEffectDurationTicks: 100,
   maximumEffectDurationTicks: 240,
   maximumSalvageAmount: 2,
+  largeSalvageDropChance: 0.3,
   bounds: DEFAULT_BOUNDS,
   biomeRegions: createQuadrantBiomes(DEFAULT_BOUNDS),
   eventWeights: DEFAULT_EVENT_WEIGHTS,
@@ -437,6 +440,9 @@ function resolveRules(
     maximumSalvageAmount:
       overrides.maximumSalvageAmount ??
       DEFAULT_WORLD_TIMELINE_RULES.maximumSalvageAmount,
+    largeSalvageDropChance:
+      overrides.largeSalvageDropChance ??
+      DEFAULT_WORLD_TIMELINE_RULES.largeSalvageDropChance,
     bounds,
     biomeRegions,
     eventWeights: {
@@ -474,6 +480,13 @@ function validateRules(rules: WorldTimelineRules): void {
     "maximumEffectDurationTicks",
   );
   assertPositiveInteger(rules.maximumSalvageAmount, "maximumSalvageAmount");
+  if (
+    !Number.isFinite(rules.largeSalvageDropChance) ||
+    rules.largeSalvageDropChance < 0 ||
+    rules.largeSalvageDropChance > 1
+  ) {
+    throw new RangeError("largeSalvageDropChance must be between 0 and 1.");
+  }
 
   if (rules.minimumIntervalTicks > rules.maximumIntervalTicks) {
     throw new RangeError(
@@ -561,11 +574,12 @@ function generateEvent(
   switch (kindSample.kind) {
     case "salvage_drop": {
       const location = generateLocation(payloadRandomState, rules.biomeRegions);
-      const amount = randomInteger(
-        location.state,
-        1,
-        rules.maximumSalvageAmount,
-      );
+      const largeDropRoll = nextRandom(location.state);
+      const amount =
+        rules.maximumSalvageAmount > 1 &&
+        largeDropRoll.value < rules.largeSalvageDropChance
+          ? rules.maximumSalvageAmount
+          : 1;
       return {
         randomState: payloadSeedSample.state,
         event: {
@@ -575,7 +589,7 @@ function generateEvent(
           regionId: location.region.id,
           biome: location.region.biome,
           position: location.position,
-          amount: amount.value,
+          amount,
         },
       };
     }

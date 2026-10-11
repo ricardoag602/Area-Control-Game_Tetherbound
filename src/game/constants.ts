@@ -13,12 +13,27 @@ export const GAME_RULES = {
   oxygenMaximum: 100,
   oxygenDrainPerSecond: 9,
   oxygenRecoveryPerSecond: 22,
-  safeZoneRadius: 18,
-  maximumLinkDistance: 28,
+  safeZoneRadius: 23.5,
+  // Long links let one deliberate expedition create meaningful map progress.
+  maximumLinkDistance: 84,
   minimumAnchorSpacing: 7,
   collectionRadius: 3.5,
   deliveryRadius: 4.5,
-  salvageCarryLimit: 3,
+  salvageCarryLimit: 6,
   salvagePerTether: 3,
-  maximumAnchorsPerPlayer: 8,
+  /** Radius around an anchor where astronauts can overload or repair it. */
+  anchorInteractionRadius: 6.5,
+  /** Unopposed time required to knock an enemy anchor offline. */
+  anchorOverloadSeconds: 2.1,
+  /** Idle overload progress drains slowly so a committed push still matters. */
+  anchorOverloadDecayPerSecond: 0.32,
+  /** A nearby defender scrubs hostile progress more quickly. */
+  anchorDefenseRecoveryPerSecond: 0.72,
+  /** Time an overloaded anchor remains offline without an astronaut repair. */
+  anchorDisruptionDurationMs: 12_000,
+  /** Time required for an owner to restore a directly disrupted anchor. */
+  anchorRepairSeconds: 1.35,
+  anchorRepairDecayPerSecond: 0.5,
+  /** Brief immunity keeps a recovered node from being camped indefinitely. */
+  anchorReactivationShieldMs: 2_500,
 } as const;

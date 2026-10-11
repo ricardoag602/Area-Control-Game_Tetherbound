@@ -7,7 +7,7 @@ import type { Vec2 } from "../types";
  */
 export const CAMERA_RULES = {
   // A slightly wider resting frame gives the player more room to read terrain.
-  baseVisibleHeight: 86,
+  baseVisibleHeight: 90,
   maximumChargeZoomOut: 0.1,
   chargeZoomDecayRate: 4,
   // Allows charge zoom-out, spring overshoot, and low-oxygen zoom to combine.

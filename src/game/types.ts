@@ -58,7 +58,16 @@ export interface Anchor {
   owner: PlayerId;
   position: Vec2;
   parentId: string;
+  /** Derived from this anchor's disruption and the power of every ancestor. */
   powered: boolean;
+  /** Match-clock deadline for a direct overload. Null means locally healthy. */
+  disruptedUntilMs: number | null;
+  /** Match-clock deadline for post-recovery overload immunity. */
+  protectedUntilMs: number | null;
+  /** Normalized hostile hold progress, rendered as the outer warning arc. */
+  overloadProgress: number;
+  /** Normalized owner repair progress, rendered as the inner recovery arc. */
+  repairProgress: number;
 }
 
 export interface SalvageDeposit {

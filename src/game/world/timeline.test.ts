@@ -136,6 +136,34 @@ describe("world event timeline", () => {
     }
   });
 
+  it("makes 30% of supply drops large while keeping the result deterministic", () => {
+    const timeline = createWorldTimeline("large-supply-drops", {
+      rules: {
+        minimumIntervalTicks: 1,
+        maximumIntervalTicks: 1,
+        maximumEventsPerAdvance: 64,
+        maximumSalvageAmount: 2,
+        largeSalvageDropChance: 0.3,
+        eventWeights: { salvage_drop: 1, biome_weather: 0 },
+      },
+    });
+    const first = collectThrough(timeline, 2_000).events;
+    const second = collectThrough(timeline, 2_000).events;
+    const largeDropCount = first.filter(
+      (event) => event.kind === "salvage_drop" && event.amount === 2,
+    ).length;
+
+    expect(second).toEqual(first);
+    expect(largeDropCount / first.length).toBeCloseTo(0.3, 1);
+    expect(
+      new Set(
+        first.map((event) =>
+          event.kind === "salvage_drop" ? event.amount : 0,
+        ),
+      ),
+    ).toEqual(new Set([1, 2]));
+  });
+
   it("caps a catch-up pass without dropping overdue events", () => {
     const initial = createWorldTimeline(9, {
       rules: {
@@ -213,6 +241,11 @@ describe("world event timeline", () => {
         rules: { minimumIntervalTicks: 2, maximumIntervalTicks: 1 },
       }),
     ).toThrow(/minimumIntervalTicks/);
+    expect(() =>
+      createWorldTimeline(1, {
+        rules: { largeSalvageDropChance: 1.01 },
+      }),
+    ).toThrow(/largeSalvageDropChance/);
     expect(() =>
       createWorldTimeline(1, {
         rules: {

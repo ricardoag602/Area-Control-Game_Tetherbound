@@ -69,7 +69,7 @@ Add only after the core game is balanced.
 
 - Four buffs: Emergency Oxygen, Thruster Burst, Repair Drone, Anchor Overcharge
 - One announced event: Meteor Impact
-- One weather system with a clear temporary effect
+- Additional announced world events only after supply-drop playtesting
 - Tunable map and match constants
 
 **Exit condition:** Events create interesting detours without deciding the match through randomness.
@@ -77,7 +77,7 @@ Add only after the core game is balanced.
 ## Milestone 6: Presentation and release
 
 - Final visual theme and mission-patch customization
-- Audio layers and weather cues
+- Audio layers and supply-drop cues
 - Performance and battery testing on phones
 - Automated rules and multiplayer tests
 - Public deployment, analytics, and submission materials

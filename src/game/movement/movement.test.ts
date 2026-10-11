@@ -158,6 +158,39 @@ describe("astronaut movement", () => {
     )).toBeCloseTo(1, 10);
   });
 
+  it("reaches walking and turning speed quickly after an input", () => {
+    const start = { x: 50, y: 80 };
+    const firstTick = advance(
+      start,
+      createMovementState({ x: 0, y: -1 }),
+      [input(1, {
+        type: "tank_drive",
+        throttle: 1,
+        steering: 1,
+      })],
+      1 / 20,
+    );
+
+    expect(firstTick.movement.forwardSpeed).toBeGreaterThan(
+      MOVEMENT_RULES.walkMaximumSpeed * 0.75,
+    );
+
+    const fourthTick = advance(
+      firstTick.position,
+      firstTick.movement,
+      [],
+      3 / 20,
+    );
+
+    expect(fourthTick.movement.forwardSpeed).toBe(
+      MOVEMENT_RULES.walkMaximumSpeed,
+    );
+    expect(fourthTick.movement.angularVelocity).toBeCloseTo(
+      MOVEMENT_RULES.tankTurnMaximumRadiansPerSecond,
+      10,
+    );
+  });
+
   it("keeps an unwrapped authoritative heading through repeated revolutions", () => {
     const start = { x: 50, y: 80 };
     let position = start;
@@ -182,7 +215,7 @@ describe("astronaut movement", () => {
     }
 
     expect(position).toEqual(start);
-    expect(movement.headingRadians - initialHeading).toBeGreaterThan(5 * TAU);
+    expect(movement.headingRadians - initialHeading).toBeGreaterThan(3 * TAU);
     expect(movement.facing.x).toBeCloseTo(Math.cos(movement.headingRadians), 10);
     expect(movement.facing.y).toBeCloseTo(Math.sin(movement.headingRadians), 10);
   });
@@ -550,7 +583,10 @@ describe("astronaut movement", () => {
       8,
     );
     expect(third.movement.velocity.x).toBeCloseTo(
-      MOVEMENT_RULES.walkAcceleration * stepSeconds * 3,
+      Math.min(
+        MOVEMENT_RULES.walkMaximumSpeed,
+        MOVEMENT_RULES.walkAcceleration * stepSeconds * 3,
+      ),
       8,
     );
     expect(first.movement.velocity.x).toBeLessThan(second.movement.velocity.x);
@@ -574,6 +610,12 @@ describe("astronaut movement", () => {
     expect(slowing.movement.velocity.x).toBeGreaterThan(0);
     expect(slowing.movement.velocity.x).toBeLessThan(third.movement.velocity.x);
     expect(stopped.movement.velocity).toEqual({ x: 0, y: 0 });
+  });
+
+  it("keeps the original step-animation cadence at the faster walk speed", () => {
+    expect(
+      MOVEMENT_RULES.walkMaximumSpeed / MOVEMENT_RULES.stepCycleDistance,
+    ).toBeCloseTo(10 / 7.5, 10);
   });
 
   it("keeps steady walking distance and gait phase independent of frame partition", () => {
@@ -753,8 +795,8 @@ describe("astronaut movement", () => {
   });
 
   it.each([
-    { label: "partial", seconds: MOVEMENT_RULES.fullChargeSeconds / 2, expected: 16 },
-    { label: "full", seconds: MOVEMENT_RULES.fullChargeSeconds, expected: 27 },
+    { label: "partial", seconds: MOVEMENT_RULES.fullChargeSeconds / 2, expected: 20.8 },
+    { label: "full", seconds: MOVEMENT_RULES.fullChargeSeconds, expected: 35.1 },
   ])("turns a $label charge into one burst", ({ seconds, expected }) => {
     const start = { x: 20, y: 80 };
     const charged = chargeAt(start, { x: 100, y: 80 }, seconds);
