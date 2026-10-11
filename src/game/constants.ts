@@ -10,6 +10,23 @@ export const SIMULATION_RULES = {
 
 export const GAME_RULES = {
   matchDurationMs: 5 * 60 * 1000,
+  /** Opening portion of regulation in which territory does not score. */
+  setupDurationMs: 30 * 1000,
+  /** Closing portion of regulation in which territory earns bonus points. */
+  scoreSurgeDurationMs: 60 * 1000,
+  scoreSurgeMultiplier: 1.5,
+  /** Regulation enters overtime when the scores differ by at most this ratio. */
+  overtimeScoreMarginRatio: 0.03,
+  overtimeDurationMs: 60 * 1000,
+  /** Overtime-only score advantage required for an immediate win. */
+  overtimeLeadPoints: 5,
+  /** Radius of the hold zone around a vulnerable enemy base. */
+  baseCollapseRadius: 8,
+  baseCollapseHoldMs: 12 * 1000,
+  /** Seconds of unattended capture progress lost per elapsed second. */
+  baseCollapseDecayPerSecond: 1,
+  /** Defender presence clears capture progress more quickly. */
+  baseCollapseDefenseRecoveryPerSecond: 3,
   oxygenMaximum: 100,
   oxygenDrainPerSecond: 9,
   oxygenRecoveryPerSecond: 22,
@@ -30,7 +47,7 @@ export const GAME_RULES = {
   /** A nearby defender scrubs hostile progress more quickly. */
   anchorDefenseRecoveryPerSecond: 0.72,
   /** Time an overloaded anchor remains offline without an astronaut repair. */
-  anchorDisruptionDurationMs: 12_000,
+  anchorDisruptionDurationMs: 20_000,
   /** Time required for an owner to restore a directly disrupted anchor. */
   anchorRepairSeconds: 1.35,
   anchorRepairDecayPerSecond: 0.5,

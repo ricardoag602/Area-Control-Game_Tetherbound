@@ -63,6 +63,29 @@ export function App() {
     }
   }, [roomSession.room]);
 
+  useEffect(() => {
+    if (
+      gameMode !== "multiplayer" ||
+      roomSession.connection !== "offline" ||
+      !roomSession.error ||
+      (view !== "lobby" && view !== "game" && view !== "result")
+    ) {
+      return;
+    }
+
+    // A non-recoverable resume failure (for example, returning after the
+    // reserved slot expired) must not strand the player on a frozen match.
+    // Keep the code and server explanation visible so they can retry or leave.
+    if (roomSession.room?.code) setJoinRoomCode(roomSession.room.code);
+    setView("join-room");
+  }, [
+    gameMode,
+    roomSession.connection,
+    roomSession.error,
+    roomSession.room?.code,
+    view,
+  ]);
+
   function startBotGame() {
     roomClient.leave();
     clearRoomFromUrl();

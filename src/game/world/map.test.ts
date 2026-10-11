@@ -116,6 +116,31 @@ describe("deterministic world model", () => {
     }
   });
 
+  it("gives rotationally mirrored routes identical gameplay tuning", () => {
+    expect(BIOME_DEFINITIONS.water.effects).toEqual(
+      BIOME_DEFINITIONS.taiga.effects,
+    );
+    expect(BIOME_DEFINITIONS.jungle.effects).toEqual(
+      BIOME_DEFINITIONS.desert.effects,
+    );
+  });
+
+  it("keeps terrain effects symmetric across the full arena rotation", () => {
+    for (let y = 0; y <= WORLD_BOUNDS.height; y += 1) {
+      for (let x = 0; x <= WORLD_BOUNDS.width; x += 1) {
+        const effects = sampleWorld({ x, y })?.effects;
+        const rotatedEffects = sampleWorld({
+          x: WORLD_BOUNDS.width - x,
+          y: WORLD_BOUNDS.height - y,
+        })?.effects;
+        expect(
+          rotatedEffects,
+          `terrain mismatch at (${x}, ${y}) and its rotated counterpart`,
+        ).toEqual(effects);
+      }
+    }
+  });
+
   it("returns the biome, region, and exact shared effect metadata together", () => {
     const sample = sampleWorld({ x: 20, y: 80 });
 

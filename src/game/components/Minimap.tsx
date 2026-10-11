@@ -42,7 +42,7 @@ export function Minimap({
     <div
       className="minimap"
       role="img"
-      aria-label={`Territory minimap. Your network controls ${localScore} percent.`}
+      aria-label={`Territory minimap. Your network covers ${localScore} percent of the full map; guaranteed home-zone cells do not add to signal score.`}
     >
       <svg
         viewBox={`0 0 ${WORLD.width} ${WORLD.height}`}

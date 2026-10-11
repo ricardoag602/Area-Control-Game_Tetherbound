@@ -1,7 +1,7 @@
 import { once } from "node:events";
 import { afterEach, describe, expect, it } from "vitest";
 import WebSocket from "ws";
-import { WORLD } from "../src/game/constants";
+import { GAME_RULES, WORLD } from "../src/game/constants";
 import { MOVEMENT_RULES } from "../src/game/movement/movement";
 import { createWorldTimeline } from "../src/game/world/timeline";
 import type { ClientMessage, ServerMessage } from "../src/network/protocol";
@@ -745,23 +745,15 @@ describe("RoomServer", () => {
     });
   });
 
-  it("awards a timed match to the player controlling more territory", async () => {
+  it("awards regulation to the player with the higher cumulative score", async () => {
     const server = await createServer();
     const { host, hostWelcome } = await createStartedRoom(server);
     const room = server.rooms.get(hostWelcome.room.code);
     if (!room?.gameState) throw new Error("Expected a running match");
 
-    room.gameState.anchors = [{
-      id: "player-territory-lead",
-      owner: "player",
-      position: { x: 105, y: 306 },
-      parentId: "player-base",
-      powered: true,
-      disruptedUntilMs: null,
-      protectedUntilMs: null,
-      overloadProgress: 0,
-      repairProgress: 0,
-    }];
+    room.gameState.matchPhase = "regulation";
+    room.gameState.elapsedMs = GAME_RULES.setupDurationMs;
+    room.gameState.scores = { player: 20, rival: 10 };
     room.gameState.remainingMs = 1;
 
     const finished = await waitForMessage(
@@ -769,7 +761,7 @@ describe("RoomServer", () => {
       (message): message is Extract<ServerMessage, { type: "room_state" }> =>
         message.type === "room_state" && message.room.phase === "finished",
     );
-    expect(finished.room.finishReason).toBe("time");
+    expect(finished.room.finishReason).toBe("regulation_score");
     expect(finished.room.winner).toBe("player");
   });
 
@@ -781,6 +773,8 @@ describe("RoomServer", () => {
 
     room.gameState.players.player.astronaut.oxygen = 7;
     room.gameState.players.player.astronaut.respawns = 3;
+    room.gameState.matchPhase = "overtime";
+    room.gameState.overtimeElapsedMs = 59_999;
     room.gameState.remainingMs = 1;
 
     const finishedPromise = waitForMessage(
@@ -789,7 +783,7 @@ describe("RoomServer", () => {
         message.type === "room_state" && message.room.phase === "finished",
     );
     const finished = await finishedPromise;
-    expect(finished.room.finishReason).toBe("time");
+    expect(finished.room.finishReason).toBe("overtime_territory");
     expect(finished.room.winner).toBe("draw");
     expect(finished.room.players.every((player) => !player.ready)).toBe(true);
 
@@ -825,5 +819,75 @@ describe("RoomServer", () => {
       hostInitial.state.players.player.astronaut.oxygen,
     );
     expect(hostRematchState.state.players.player.astronaut.respawns).toBe(0);
+  });
+
+  it("starts a fully voted rematch when the disconnected player reconnects", async () => {
+    const server = await createServer();
+    const { host, guest, hostWelcome, guestWelcome } = await createStartedRoom(server);
+    const room = server.rooms.get(hostWelcome.room.code);
+    if (!room?.gameState) throw new Error("Expected a running match");
+
+    room.gameState.matchPhase = "overtime";
+    room.gameState.overtimeElapsedMs = GAME_RULES.overtimeDurationMs - 1;
+    room.gameState.remainingMs = 1;
+    await waitForMessage(
+      host,
+      (message): message is Extract<ServerMessage, { type: "room_state" }> =>
+        message.type === "room_state" && message.room.phase === "finished",
+    );
+
+    const guestVote = waitForMessage(
+      host,
+      (message): message is Extract<ServerMessage, { type: "room_state" }> =>
+        message.type === "room_state" &&
+        message.room.phase === "finished" &&
+        message.room.players.some(
+          (player) => player.id === "rival" && player.ready,
+        ),
+    );
+    send(guest, { type: "request_rematch" });
+    await guestVote;
+
+    const disconnected = waitForMessage(
+      host,
+      (message): message is Extract<ServerMessage, { type: "room_state" }> =>
+        message.type === "room_state" &&
+        message.room.players.some(
+          (player) => player.id === "rival" && !player.connected,
+        ),
+    );
+    guest.terminate();
+    await disconnected;
+
+    const hostVote = waitForMessage(
+      host,
+      (message): message is Extract<ServerMessage, { type: "room_state" }> =>
+        message.type === "room_state" &&
+        message.room.phase === "finished" &&
+        message.room.players.every((player) => player.ready),
+    );
+    send(host, { type: "request_rematch" });
+    await hostVote;
+
+    const resumedGuest = await connect(server);
+    const welcome = waitForMessage(resumedGuest, isWelcome);
+    const restartedRoom = waitForMessage(
+      host,
+      (message): message is Extract<ServerMessage, { type: "room_state" }> =>
+        message.type === "room_state" && message.room.phase === "playing",
+    );
+    const restartedState = waitForMessage(host, isGameState);
+    send(resumedGuest, {
+      type: "join_room",
+      requestId: "ready-rematch-reconnect",
+      code: hostWelcome.room.code,
+      name: "Guest",
+      sessionToken: guestWelcome.sessionToken,
+    });
+
+    expect((await welcome).reconnected).toBe(true);
+    expect((await restartedRoom).room.players.every((player) => !player.ready))
+      .toBe(true);
+    expect((await restartedState).state.matchPhase).toBe("setup");
   });
 });

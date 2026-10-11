@@ -13,8 +13,8 @@ const RIVAL_BASE = WORLD_BASE_SLOTS.north.basePosition;
 const TIMELINE_BIOME_REGIONS: TimelineBiomeRegion[] = [
   { id: "water-event-zone", biome: "water", x: 6, y: 65, width: 82, height: 90 },
   { id: "jungle-event-zone", biome: "jungle", x: 122, y: 65, width: 82, height: 90 },
-  { id: "desert-event-zone", biome: "desert", x: 6, y: 195, width: 82, height: 85 },
-  { id: "taiga-event-zone", biome: "taiga", x: 122, y: 195, width: 82, height: 85 },
+  { id: "desert-event-zone", biome: "desert", x: 6, y: 195, width: 82, height: 90 },
+  { id: "taiga-event-zone", biome: "taiga", x: 122, y: 195, width: 82, height: 90 },
 ];
 
 export function createInitialGameState(seed: number | string = "local-sandbox"): GameState {
@@ -22,6 +22,13 @@ export function createInitialGameState(seed: number | string = "local-sandbox"):
     elapsedMs: 0,
     simulationRemainderMs: 0,
     pendingInputs: {},
+    matchPhase: "setup",
+    scores: { player: 0, rival: 0 },
+    overtimeScores: { player: 0, rival: 0 },
+    overtimeElapsedMs: 0,
+    hasDeployedAnchor: { player: false, rival: false },
+    baseCollapseProgressMs: { player: 0, rival: 0 },
+    matchOutcome: null,
     remainingMs: GAME_RULES.matchDurationMs,
     nextAnchorId: 1,
     worldTimeline: createGameWorldTimeline(seed),

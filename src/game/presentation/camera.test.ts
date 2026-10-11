@@ -12,15 +12,15 @@ describe("camera framing", () => {
   it("uses a responsive view centered directly on the local player", () => {
     const view = calculateCameraViewBox({ x: 50, y: 80 }, 0.5, 1);
 
-    expect(view).toEqual({ x: 27.5, y: 35, width: 45, height: 90 });
+    expect(view).toEqual({ x: 26, y: 32, width: 48, height: 96 });
   });
 
   it("keeps the player center-locked by allowing overscan at world edges", () => {
     const center = { x: WORLD.width / 2, y: WORLD.height - 15 };
     const view = calculateCameraViewBox(center, 0.5, 1);
 
-    expect(view.y).toBe(center.y - 45);
-    expect(view.y + view.height).toBe(WORLD.height + 30);
+    expect(view.y).toBe(center.y - 48);
+    expect(view.y + view.height).toBe(WORLD.height + 33);
   });
 
   it("fits very wide viewports to the world width", () => {
@@ -45,12 +45,10 @@ describe("camera framing", () => {
       Number.NaN,
     );
 
-    expect(view).toEqual({
-      x: WORLD.width / 2 - 27,
-      y: WORLD.height / 2 - 45,
-      width: 54,
-      height: 90,
-    });
+    expect(view.x).toBeCloseTo(WORLD.width / 2 - 28.8, 10);
+    expect(view.y).toBeCloseTo(WORLD.height / 2 - 48, 10);
+    expect(view.width).toBeCloseTo(57.6, 10);
+    expect(view.height).toBeCloseTo(96, 10);
     expect(Object.values(view).every(Number.isFinite)).toBe(true);
   });
 
@@ -62,6 +60,18 @@ describe("camera framing", () => {
     expect(charged.height).toBeCloseTo(resting.height / 1.1, 10);
     expect(charged.x + charged.width / 2).toBeCloseTo(50, 10);
     expect(charged.y + charged.height / 2).toBeCloseTo(80, 10);
+  });
+
+  it("reveals a meaningfully wider route at full boost charge", () => {
+    const resting = calculateCameraViewBox({ x: 50, y: 80 }, 0.5, 1);
+    const charged = calculateCameraViewBox(
+      { x: 50, y: 80 },
+      0.5,
+      chargeZoomTarget(1),
+    );
+
+    expect(charged.height).toBeGreaterThan(resting.height * 1.15);
+    expect(charged.width).toBeGreaterThan(resting.width * 1.15);
   });
 });
 

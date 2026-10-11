@@ -1,5 +1,11 @@
 import { WORLD } from "../game/constants";
-import type { GameState, MovementCommand, PlayerId, Vec2 } from "../game/types";
+import type {
+  GameState,
+  MatchFinishReason,
+  MovementCommand,
+  PlayerId,
+  Vec2,
+} from "../game/types";
 
 export type RoomPhase = "lobby" | "playing" | "finished";
 
@@ -17,7 +23,7 @@ export interface RoomSnapshot {
   phase: RoomPhase;
   players: RoomPlayerSummary[];
   winner: PlayerId | "draw" | null;
-  finishReason: "time" | "disconnect" | null;
+  finishReason: MatchFinishReason | "disconnect" | null;
 }
 
 export type ClientMessage =

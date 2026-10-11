@@ -85,8 +85,10 @@ export function TetherNetworkLayer({
 
       <InteractionFilaments state={state} renderPositions={renderPositions} />
 
-      <NetworkNodes state={state} playerId="rival" highlightDelivery={localPlayerId === "rival"} />
-      <NetworkNodes state={state} playerId="player" highlightDelivery={localPlayerId === "player"} />
+      <NetworkNodes state={state} playerId="rival" highlightDelivery={localPlayerId === "rival"}
+        isLocalBase={localPlayerId === "rival"} />
+      <NetworkNodes state={state} playerId="player" highlightDelivery={localPlayerId === "player"}
+        isLocalBase={localPlayerId === "player"} />
     </g>
   );
 }
@@ -166,13 +168,19 @@ function NetworkNodes({
   state,
   playerId,
   highlightDelivery,
+  isLocalBase,
 }: {
   state: GameState;
   playerId: PlayerId;
   highlightDelivery: boolean;
+  isLocalBase: boolean;
 }) {
   const player = state.players[playerId];
   const anchors = state.anchors.filter((anchor) => anchor.owner === playerId);
+  const baseVulnerable = state.matchPhase !== "setup" &&
+    state.hasDeployedAnchor[playerId] &&
+    !anchors.some((anchor) => anchor.powered);
+  const collapseProgressMs = state.baseCollapseProgressMs[playerId];
 
   return (
     <g className={`world__network world__network--${playerId}`}>
@@ -188,14 +196,56 @@ function NetworkNodes({
         );
       })}
       <g
-        className="world__base"
+        className={`world__base${baseVulnerable ? " world__base--vulnerable" : ""}${collapseProgressMs > 0 ? " world__base--collapsing" : ""}`}
         transform={`translate(${player.basePosition.x} ${player.basePosition.y})`}
-        aria-hidden="true"
+        role="img"
+        aria-label={`${isLocalBase ? "Your" : "Rival"} base${collapseProgressMs > 0 ? ` collapse ${Math.round(collapseProgressMs / GAME_RULES.baseCollapseHoldMs * 100)} percent` : baseVulnerable ? " exposed" : " secure"}`}
       >
+        {baseVulnerable && (
+          <BaseCollapseIndicator
+            progressMs={collapseProgressMs}
+            isLocalBase={isLocalBase}
+          />
+        )}
         <circle className="world__base-ring" r="5" />
         <path className="world__base-spokes" d="M -3 0 H 3 M 0 -3 V 3" />
         <circle className="world__base-core" r="2.5" />
       </g>
+    </g>
+  );
+}
+
+function BaseCollapseIndicator({
+  progressMs,
+  isLocalBase,
+}: {
+  progressMs: number;
+  isLocalBase: boolean;
+}) {
+  const progress = Math.min(
+    1,
+    Math.max(0, progressMs / GAME_RULES.baseCollapseHoldMs),
+  );
+
+  return (
+    <g
+      className={`world__base-collapse${progress > 0 ? " world__base-collapse--active" : ""}${isLocalBase ? " world__base-collapse--local" : ""}`}
+      aria-hidden="true"
+    >
+      <circle className="world__base-collapse-zone" r={GAME_RULES.baseCollapseRadius} />
+      <circle className="world__base-collapse-track" r={GAME_RULES.baseCollapseRadius + 1.15} />
+      {progress > 0 && (
+        <>
+          <circle
+            className="world__base-collapse-progress"
+            r={GAME_RULES.baseCollapseRadius + 1.15}
+            pathLength="1"
+            strokeDasharray={`${progress} 1`}
+            transform="rotate(-90)"
+          />
+          <circle className="world__base-collapse-pulse" r={GAME_RULES.baseCollapseRadius} />
+        </>
+      )}
     </g>
   );
 }
@@ -307,6 +357,29 @@ function InteractionFilaments({
   state,
   renderPositions,
 }: Pick<TetherNetworkLayerProps, "state" | "renderPositions">) {
+  const collapseFilaments = (["player", "rival"] as const).flatMap((defenderId) => {
+    if (state.baseCollapseProgressMs[defenderId] <= 0) return [];
+    const attackerId: PlayerId = defenderId === "player" ? "rival" : "player";
+    const defenderBase = state.players[defenderId].basePosition;
+    const attackerPosition = state.players[attackerId].astronaut.position;
+    if (
+      Math.hypot(
+        attackerPosition.x - defenderBase.x,
+        attackerPosition.y - defenderBase.y,
+      ) > GAME_RULES.baseCollapseRadius
+    ) {
+      return [];
+    }
+    return [
+      <InteractionFilament
+        key={`${defenderId}-base-collapse`}
+        kind="collapse"
+        start={renderPositions[attackerId]}
+        end={defenderBase}
+      />,
+    ];
+  });
+
   return (
     <g className="world__interaction-filaments" aria-hidden="true">
       {state.anchors.flatMap((anchor) => {
@@ -340,6 +413,7 @@ function InteractionFilaments({
         }
         return strands;
       })}
+      {collapseFilaments}
     </g>
   );
 }
@@ -349,7 +423,7 @@ function InteractionFilament({
   start,
   end,
 }: {
-  kind: "overload" | "repair";
+  kind: "overload" | "repair" | "collapse";
   start: Vec2;
   end: Vec2;
 }) {

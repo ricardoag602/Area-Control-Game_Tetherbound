@@ -6,6 +6,18 @@ import type {
 
 export type PlayerId = "player" | "rival";
 export type GameMode = "bot" | "multiplayer";
+export type MatchPhase = "setup" | "regulation" | "overtime" | "finished";
+export type MatchWinner = PlayerId | "draw";
+export type MatchFinishReason =
+  | "regulation_score"
+  | "overtime_lead"
+  | "overtime_territory"
+  | "base_collapse";
+
+export interface MatchOutcome {
+  winner: MatchWinner;
+  reason: MatchFinishReason;
+}
 
 export interface Vec2 {
   x: number;
@@ -99,6 +111,20 @@ export interface GameState {
   simulationRemainderMs: number;
   /** Commands received between fixed ticks, consumed together in sequence order. */
   pendingInputs: MatchInputs;
+  /** Current authoritative rules phase. Setup is part of regulation time. */
+  matchPhase: MatchPhase;
+  /** Cumulative scorable-map-fraction seconds earned by each player. */
+  scores: Record<PlayerId, number>;
+  /** Overtime-only gains used for the sudden-lead victory threshold. */
+  overtimeScores: Record<PlayerId, number>;
+  overtimeElapsedMs: number;
+  /** Historical deployment flag; a player with no prior anchor is collapse-immune. */
+  hasDeployedAnchor: Record<PlayerId, boolean>;
+  /** Hold progress indexed by the defender whose base is being collapsed. */
+  baseCollapseProgressMs: Record<PlayerId, number>;
+  /** Set once and only once when authoritative play has finished. */
+  matchOutcome: MatchOutcome | null;
+  /** Remaining time in regulation, or in overtime after regulation expires. */
   remainingMs: number;
   nextAnchorId: number;
   worldTimeline: WorldTimelineState;

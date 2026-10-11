@@ -6,12 +6,13 @@ import type { Vec2 } from "../types";
  * lets each client frame its own astronaut without affecting simulation state.
  */
 export const CAMERA_RULES = {
-  // A slightly wider resting frame gives the player more room to read terrain.
-  baseVisibleHeight: 90,
-  maximumChargeZoomOut: 0.1,
+  // Keep more nearby terrain and network decisions visible during normal play.
+  baseVisibleHeight: 96,
+  // Charging opens the frame further so the player can read the launch route.
+  maximumChargeZoomOut: 0.14,
   chargeZoomDecayRate: 4,
   // Allows charge zoom-out, spring overshoot, and low-oxygen zoom to combine.
-  minimumSpringZoom: 0.88,
+  minimumSpringZoom: 0.84,
   maximumSpringZoom: 1.16,
   springAngularFrequency: 16,
   springDampingRatio: 0.78,

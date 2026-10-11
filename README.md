@@ -6,7 +6,7 @@ Tetherbound is a mobile-first, two-player territory game about extending fragile
 
 The current arena is a 210 × 350 world divided into water, jungle, desert, taiga, and protected base corridors. Terrain changes authoritative movement and oxygen behavior, while a seeded match timeline synchronizes frequent supply drops in bot and multiplayer games.
 
-Where opposing life-support zones overlap, the ground becomes contested and stops scoring for either side. Hold position beside an enemy tether to overload it and sever every downstream zone; return to your own broken tether to repair it early. The network communicates this through closing progress rings, solid or broken cable shapes, and crossed territory hatching rather than another text-heavy HUD.
+Where opposing life-support zones overlap, the ground becomes contested and stops scoring for either side. Exclusive powered territory outside the guaranteed home safe zones adds to a cumulative match score, rewarding control throughout the match instead of only the final map state. Hold position beside an enemy tether to overload it and sever every downstream zone; return to your own broken tether to repair it early. The network communicates this through closing progress rings, solid or broken cable shapes, and crossed territory hatching rather than another text-heavy HUD.
 
 ## Run locally
 
@@ -37,7 +37,20 @@ The terminal prints both a local URL and a network URL.
 - Three salvage materials fabricate one tether. The whole home zone accepts deliveries; powered remote anchors use the smaller pulsing hand-in ring. Gold recipe slots are carried material and cyan slots are safely banked.
 - Select **Deploy** or press **T** within 84 world units of a powered node to place an available anchor. The long cable connects the nodes, but oxygen and territory still come from their circular zones.
 - Stay inside the ring around an enemy anchor to overload it automatically. A nearby defender reverses your progress.
-- Stay beside your own directly disabled anchor to repair it. Restored anchors receive a brief protective ring before they can be attacked again.
+- Stay beside your own directly disabled anchor to repair it early. Otherwise the direct disruption clears after 20 seconds; restored anchors receive a brief protective ring before they can be attacked again.
+- After setup, once an opponent has deployed a network, sever every one of its anchors from power and hold inside the exposed home-base collapse zone for 12 seconds to win immediately. A defender in the zone pushes the collapse back, and restoring any powered anchor cancels the attempt.
+
+## Match flow and victory
+
+- Regulation lasts five minutes. The opening 30 seconds are a protected setup period in which players can explore, collect, and deploy, but territory does not score and bases cannot be collapsed.
+- After setup, each player earns the fraction of the scorable grid they exclusively control every second: controlling the entire scorable map would earn one point per second. Cells inside either guaranteed home safe zone are excluded from both the owned count and the total; neutral and contested cells earn nothing.
+- The final minute of regulation is the announced **Signal Surge**, when territory contributes at 1.5× its normal rate.
+- The four quadrants retain different biome art, while rotationally mirrored routes share the same movement and oxygen tuning so neither spawn receives an opening-speed advantage.
+- When regulation expires, a result outside the configured close-score threshold is final. A cumulative-score margin within the 3% threshold sends the match to overtime.
+- Overtime lasts at most 60 seconds. Supply drops stop, and the first player to earn five points more than the opponent during overtime wins. Regulation's cumulative score remains visible but does not cause an instant overtime finish.
+- If neither player reaches that lead, the player controlling more exclusive non-base territory when overtime expires wins. An exact territory tie is a draw.
+- Base collapse is the alternate instant win. It cannot begin until the defender has deployed at least one anchor; while none of that player's anchors are powered, an uncontested attacker inside the base zone builds the 12-second collapse meter. Leaving makes progress decay, a defender in the zone reverses it faster, and restoring any powered anchor resets it.
+- Bot and multiplayer matches both end on a result screen. Bot games can restart immediately; multiplayer rematches begin after both players vote to play again.
 
 ## Test multiplayer
 
@@ -57,7 +70,7 @@ Open the printed **Network** URL on the computer before creating the room. The r
 
 ## Reliability model
 
-- The server owns movement, oxygen, salvage, tether conflict, timer, and scoring.
+- The server owns movement, oxygen, salvage, tether conflict, regulation and overtime clocks, cumulative scoring, base collapse, and match outcomes.
 - Biome effects and match events use the authoritative elapsed match clock; no gameplay system relies on client timers or `Math.random`.
 - Every match event stream is seeded and serializable, allowing identical replay and reconnect behavior.
 - The server simulates rooms and sends full state snapshots at 20 Hz.
@@ -74,7 +87,7 @@ Open the printed **Network** URL on the computer before creating the room. The r
 - Application ping/pong messages report smoothed round-trip latency in the lobby and match HUD.
 - Reconnect attempts use capped exponential backoff with jitter.
 - Runtime validation, message-rate limits, bounded action history, and snapshot backpressure protect the server from malformed or slow clients.
-- Finished matches show a result screen and support a two-player rematch vote.
+- Finished bot and multiplayer matches show a result screen. Bot matches can restart immediately, while multiplayer uses a two-player rematch vote.
 
 ## Main modules
 
@@ -83,7 +96,7 @@ Open the printed **Network** URL on the computer before creating the room. The r
 - `src/network/RoomClient.ts` — socket lifecycle, session resume, backoff, and latency tracking
 - `src/network/protocol.ts` — shared network message contracts
 - `src/game/movement/movement.ts` — walking, charge, burst, and movement feel rules
-- `src/game/simulation/` — fixed-step match, tether, environment, event, and scoring systems
+- `src/game/simulation/` — fixed-step match, tether, environment, event, cumulative scoring, overtime, and base-collapse systems
 - `src/game/simulation/tetherConflict.ts` — overload, repair, recovery protection, and downstream power resolution
 - `src/game/world/map.ts` — renderer-independent biome geometry and terrain effects
 - `src/game/world/timeline.ts` — deterministic master event timeline and future system hooks
@@ -99,7 +112,7 @@ npm run build
 npm audit
 ```
 
-The test suite includes real two-client WebSocket coverage for room creation, joining, ready/start, synchronized movement, malformed traffic, idempotent requests and deployment, action acknowledgement, latency echo, disconnect pausing, session resume, and rematches.
+The test suite includes deterministic rules coverage for setup, cumulative scoring, Signal Surge, overtime, base collapse, and result resolution, plus real two-client WebSocket coverage for room creation, joining, ready/start, synchronized movement, malformed traffic, idempotent requests and deployment, action acknowledgement, latency echo, disconnect pausing, session resume, and rematches.
 
 ## Configuration
 

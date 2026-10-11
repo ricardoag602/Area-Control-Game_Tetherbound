@@ -74,6 +74,8 @@ export function canDeployAnchor(state: GameState, playerId: PlayerId) {
   const position = player.astronaut.position;
 
   return (
+    state.matchPhase !== "finished" &&
+    state.remainingMs > 0 &&
     player.astronaut.tetherKits > 0 &&
     player.astronaut.movement.mode !== "charging" &&
     player.astronaut.movement.mode !== "burst" &&
@@ -111,6 +113,16 @@ export function deployAnchor(state: GameState, playerId: PlayerId): GameState {
     ...state,
     nextAnchorId: state.nextAnchorId + 1,
     anchors: [...state.anchors, anchor],
+    hasDeployedAnchor: {
+      ...state.hasDeployedAnchor,
+      [playerId]: true,
+    },
+    // A newly connected anchor restores the network immediately, including
+    // for deploy actions processed between fixed simulation ticks.
+    baseCollapseProgressMs: {
+      ...state.baseCollapseProgressMs,
+      [playerId]: 0,
+    },
     players: {
       ...state.players,
       [playerId]: {

@@ -47,6 +47,27 @@ export interface BiomeDefinition {
   readonly effects: BiomeEffects;
 }
 
+// The arena uses different art in each quadrant, but every 180-degree mirrored
+// route has identical authoritative tuning. Spawn points, salvage, terrain,
+// and event zones therefore share the same rotational fairness contract.
+const RUGGED_ROUTE_EFFECTS = {
+  movement: {
+    speedMultiplier: 0.76,
+    turnRateMultiplier: 0.8,
+    ambientDrift: null,
+  },
+  oxygen: { drainMultiplier: 1.22, recoveryMultiplier: 0.9 },
+} as const satisfies BiomeEffects;
+
+const OPEN_ROUTE_EFFECTS = {
+  movement: {
+    speedMultiplier: 0.84,
+    turnRateMultiplier: 0.8,
+    ambientDrift: null,
+  },
+  oxygen: { drainMultiplier: 1.21, recoveryMultiplier: 0.88 },
+} as const satisfies BiomeEffects;
+
 /**
  * Simulation-facing terrain tuning. Values are deliberately modest so terrain
  * changes decisions without replacing the movement feel that already works.
@@ -76,47 +97,19 @@ export const BIOME_DEFINITIONS = {
   },
   water: {
     id: "water",
-    effects: {
-      movement: {
-        speedMultiplier: 0.68,
-        turnRateMultiplier: 0.82,
-        ambientDrift: { strength: 0.55, cycleSeconds: 4.5 },
-      },
-      oxygen: { drainMultiplier: 1.25, recoveryMultiplier: 0.9 },
-    },
+    effects: RUGGED_ROUTE_EFFECTS,
   },
   jungle: {
     id: "jungle",
-    effects: {
-      movement: {
-        speedMultiplier: 0.76,
-        turnRateMultiplier: 0.7,
-        ambientDrift: null,
-      },
-      oxygen: { drainMultiplier: 1.12, recoveryMultiplier: 0.95 },
-    },
+    effects: OPEN_ROUTE_EFFECTS,
   },
   desert: {
     id: "desert",
-    effects: {
-      movement: {
-        speedMultiplier: 0.92,
-        turnRateMultiplier: 0.9,
-        ambientDrift: null,
-      },
-      oxygen: { drainMultiplier: 1.3, recoveryMultiplier: 0.8 },
-    },
+    effects: OPEN_ROUTE_EFFECTS,
   },
   taiga: {
     id: "taiga",
-    effects: {
-      movement: {
-        speedMultiplier: 0.82,
-        turnRateMultiplier: 0.78,
-        ambientDrift: { strength: 0.18, cycleSeconds: 7 },
-      },
-      oxygen: { drainMultiplier: 1.18, recoveryMultiplier: 0.9 },
-    },
+    effects: RUGGED_ROUTE_EFFECTS,
   },
 } as const satisfies Readonly<Record<BiomeId, BiomeDefinition>>;
 
@@ -217,7 +210,7 @@ export const WORLD_REGIONS = [
     vertices: [
       { x: 0, y: 175 },
       { x: 105, y: 175 },
-      { x: 101, y: 217 },
+      { x: 101, y: 218 },
       { x: 110, y: 260 },
       { x: 104, y: 308 },
       { x: 112, y: 350 },
@@ -235,7 +228,7 @@ export const WORLD_REGIONS = [
       { x: 98, y: 350 },
       { x: 106, y: 308 },
       { x: 100, y: 260 },
-      { x: 109, y: 217 },
+      { x: 109, y: 218 },
     ],
   },
   {

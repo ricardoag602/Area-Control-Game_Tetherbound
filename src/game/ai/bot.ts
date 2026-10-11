@@ -15,10 +15,11 @@ const PREFERRED_LINK_DISTANCE_RATIO = 0.75;
  * human currently has: choose a movement target and request an anchor deploy.
  */
 export function getBotCommand(state: GameState, playerId: PlayerId): PlayerCommand {
-  if (state.remainingMs <= 0) {
+  if (state.matchPhase === "finished" || state.remainingMs <= 0) {
     return { movementCommands: [{ type: "stop" }], deployAnchor: false };
   }
 
+  const opponentId: PlayerId = playerId === "player" ? "rival" : "player";
   const astronaut = state.players[playerId].astronaut;
   const poweredNode = closestPosition(
     astronaut.position,
@@ -34,10 +35,24 @@ export function getBotCommand(state: GameState, playerId: PlayerId): PlayerComma
   const shouldReturn =
     astronaut.oxygen <= LOW_OXYGEN_THRESHOLD ||
     astronaut.carriedSalvage >= GAME_RULES.salvageCarryLimit;
+  const ownNetworkOffline = state.hasDeployedAnchor[playerId] &&
+    !state.anchors.some(
+      (anchor) => anchor.owner === playerId && anchor.powered,
+    );
+  const enemyBaseExposed = state.matchPhase !== "setup" &&
+    state.hasDeployedAnchor[opponentId] &&
+    !state.anchors.some(
+      (anchor) => anchor.owner === opponentId && anchor.powered,
+    );
 
   let moveTarget: Vec2 | null = null;
   let pursuingConflict = false;
-  if (shouldReturn) {
+  if (state.baseCollapseProgressMs[playerId] > 0) {
+    // The home base is safe for its owner, so this also recovers oxygen while
+    // immediately contesting a collapse attempt.
+    moveTarget = state.players[playerId].basePosition;
+    pursuingConflict = true;
+  } else if (shouldReturn) {
     moveTarget = poweredNode;
   } else {
     const repairTarget = closestAnchor(
@@ -48,7 +63,7 @@ export function getBotCommand(state: GameState, playerId: PlayerId): PlayerComma
           isAnchorDirectlyDisrupted(anchor, state.elapsedMs) &&
           parentIsPowered(state, anchor),
       ),
-      CONFLICT_SEEK_RADIUS,
+      ownNetworkOffline ? Number.POSITIVE_INFINITY : CONFLICT_SEEK_RADIUS,
     );
     const enemyTarget = astronaut.oxygen >= ATTACK_OXYGEN_THRESHOLD
       ? closestAnchor(
@@ -63,6 +78,12 @@ export function getBotCommand(state: GameState, playerId: PlayerId): PlayerComma
     const conflictTarget = repairTarget ?? enemyTarget;
     if (conflictTarget) {
       moveTarget = conflictTarget.position;
+      pursuingConflict = true;
+    } else if (
+      enemyBaseExposed &&
+      astronaut.oxygen >= ATTACK_OXYGEN_THRESHOLD
+    ) {
+      moveTarget = state.players[opponentId].basePosition;
       pursuingConflict = true;
     } else {
       moveTarget = closestPosition(

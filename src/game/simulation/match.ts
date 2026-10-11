@@ -8,6 +8,7 @@ import {
 } from "./environment";
 import { isAtDeliveryNode, isInsideSafeZone } from "./tetherNetwork";
 import { advanceTetherConflict } from "./tetherConflict";
+import { advanceMatchRules, normalizeMatchState } from "./scoring";
 import { advanceWorldSystems, normalizeWorldSystems } from "./worldSystems";
 
 const DISTANCE_TIE_EPSILON = 1e-9;
@@ -17,8 +18,6 @@ export function advanceGame(
   input: GameInput,
   deltaSeconds: number,
 ): GameState {
-  if (state.remainingMs <= 0) return state;
-
   return advanceMatch(state, { player: [input] }, deltaSeconds);
 }
 
@@ -27,8 +26,8 @@ export function advanceMatch(
   inputs: MatchInputs,
   deltaSeconds: number,
 ): GameState {
-  state = normalizeWorldSystems(state);
-  if (state.remainingMs <= 0) return state;
+  state = normalizeMatchState(normalizeWorldSystems(state));
+  if (state.matchPhase === "finished") return state;
 
   const fixedStepSeconds = 1 / SIMULATION_RULES.ticksPerSecond;
   const fixedStepMs = fixedStepSeconds * 1_000;
@@ -59,7 +58,7 @@ export function advanceMatch(
   // movement even when callers deliver time in different-sized chunks.
   for (
     let step = 0;
-    step < fullStepCount && nextState.remainingMs > 0;
+    step < fullStepCount && nextState.matchPhase !== "finished";
     step += 1
   ) {
     const stepInputs = step === 0 ? nextState.pendingInputs : {};
@@ -70,7 +69,7 @@ export function advanceMatch(
     );
   }
 
-  if (nextState.remainingMs <= 0) {
+  if (nextState.matchPhase === "finished") {
     return { ...nextState, pendingInputs: {}, simulationRemainderMs: 0 };
   }
   return nextState;
@@ -96,6 +95,7 @@ function advanceMatchStep(
   inputs: MatchInputs,
   deltaSeconds: number,
 ): GameState {
+  const previousRemainingMs = state.remainingMs;
   let nextState: GameState = {
     ...state,
     elapsedMs: state.elapsedMs + deltaSeconds * 1000,
@@ -114,7 +114,8 @@ function advanceMatchStep(
   nextState = advanceTetherConflict(nextState, deltaSeconds, activePlayers);
   nextState = collectSalvage(nextState, activePlayers, movementPaths);
   nextState = deliverSalvage(nextState, activePlayers);
-  return advanceWorldSystems(nextState);
+  nextState = advanceWorldSystems(nextState);
+  return advanceMatchRules(nextState, previousRemainingMs, deltaSeconds);
 }
 
 function advancePlayer(

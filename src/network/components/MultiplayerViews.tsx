@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
-import { getTerritoryScore } from "../../game/simulation/scoring";
-import type { GameState, PlayerId } from "../../game/types";
+import { sampleScorableTerritory } from "../../game/simulation/scoring";
+import type { GameState, MatchFinishReason, PlayerId } from "../../game/types";
 import type { ConnectionStatus } from "../RoomClient";
 import { isValidRoomCode, normalizeRoomCode } from "../connectionInfo";
 import type { RoomSnapshot } from "../protocol";
@@ -185,30 +185,32 @@ export function MatchResultView({
   onLeave,
 }: MatchResultViewProps) {
   const opponentId: PlayerId = localPlayerId === "player" ? "rival" : "player";
-  const localScore = getTerritoryScore(state, localPlayerId);
-  const opponentScore = getTerritoryScore(state, opponentId);
+  const territory = sampleScorableTerritory(state).fractions;
+  const localTerritory = territory[localPlayerId] * 100;
+  const opponentTerritory = territory[opponentId] * 100;
   const localPlayer = room.players.find((player) => player.id === localPlayerId);
   const opponent = room.players.find((player) => player.id === opponentId);
   const canRematch =
     room.players.length === room.playerLimit && room.players.every((player) => player.connected);
-  const isDraw = room.winner === "draw" || (room.winner === null && localScore === opponentScore);
-  const didWin = room.winner === localPlayerId || (room.winner === null && localScore > opponentScore);
+  const winner = room.winner ?? state.matchOutcome?.winner ?? scoreWinner(state);
+  const finishReason = room.finishReason ?? state.matchOutcome?.reason ?? "regulation_score";
+  const isDraw = winner === "draw";
+  const didWin = winner === localPlayerId;
   const result = isDraw ? "Draw" : didWin ? "Victory" : "Defeat";
-  const resultSummary = room.finishReason === "disconnect"
-    ? didWin
-      ? "The rival signal was lost before it could reconnect."
-      : "Your signal was lost before it could reconnect."
-    : isDraw
-      ? "Both tether networks held equal ground."
-      : didWin
-        ? "Your tether network controlled more territory."
-        : "The rival network controlled more territory.";
+  const decidedInOvertime =
+    finishReason === "overtime_lead" || finishReason === "overtime_territory";
+  const resultSummary = describeFinish(
+    finishReason,
+    didWin,
+    isDraw,
+    opponent?.name ?? "The rival",
+  );
   const connectionLabel = getConnectionLabel(connection);
 
   return (
     <div className="screen screen--room screen--result">
       <header className="section-heading result-heading">
-        <p className="eyebrow">Mission complete</p>
+        <p className="eyebrow">{finishLabel(finishReason)}</p>
         <h2>{result}</h2>
         <p>{resultSummary}</p>
       </header>
@@ -216,13 +218,33 @@ export function MatchResultView({
       <div className="result-scores" aria-label="Final scores">
         <div className={`result-score result-score--${localPlayerId}`}>
           <span>You</span>
-          <strong>{Math.round(localScore)}%</strong>
+          <strong>{state.scores[localPlayerId].toFixed(1)}</strong>
+          <small>signal · {Math.round(localTerritory)}% final territory</small>
         </div>
         <div className={`result-score result-score--${opponentId}`}>
           <span>{opponent?.name ?? "Rival"}</span>
-          <strong>{Math.round(opponentScore)}%</strong>
+          <strong>{state.scores[opponentId].toFixed(1)}</strong>
+          <small>signal · {Math.round(opponentTerritory)}% final territory</small>
         </div>
       </div>
+
+      {decidedInOvertime && (
+        <p className="result-overtime-score">
+          <span>Overtime-only signal</span>
+          <strong>
+            You {state.overtimeScores[localPlayerId].toFixed(1)} ·{" "}
+            {opponent?.name ?? "Rival"} {state.overtimeScores[opponentId].toFixed(1)}
+          </strong>
+        </p>
+      )}
+
+      <p className="result-score-explainer">
+        {finishReason === "overtime_lead"
+          ? "Regulation totals remain above. The separate overtime race ended at a five-point lead."
+          : finishReason === "overtime_territory"
+            ? "Regulation totals remain above. Live territory decided the match when overtime expired."
+            : "Signal score accumulates from uncontested powered territory throughout the match."}
+      </p>
 
       <div className="connection-strip" data-status={connection}>
         <span>{connectionLabel}</span>
@@ -273,5 +295,63 @@ function getConnectionLabel(connection: ConnectionStatus) {
     case "reconnecting": return "Reconnecting…";
     case "connecting": return "Connecting…";
     default: return "Connection lost";
+  }
+}
+
+function scoreWinner(state: GameState): PlayerId | "draw" {
+  if (state.scores.player === state.scores.rival) return "draw";
+  return state.scores.player > state.scores.rival ? "player" : "rival";
+}
+
+function finishLabel(reason: MatchFinishReason | "disconnect") {
+  switch (reason) {
+    case "disconnect": return "Signal lost";
+    case "base_collapse": return "Network collapsed";
+    case "overtime_lead": return "Overtime breakthrough";
+    case "overtime_territory": return "Overtime expired";
+    default: return "Regulation complete";
+  }
+}
+
+function describeFinish(
+  reason: MatchFinishReason | "disconnect",
+  didWin: boolean,
+  isDraw: boolean,
+  opponentName: string,
+) {
+  if (reason === "disconnect") {
+    if (isDraw) {
+      return "Both signals were lost before either astronaut could reconnect.";
+    }
+    return didWin
+      ? `${opponentName}'s signal was lost before it could reconnect.`
+      : "Your signal was lost before it could reconnect.";
+  }
+  if (isDraw) {
+    if (reason === "base_collapse") {
+      return "Both exposed bases collapsed at the same moment.";
+    }
+    if (reason === "overtime_territory") {
+      return "Both networks controlled equal live territory when overtime expired.";
+    }
+    return "Both networks finished level on signal.";
+  }
+  switch (reason) {
+    case "base_collapse":
+      return didWin
+        ? `You held ${opponentName}'s exposed base until its network collapsed.`
+        : `${opponentName} held your exposed base until your network collapsed.`;
+    case "overtime_lead":
+      return didWin
+        ? "You established the decisive signal lead in overtime."
+        : `${opponentName} established the decisive signal lead in overtime.`;
+    case "overtime_territory":
+      return didWin
+        ? "You controlled more live territory when overtime expired."
+        : `${opponentName} controlled more live territory when overtime expired.`;
+    default:
+      return didWin
+        ? "Your network accumulated more signal during regulation."
+        : `${opponentName}'s network accumulated more signal during regulation.`;
   }
 }

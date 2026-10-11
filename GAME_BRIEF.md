@@ -25,9 +25,14 @@ Tetherbound is a two-player, top-down mobile territory game. Rival astronauts ex
 - Delivering three salvage pieces to a powered anchor fabricates one new tether anchor.
 - Players can deploy every tether anchor they fabricate; collection and spacing are the limits.
 - Enemy tether connections can be disrupted through a short nearby interaction.
-- Disconnected anchors receive a brief reconnection grace period before shutting down.
-- Active territory generates score over a five-minute match.
-- A player can also win by disabling the opposing home base.
+- An overloaded anchor and every downstream zone lose power immediately. The direct disruption clears after 20 seconds unless its owner repairs it sooner, and a recovered anchor receives brief overload protection.
+- Regulation lasts five minutes. The first 30 seconds are a protected, non-scoring setup period for exploration, collection, and initial network deployment; base-collapse progress cannot begin during setup.
+- After setup, each player earns the fraction of the scorable grid they exclusively control every second, up to one point per second for full control. Cells inside either guaranteed home safe zone are excluded from the calculation; neutral and contested cells do not score.
+- The final minute is an announced Signal Surge in which territory earns 1.5× score.
+- If the regulation scores finish within 3%, the match enters overtime. Supply drops stop, and the first player to earn five points more than the opponent during overtime wins; the retained regulation score does not trigger an immediate overtime finish.
+- Overtime is capped at 60 seconds. If the lead target is not reached, current exclusive non-base territory breaks the tie; equal territory produces a draw.
+- A base cannot be collapsed until its owner has deployed at least one anchor. If every deployed anchor is severed from power, an uncontested attacker inside the base zone builds a 12-second collapse meter. The meter decays when unattended, reverses faster when the defender contests the zone, and resets if any anchor regains power.
+- Losing territory or interrupting a base push creates a recoverable setback rather than permanent early elimination.
 
 ## Initial content boundary
 
@@ -62,8 +67,14 @@ The first playable contains no weather, character classes, inventory screen, cus
 ### Match
 
 - Full-screen arena
-- Minimal match HUD
+- Minimal match HUD showing cumulative score, current territory, match phase, and base-collapse progress when relevant
 - Bot and multiplayer modes use the same game-state model
 - Leave-match confirmation returns to the main menu
+
+### Results
+
+- Bot and multiplayer matches show the winner, finish reason, final cumulative score, and final territory.
+- A bot game can restart immediately from its result screen.
+- A multiplayer rematch starts after both connected players vote to play again.
 
 View changes should feel continuous through short fades and directional motion. Accessibility preferences must remain active across every view.

@@ -122,7 +122,7 @@ describe("Tetherbound simulation", () => {
 
     expect(waterDistance).toBeLessThan(neutralDistance);
     expect(waterNext.players.player.astronaut.oxygen).toBeCloseTo(
-      GAME_RULES.oxygenMaximum - GAME_RULES.oxygenDrainPerSecond * 1.25 * 0.5,
+      GAME_RULES.oxygenMaximum - GAME_RULES.oxygenDrainPerSecond * 1.22 * 0.5,
       8,
     );
   });

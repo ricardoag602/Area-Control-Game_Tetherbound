@@ -49,6 +49,20 @@ export function advanceWorldSystems(state: GameState): GameState {
     state.elapsedMs,
     timeline.rules.ticksPerSecond,
   );
+  const regulationHasExpired =
+    state.matchPhase === "regulation" && state.remainingMs <= 0;
+  if (
+    state.matchPhase === "overtime" ||
+    state.matchPhase === "finished" ||
+    regulationHasExpired
+  ) {
+    return {
+      ...state,
+      activeWeather: state.activeWeather.filter(
+        (event) => event.scheduledTick + event.durationTicks > targetTick,
+      ),
+    };
+  }
   const maximumOverdueEvents = Math.max(
     1,
     Math.floor(

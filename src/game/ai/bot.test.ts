@@ -85,6 +85,41 @@ describe("basic bot controller", () => {
     ]);
   });
 
+  it("returns to defend its base during an active collapse attempt", () => {
+    const state = createInitialGameState();
+    state.matchPhase = "regulation";
+    state.baseCollapseProgressMs.rival = 1_000;
+    state.players.rival.astronaut.position = { x: 105, y: 100 };
+
+    const command = getBotCommand(state, "rival");
+
+    expect(command.movementCommands).toEqual([
+      { type: "walk", target: state.players.rival.basePosition },
+    ]);
+    expect(command.deployAnchor).toBe(false);
+  });
+
+  it("presses an exposed enemy base after setup", () => {
+    const state = createInitialGameState();
+    state.matchPhase = "regulation";
+    state.hasDeployedAnchor.player = true;
+    state.anchors = [
+      {
+        ...anchor("player-offline", "player", { x: 105, y: 300 }),
+        powered: false,
+        disruptedUntilMs: state.elapsedMs + GAME_RULES.anchorDisruptionDurationMs,
+      },
+    ];
+    state.players.rival.astronaut.position = { x: 105, y: 100 };
+
+    const command = getBotCommand(state, "rival");
+
+    expect(command.movementCommands).toEqual([
+      { type: "walk", target: state.players.player.basePosition },
+    ]);
+    expect(command.deployAnchor).toBe(false);
+  });
+
   it("runs human and bot commands through the same command pipeline", () => {
     const state = createInitialGameState();
     state.players.rival.astronaut.position = {
@@ -112,6 +147,31 @@ describe("basic bot controller", () => {
     );
     expect(next.anchors.filter((anchor) => anchor.owner === "player")).toHaveLength(1);
     expect(next.anchors.filter((anchor) => anchor.owner === "rival")).toHaveLength(1);
+  });
+
+  it("produces a side-neutral control match on the symmetric static arena", () => {
+    let state = createInitialGameState("static-balance-control");
+    state.worldTimeline.nextEventTick = Number.MAX_SAFE_INTEGER;
+
+    for (let tick = 0; tick < 20_000 && state.matchPhase !== "finished"; tick += 1) {
+      state = applyPlayerCommands(
+        state,
+        {
+          player: getBotCommand(state, "player"),
+          rival: getBotCommand(state, "rival"),
+        },
+        0.05,
+      );
+    }
+
+    expect(state.matchOutcome).toEqual({
+      winner: "draw",
+      reason: "overtime_territory",
+    });
+    expect(state.scores.player).toBeCloseTo(state.scores.rival, 10);
+    expect(state.anchors.filter((anchor) => anchor.owner === "player")).toHaveLength(
+      state.anchors.filter((anchor) => anchor.owner === "rival").length,
+    );
   });
 
   it("stops issuing movement and deployment commands after the match ends", () => {

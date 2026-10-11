@@ -23,15 +23,16 @@ Build one local arena with two simulated players and no networking.
 
 - Network connectivity calculation
 - Connection disruption interaction
-- Grace period for disconnected anchors
-- Repair and reconnection behavior
-- Active territory scoring
-- Home-base vulnerability
-- Match timer and win states
+- Timed anchor disruption, active repair, and brief reactivation protection
+- Cumulative scoring from each player's share of exclusive powered territory outside the guaranteed home safe zones
+- A protected 30-second setup period and 1.5× final-minute Signal Surge
+- Close-score overtime with no supply drops, a five-point overtime-advantage target, and a 60-second cap
+- Home-base collapse after severing the deployed network and holding the base for 12 seconds
+- Match timer, current-territory overtime tiebreak, result screen, and rematch flow
 
 **Exit condition:** Two players sharing one device or test harness can complete a full match with a clear winner.
 
-**Current progress:** Powered coverage is sampled into a deterministic territory grid and displayed through the pixel minimap. Connection disruption, repair, base vulnerability, and a territory-hold victory remain.
+**Current progress:** Implemented for bot and multiplayer matches. Powered coverage is sampled into a deterministic territory grid and displayed through the pixel minimap. After setup, each player's exclusive share of the scorable grid accumulates up to one point per second; the last minute uses the Signal Surge multiplier, close regulation scores enter capped overtime, and a fully severed deployed network exposes its home base to a 12-second collapse hold. Disruption, repair, recovery protection, results, and rematches are integrated into the same authoritative match flow.
 
 ## Milestone 3: Authoritative multiplayer
 
@@ -44,7 +45,7 @@ Build one local arena with two simulated players and no networking.
 
 **Exit condition:** Two separate phones or browser sessions can complete the same synchronized match.
 
-**Current progress:** The two-player room vertical slice is implemented: server-issued room codes, join links, ready state, authoritative 20 Hz snapshots, ordered movement input, fair shared-resource resolution, acknowledged idempotent actions, RTT measurement, render-only position smoothing, backpressure protection, paused reconnect grace, refresh recovery, result screens, and rematches. Public deployment and real-device network testing remain before this milestone is complete.
+**Current progress:** The two-player room vertical slice is implemented: server-issued room codes, join links, ready state, authoritative 20 Hz snapshots, ordered movement input, fair shared-resource resolution, acknowledged idempotent actions, RTT measurement, render-only position smoothing, backpressure protection, paused reconnect grace, refresh recovery, cumulative-score and base-collapse results, and two-player rematch votes. Public deployment and real-device network testing remain before this milestone is complete.
 
 ## Milestone 4: Mobile usability
 
@@ -92,10 +93,10 @@ Add only after the core game is balanced.
 - Vitest for deterministic game rules
 - Playwright for multi-browser match testing
 
-## Immediate implementation order
+## Immediate validation order
 
-1. Add enemy anchor disruption with downstream network disconnection.
-2. Add repair and reconnection grace behavior.
-3. Add a territory-hold victory condition and home-base vulnerability.
-4. Playtest biome movement, oxygen pressure, event cadence, and resource density.
-5. Enable timeline-driven buffs and debuffs only after the core competition is balanced.
+1. Playtest whether the 30-second setup creates useful opening choices without delaying the first conflict.
+2. Tune normal scoring, the 1.5× Signal Surge, the 3% overtime threshold, and the five-point overtime-advantage target so an early lead matters without becoming irreversible.
+3. Test whether severing every deployed anchor and holding a base for 12 seconds creates a readable, recoverable last stand.
+4. Validate overtime supply scarcity, the 60-second cap, and the current-territory tiebreak across defensive and aggressive strategies; track how often neither player reaches a five-point overtime advantage so the tiebreak does not become an accidental default.
+5. Continue tuning biome movement, oxygen pressure, event cadence, and resource density before enabling timeline-driven buffs or debuffs.

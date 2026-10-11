@@ -3,11 +3,15 @@ import type { AddressInfo } from "node:net";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
 import { SIMULATION_RULES } from "../src/game/constants";
 import { advanceMatch } from "../src/game/simulation/match";
-import { getTerritoryScore } from "../src/game/simulation/scoring";
 import { deployAnchor } from "../src/game/simulation/tetherNetwork";
 import { cancelMovement } from "../src/game/movement/movement";
 import { createInitialGameState } from "../src/game/state";
-import type { GameInput, GameState, PlayerId } from "../src/game/types";
+import type {
+  GameInput,
+  GameState,
+  MatchFinishReason,
+  PlayerId,
+} from "../src/game/types";
 import {
   parseClientMessage,
   type ClientMessage,
@@ -50,7 +54,7 @@ interface MatchRoom {
   players: Map<PlayerId, ConnectedPlayer>;
   gameState: GameState | null;
   winner: PlayerId | "draw" | null;
-  finishReason: "time" | "disconnect" | null;
+  finishReason: MatchFinishReason | "disconnect" | null;
   lastTickAt: number;
   tickAccumulatorMs: number;
   lastActivityAt: number;
@@ -319,6 +323,18 @@ export class RoomServer {
     });
     if (room.gameState) this.sendGameState(room, socket);
     this.broadcastRoom(room);
+    // Rematch votes survive a temporary disconnect. If the second vote arrived
+    // while one player was offline, reconnecting that ready player completes
+    // the same two-vote handshake instead of leaving the room stuck.
+    if (
+      room.phase === "finished" &&
+      room.players.size === room.playerLimit &&
+      [...room.players.values()].every(
+        (candidate) => candidate.ready && candidate.connected,
+      )
+    ) {
+      this.startMatch(room);
+    }
   }
 
   private handleRoomMessage(room: MatchRoom, player: ConnectedPlayer, message: ClientMessage) {
@@ -414,13 +430,13 @@ export class RoomServer {
 
   private finishMatch(
     room: MatchRoom,
-    reason: "time" | "disconnect",
+    reason: MatchFinishReason | "disconnect",
     winner?: PlayerId | "draw",
   ) {
     if (room.phase === "finished") return;
     room.phase = "finished";
     room.finishReason = reason;
-    room.winner = winner ?? this.scoreWinner(room);
+    room.winner = winner ?? room.gameState?.matchOutcome?.winner ?? "draw";
     room.lastActivityAt = Date.now();
     room.revision += 1;
     for (const player of room.players.values()) {
@@ -429,14 +445,6 @@ export class RoomServer {
     }
     if (room.gameState) room.gameState = this.cancelAllMovement(room.gameState);
     this.broadcastRoom(room);
-  }
-
-  private scoreWinner(room: MatchRoom): PlayerId | "draw" {
-    if (!room.gameState) return "draw";
-    const playerScore = getTerritoryScore(room.gameState, "player");
-    const rivalScore = getTerritoryScore(room.gameState, "rival");
-    if (playerScore === rivalScore) return "draw";
-    return playerScore > rivalScore ? "player" : "rival";
   }
 
   private handleDisconnect(socket: WebSocket) {
@@ -503,9 +511,13 @@ export class RoomServer {
           fixedStepMs / 1_000,
         );
         room.stateVersion += 1;
-        if (room.gameState.remainingMs <= 0) {
+        if (room.gameState.matchPhase === "finished") {
           room.tickAccumulatorMs = 0;
-          this.finishMatch(room, "time");
+          this.finishMatch(
+            room,
+            room.gameState.matchOutcome?.reason ?? "regulation_score",
+            room.gameState.matchOutcome?.winner,
+          );
           break;
         }
       }
@@ -594,7 +606,7 @@ export class RoomServer {
       stateVersion: room.stateVersion,
       lastProcessedInput,
       serverTime: Date.now(),
-    }, true);
+    }, room.phase === "playing");
   }
 
   private roomSnapshot(room: MatchRoom): RoomSnapshot {
