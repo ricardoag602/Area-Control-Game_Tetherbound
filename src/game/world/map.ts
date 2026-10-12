@@ -1,12 +1,12 @@
 import type { Vec2 } from "../types";
 
 /**
- * The first full-size arena is 4.59 times the area of the 100 x 160 prototype.
+ * The square arena is 7.66 times the area of the 100 x 160 prototype.
  * Keeping this data separate from the renderer lets the simulation, server, and
  * any future GPU renderer consume exactly the same world definition.
  */
 export const WORLD_BOUNDS = {
-  width: 210,
+  width: 350,
   height: 350,
 } as const;
 
@@ -47,25 +47,16 @@ export interface BiomeDefinition {
   readonly effects: BiomeEffects;
 }
 
-// The arena uses different art in each quadrant, but every 180-degree mirrored
-// route has identical authoritative tuning. Spawn points, salvage, terrain,
-// and event zones therefore share the same rotational fairness contract.
-const RUGGED_ROUTE_EFFECTS = {
+// The arena uses different art in each quadrant, while all four terrain themes
+// share authoritative tuning. Radial routes therefore stay mechanically equal
+// for two-, three-, and four-player spawn layouts.
+const BALANCED_TERRAIN_EFFECTS = {
   movement: {
-    speedMultiplier: 0.76,
+    speedMultiplier: 0.8,
     turnRateMultiplier: 0.8,
     ambientDrift: null,
   },
-  oxygen: { drainMultiplier: 1.22, recoveryMultiplier: 0.9 },
-} as const satisfies BiomeEffects;
-
-const OPEN_ROUTE_EFFECTS = {
-  movement: {
-    speedMultiplier: 0.84,
-    turnRateMultiplier: 0.8,
-    ambientDrift: null,
-  },
-  oxygen: { drainMultiplier: 1.21, recoveryMultiplier: 0.88 },
+  oxygen: { drainMultiplier: 1.21, recoveryMultiplier: 0.89 },
 } as const satisfies BiomeEffects;
 
 /**
@@ -97,19 +88,19 @@ export const BIOME_DEFINITIONS = {
   },
   water: {
     id: "water",
-    effects: RUGGED_ROUTE_EFFECTS,
+    effects: BALANCED_TERRAIN_EFFECTS,
   },
   jungle: {
     id: "jungle",
-    effects: OPEN_ROUTE_EFFECTS,
+    effects: BALANCED_TERRAIN_EFFECTS,
   },
   desert: {
     id: "desert",
-    effects: OPEN_ROUTE_EFFECTS,
+    effects: BALANCED_TERRAIN_EFFECTS,
   },
   taiga: {
     id: "taiga",
-    effects: RUGGED_ROUTE_EFFECTS,
+    effects: BALANCED_TERRAIN_EFFECTS,
   },
 } as const satisfies Readonly<Record<BiomeId, BiomeDefinition>>;
 
@@ -143,7 +134,7 @@ export const WORLD_REGIONS = [
     id: "north-base-corridor",
     biome: "base_corridor",
     shape: "rectangle",
-    x: 72,
+    x: 142,
     y: 0,
     width: 66,
     height: 62,
@@ -152,84 +143,82 @@ export const WORLD_REGIONS = [
     id: "south-base-corridor",
     biome: "base_corridor",
     shape: "rectangle",
-    x: 72,
+    x: 142,
     y: 288,
     width: 66,
     height: 62,
   },
   {
+    id: "west-base-corridor",
+    biome: "base_corridor",
+    shape: "rectangle",
+    x: 0,
+    y: 142,
+    width: 62,
+    height: 66,
+  },
+  {
+    id: "east-base-corridor",
+    biome: "base_corridor",
+    shape: "rectangle",
+    x: 288,
+    y: 142,
+    width: 62,
+    height: 66,
+  },
+  {
     id: "vertical-neutral-corridor",
     biome: "neutral",
     shape: "rectangle",
-    x: 96,
+    x: 166,
     y: 0,
     width: 18,
     height: 350,
   },
   {
-    id: "equatorial-neutral-corridor",
+    id: "horizontal-neutral-corridor",
     biome: "neutral",
     shape: "rectangle",
     x: 0,
-    y: 168,
-    width: 210,
-    height: 14,
+    y: 166,
+    width: 350,
+    height: 18,
   },
   {
     id: "water-shelf",
     biome: "water",
-    shape: "polygon",
-    vertices: [
-      { x: 0, y: 0 },
-      { x: 112, y: 0 },
-      { x: 104, y: 42 },
-      { x: 110, y: 90 },
-      { x: 101, y: 132 },
-      { x: 105, y: 175 },
-      { x: 0, y: 175 },
-    ],
+    shape: "rectangle",
+    x: 0,
+    y: 0,
+    width: 175,
+    height: 175,
   },
   {
     id: "jungle-canopy",
     biome: "jungle",
-    shape: "polygon",
-    vertices: [
-      { x: 98, y: 0 },
-      { x: 210, y: 0 },
-      { x: 210, y: 175 },
-      { x: 105, y: 175 },
-      { x: 109, y: 132 },
-      { x: 100, y: 90 },
-      { x: 106, y: 42 },
-    ],
+    shape: "rectangle",
+    x: 175,
+    y: 0,
+    width: 175,
+    height: 175,
   },
   {
     id: "desert-basin",
     biome: "desert",
-    shape: "polygon",
-    vertices: [
-      { x: 0, y: 175 },
-      { x: 105, y: 175 },
-      { x: 101, y: 218 },
-      { x: 110, y: 260 },
-      { x: 104, y: 308 },
-      { x: 112, y: 350 },
-      { x: 0, y: 350 },
-    ],
+    shape: "rectangle",
+    x: 0,
+    y: 175,
+    width: 175,
+    height: 175,
   },
   {
     id: "taiga-ridge",
     biome: "taiga",
-    shape: "polygon",
-    vertices: [
-      { x: 105, y: 175 },
-      { x: 210, y: 175 },
-      { x: 210, y: 350 },
-      { x: 98, y: 350 },
-      { x: 106, y: 308 },
-      { x: 100, y: 260 },
-      { x: 109, y: 218 },
-    ],
+    shape: "rectangle",
+    x: 175,
+    y: 175,
+    width: 175,
+    height: 175,
   },
   {
     id: "neutral-remainder",
@@ -237,22 +226,32 @@ export const WORLD_REGIONS = [
     shape: "rectangle",
     x: 0,
     y: 0,
-    width: 210,
+    width: 350,
     height: 350,
   },
 ] as const satisfies readonly BiomeRegion[];
 
-/** Two-player placement remains independent from player IDs for future modes. */
+/** Cardinal reference slots used by map presentation and placement tests. */
 export const WORLD_BASE_SLOTS = {
   north: {
-    basePosition: { x: 105, y: 16 },
-    spawnPosition: { x: 105, y: 34 },
+    basePosition: { x: 175, y: 16 },
+    spawnPosition: { x: 175, y: 34 },
     facing: { x: 0, y: 1 },
   },
   south: {
-    basePosition: { x: 105, y: 334 },
-    spawnPosition: { x: 105, y: 316 },
+    basePosition: { x: 175, y: 334 },
+    spawnPosition: { x: 175, y: 316 },
     facing: { x: 0, y: -1 },
+  },
+  west: {
+    basePosition: { x: 16, y: 175 },
+    spawnPosition: { x: 34, y: 175 },
+    facing: { x: 1, y: 0 },
+  },
+  east: {
+    basePosition: { x: 334, y: 175 },
+    spawnPosition: { x: 316, y: 175 },
+    facing: { x: -1, y: 0 },
   },
 } as const;
 

@@ -8,7 +8,7 @@ describe("territory grid", () => {
   it("uses ten-unit pixel blocks across the full enlarged arena", () => {
     const grid = sampleTerritoryGrid(createInitialGameState());
 
-    expect(grid.columns).toBe(21);
+    expect(grid.columns).toBe(35);
     expect(grid.rows).toBe(35);
     expect(grid.cellWidth).toBe(10);
     expect(grid.cellHeight).toBe(10);

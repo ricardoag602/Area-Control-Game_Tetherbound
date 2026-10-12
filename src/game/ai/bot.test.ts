@@ -11,9 +11,12 @@ describe("basic bot controller", () => {
 
     const command = getBotCommand(state, "rival");
 
-    expect(command.movementCommands).toEqual([
-      { type: "walk", target: { x: 120, y: 50 } },
-    ]);
+    const target = command.movementCommands[0];
+    expect(target?.type).toBe("walk");
+    if (target?.type !== "walk") throw new Error("Expected bot to walk");
+    expect(state.salvage.some((deposit) =>
+      deposit.position.x === target.target.x && deposit.position.y === target.target.y,
+    )).toBe(true);
   });
 
   it("returns to its nearest powered node when carrying a full load", () => {

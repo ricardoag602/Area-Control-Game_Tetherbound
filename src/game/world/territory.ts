@@ -1,5 +1,5 @@
 import { GAME_RULES, WORLD } from "../constants";
-import type { GameState, PlayerId, Vec2 } from "../types";
+import { PLAYER_IDS, type GameState, type PlayerId, type Vec2 } from "../types";
 
 export type TerritoryOwner = PlayerId | "neutral" | "contested";
 
@@ -86,15 +86,13 @@ export function sampleTerritoryGrid(
 
 function collectPoweredNodes(state: GameState): TerritoryNode[] {
   const nodes: TerritoryNode[] = [];
-  const playerIds: readonly PlayerId[] = ["player", "rival"];
-
-  for (const owner of playerIds) {
+  for (const owner of state.activePlayerIds) {
     const basePosition = clampPosition(state.players[owner].basePosition);
     if (basePosition) nodes.push({ owner, position: basePosition });
   }
 
   for (const anchor of state.anchors) {
-    if (!anchor.powered) continue;
+    if (!anchor.powered || !state.activePlayerIds.includes(anchor.owner)) continue;
     const position = clampPosition(anchor.position);
     if (position) nodes.push({ owner: anchor.owner, position });
   }
@@ -107,28 +105,18 @@ function resolveTerritoryOwner(
   nodes: readonly TerritoryNode[],
   coverageRadiusSquared: number,
 ): TerritoryOwner {
-  let playerDistanceSquared = Number.POSITIVE_INFINITY;
-  let rivalDistanceSquared = Number.POSITIVE_INFINITY;
+  const claimingPlayers = new Set<PlayerId>();
 
   for (const node of nodes) {
     const distanceSquared = squaredDistance(position, node.position);
     if (distanceSquared > coverageRadiusSquared) continue;
 
-    if (node.owner === "player") {
-      playerDistanceSquared = Math.min(playerDistanceSquared, distanceSquared);
-    } else {
-      rivalDistanceSquared = Math.min(rivalDistanceSquared, distanceSquared);
-    }
+    claimingPlayers.add(node.owner);
   }
 
-  const playerClaims = Number.isFinite(playerDistanceSquared);
-  const rivalClaims = Number.isFinite(rivalDistanceSquared);
-
-  if (!playerClaims && !rivalClaims) return "neutral";
-  if (!rivalClaims) return "player";
-  if (!playerClaims) return "rival";
-
-  return "contested";
+  if (claimingPlayers.size === 0) return "neutral";
+  if (claimingPlayers.size > 1) return "contested";
+  return claimingPlayers.values().next().value as PlayerId;
 }
 
 function normalizeGridDimension(value: number | undefined, fallback: number) {
@@ -152,7 +140,14 @@ function squaredDistance(a: Vec2, b: Vec2) {
 }
 
 function createEmptyTotals(): TerritoryTotals {
-  return { player: 0, rival: 0, neutral: 0, contested: 0 };
+  return {
+    player: 0,
+    rival: 0,
+    player3: 0,
+    player4: 0,
+    neutral: 0,
+    contested: 0,
+  };
 }
 
 function mapTotals(
@@ -160,8 +155,9 @@ function mapTotals(
   mapValue: (value: number) => number,
 ): TerritoryTotals {
   return {
-    player: mapValue(totals.player),
-    rival: mapValue(totals.rival),
+    ...Object.fromEntries(
+      PLAYER_IDS.map((playerId) => [playerId, mapValue(totals[playerId])]),
+    ) as Record<PlayerId, number>,
     neutral: mapValue(totals.neutral),
     contested: mapValue(totals.contested),
   };

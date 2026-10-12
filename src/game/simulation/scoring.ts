@@ -5,9 +5,8 @@ import type {
   MatchPhase,
   PlayerId,
 } from "../types";
+import { PLAYER_IDS } from "../types";
 import { sampleTerritoryGrid } from "../world/territory";
-
-const PLAYER_IDS: readonly PlayerId[] = ["player", "rival"];
 
 export interface ScorableTerritory {
   /** Grid cells outside both guaranteed home zones. */
@@ -26,13 +25,14 @@ export interface ScorableTerritory {
  */
 export function sampleScorableTerritory(state: GameState): ScorableTerritory {
   const grid = sampleTerritoryGrid(state);
-  const totals: Record<PlayerId, number> = { player: 0, rival: 0 };
+  const totals = createNumberRecord(0);
+  const activePlayerIds = getActivePlayerIds(state);
   let totalCells = 0;
   const excludedRadiusSquared = GAME_RULES.safeZoneRadius ** 2;
 
   for (const cell of grid.cells) {
     if (
-      PLAYER_IDS.some((playerId) => {
+      activePlayerIds.some((playerId) => {
         const base = state.players[playerId].basePosition;
         const x = cell.position.x - base.x;
         const y = cell.position.y - base.y;
@@ -43,8 +43,8 @@ export function sampleScorableTerritory(state: GameState): ScorableTerritory {
     }
 
     totalCells += 1;
-    if (cell.owner === "player" || cell.owner === "rival") {
-      totals[cell.owner] += 1;
+    if (activePlayerIds.includes(cell.owner as PlayerId)) {
+      totals[cell.owner as PlayerId] += 1;
     }
   }
 
@@ -52,10 +52,7 @@ export function sampleScorableTerritory(state: GameState): ScorableTerritory {
   return {
     totalCells,
     totals,
-    fractions: {
-      player: totals.player / denominator,
-      rival: totals.rival / denominator,
-    },
+    fractions: mapPlayerRecord((playerId) => totals[playerId] / denominator),
   };
 }
 
@@ -85,7 +82,8 @@ export function getScorableTerritoryPercent(
  * current scorable territory.
  */
 export function normalizeMatchState(state: GameState): GameState {
-  const hasCurrentScores = hasCompleteScoreRecord(state.scores);
+  const activePlayerIds = getActivePlayerIds(state);
+  const hasCurrentScores = hasCompleteScoreRecord(state.scores, activePlayerIds);
   const elapsedMs = finiteNonNegative(
     state.elapsedMs,
     Math.max(0, GAME_RULES.matchDurationMs - finiteNonNegative(state.remainingMs, 0)),
@@ -94,26 +92,20 @@ export function normalizeMatchState(state: GameState): GameState {
   const scores = normalizeScores(state.scores);
   let overtimeScores = normalizeScores(state.overtimeScores);
   let overtimeElapsedMs = finiteNonNegative(state.overtimeElapsedMs, 0);
-  const hasDeployedAnchor: Record<PlayerId, boolean> = {
-    player:
-      state.hasDeployedAnchor?.player === true ||
-      state.anchors.some((anchor) => anchor.owner === "player"),
-    rival:
-      state.hasDeployedAnchor?.rival === true ||
-      state.anchors.some((anchor) => anchor.owner === "rival"),
-  };
-  const baseCollapseProgressMs: Record<PlayerId, number> = {
-    player: clamp(
-      finiteNonNegative(state.baseCollapseProgressMs?.player, 0),
-      0,
-      GAME_RULES.baseCollapseHoldMs,
-    ),
-    rival: clamp(
-      finiteNonNegative(state.baseCollapseProgressMs?.rival, 0),
-      0,
-      GAME_RULES.baseCollapseHoldMs,
-    ),
-  };
+  const hasDeployedAnchor = mapPlayerRecord((playerId) =>
+    state.hasDeployedAnchor?.[playerId] === true ||
+    state.anchors.some((anchor) => anchor.owner === playerId));
+  const baseCollapseProgressMs = mapPlayerRecord((playerId) => clamp(
+    finiteNonNegative(state.baseCollapseProgressMs?.[playerId], 0),
+    0,
+    GAME_RULES.baseCollapseHoldMs,
+  ));
+  const baseCollapseAttacker = mapPlayerRecord<PlayerId | null>((playerId) => {
+    const attacker = state.baseCollapseAttacker?.[playerId];
+    return attacker && activePlayerIds.includes(attacker) && attacker !== playerId
+      ? attacker
+      : null;
+  });
   let matchOutcome = normalizeOutcome(state.matchOutcome);
   let matchPhase = normalizePhase(state.matchPhase, elapsedMs, remainingMs);
   const phaseBeforeFinish = matchPhase;
@@ -122,12 +114,12 @@ export function normalizeMatchState(state: GameState): GameState {
     matchPhase = "finished";
   } else if (matchPhase === "finished") {
     const finishedAfterOvertime = overtimeElapsedMs > 0 ||
-      overtimeScores.player > 0 || overtimeScores.rival > 0;
+      activePlayerIds.some((playerId) => overtimeScores[playerId] > 0);
     matchPhase = "finished";
     matchOutcome = {
       winner: finishedAfterOvertime || !hasCurrentScores
         ? currentTerritoryWinner(state)
-        : scoreWinner(scores),
+        : scoreWinner(scores, activePlayerIds),
       reason: finishedAfterOvertime
         ? "overtime_territory"
         : "regulation_score",
@@ -139,15 +131,15 @@ export function normalizeMatchState(state: GameState): GameState {
       reason: "overtime_territory",
     };
   } else if (remainingMs <= 0 && hasCurrentScores) {
-    if (scoresAreWithinOvertimeMargin(scores)) {
+    if (scoresAreWithinOvertimeMargin(scores, activePlayerIds)) {
       matchPhase = "overtime";
       remainingMs = GAME_RULES.overtimeDurationMs;
       overtimeElapsedMs = 0;
-      overtimeScores = { player: 0, rival: 0 };
+      overtimeScores = createNumberRecord(0);
     } else {
       matchPhase = "finished";
       matchOutcome = {
-        winner: scoreWinner(scores),
+        winner: scoreWinner(scores, activePlayerIds),
         reason: "regulation_score",
       };
     }
@@ -166,6 +158,7 @@ export function normalizeMatchState(state: GameState): GameState {
 
   return {
     ...state,
+    activePlayerIds,
     elapsedMs,
     remainingMs,
     matchPhase,
@@ -174,6 +167,7 @@ export function normalizeMatchState(state: GameState): GameState {
     overtimeElapsedMs,
     hasDeployedAnchor,
     baseCollapseProgressMs,
+    baseCollapseAttacker,
     matchOutcome,
   };
 }
@@ -209,17 +203,24 @@ export function advanceMatchRules(
     );
     if (nextState.remainingMs > 0) return nextState;
 
-    if (scoresAreWithinOvertimeMargin(nextState.scores)) {
+    if (scoresAreWithinOvertimeMargin(
+      nextState.scores,
+      getActivePlayerIds(nextState),
+    )) {
       return {
         ...nextState,
         matchPhase: "overtime",
         remainingMs: GAME_RULES.overtimeDurationMs,
         overtimeElapsedMs: 0,
-        overtimeScores: { player: 0, rival: 0 },
+        overtimeScores: createNumberRecord(0),
       };
     }
 
-    return finishMatch(nextState, scoreWinner(nextState.scores), "regulation_score");
+    return finishMatch(
+      nextState,
+      scoreWinner(nextState.scores, getActivePlayerIds(nextState)),
+      "regulation_score",
+    );
   }
 
   if (phase === "overtime") {
@@ -240,12 +241,17 @@ export function advanceMatchRules(
       ),
     };
 
-    const overtimeDifference =
-      nextState.overtimeScores.player - nextState.overtimeScores.rival;
-    if (Math.abs(overtimeDifference) >= GAME_RULES.overtimeLeadPoints) {
+    const overtimeLeader = leadingPlayer(
+      nextState.overtimeScores,
+      getActivePlayerIds(nextState),
+    );
+    if (
+      overtimeLeader &&
+      overtimeLeader.lead >= GAME_RULES.overtimeLeadPoints
+    ) {
       return finishMatch(
         nextState,
-        overtimeDifference > 0 ? "player" : "rival",
+        overtimeLeader.playerId,
         "overtime_lead",
       );
     }
@@ -274,21 +280,17 @@ function awardTerritoryScore(
   if (weightedSeconds <= 0) return state;
 
   const territory = sampleScorableTerritory(state);
-  const gains: Record<PlayerId, number> = {
-    player: territory.fractions.player * weightedSeconds,
-    rival: territory.fractions.rival * weightedSeconds,
-  };
+  const activePlayerIds = getActivePlayerIds(state);
+  const gains = mapPlayerRecord((playerId) =>
+    activePlayerIds.includes(playerId)
+      ? territory.fractions[playerId] * weightedSeconds
+      : 0);
   return {
     ...state,
-    scores: {
-      player: state.scores.player + gains.player,
-      rival: state.scores.rival + gains.rival,
-    },
+    scores: mapPlayerRecord((playerId) => state.scores[playerId] + gains[playerId]),
     overtimeScores: durations.includeInOvertime
-      ? {
-          player: state.overtimeScores.player + gains.player,
-          rival: state.overtimeScores.rival + gains.rival,
-        }
+      ? mapPlayerRecord((playerId) =>
+          state.overtimeScores[playerId] + gains[playerId])
       : state.overtimeScores,
   };
 }
@@ -311,15 +313,12 @@ function regulationScoreSeconds(
 }
 
 function advanceBaseCollapse(state: GameState, deltaSeconds: number): GameState {
-  const hasDeployedAnchor: Record<PlayerId, boolean> = {
-    player:
-      state.hasDeployedAnchor.player ||
-      state.anchors.some((anchor) => anchor.owner === "player"),
-    rival:
-      state.hasDeployedAnchor.rival ||
-      state.anchors.some((anchor) => anchor.owner === "rival"),
-  };
+  const activePlayerIds = getActivePlayerIds(state);
+  const hasDeployedAnchor = mapPlayerRecord((playerId) =>
+    state.hasDeployedAnchor[playerId] ||
+    state.anchors.some((anchor) => anchor.owner === playerId));
   const progress = { ...state.baseCollapseProgressMs };
+  const attackers = { ...state.baseCollapseAttacker };
 
   // Setup is protected expansion time. Remember deployments made during it,
   // but do not allow an early knockout or carry capture progress into scoring.
@@ -327,31 +326,37 @@ function advanceBaseCollapse(state: GameState, deltaSeconds: number): GameState 
     return {
       ...state,
       hasDeployedAnchor,
-      baseCollapseProgressMs: { player: 0, rival: 0 },
+      baseCollapseProgressMs: createNumberRecord(0),
+      baseCollapseAttacker: mapPlayerRecord(() => null),
     };
   }
 
-  for (const defenderId of PLAYER_IDS) {
-    const attackerId = opponentOf(defenderId);
+  for (const defenderId of activePlayerIds) {
     const hasPoweredAnchor = state.anchors.some(
       (anchor) => anchor.owner === defenderId && anchor.powered,
     );
     if (!hasDeployedAnchor[defenderId] || hasPoweredAnchor) {
       progress[defenderId] = 0;
+      attackers[defenderId] = null;
       continue;
     }
 
     const base = state.players[defenderId].basePosition;
-    const attackerInside = distanceSquared(
-      state.players[attackerId].astronaut.position,
-      base,
-    ) <= GAME_RULES.baseCollapseRadius ** 2;
+    const attackersInside = activePlayerIds.filter((playerId) =>
+      playerId !== defenderId &&
+      distanceSquared(state.players[playerId].astronaut.position, base) <=
+        GAME_RULES.baseCollapseRadius ** 2);
     const defenderInside = distanceSquared(
       state.players[defenderId].astronaut.position,
       base,
     ) <= GAME_RULES.baseCollapseRadius ** 2;
 
-    if (attackerInside && !defenderInside) {
+    if (attackersInside.length === 1 && !defenderInside) {
+      const attackerId = attackersInside[0];
+      if (attackers[defenderId] !== attackerId) {
+        progress[defenderId] = 0;
+        attackers[defenderId] = attackerId;
+      }
       progress[defenderId] = Math.min(
         GAME_RULES.baseCollapseHoldMs,
         progress[defenderId] + deltaSeconds * 1_000,
@@ -364,6 +369,7 @@ function advanceBaseCollapse(state: GameState, deltaSeconds: number): GameState 
         0,
         progress[defenderId] - deltaSeconds * 1_000 * recoveryRate,
       );
+      if (progress[defenderId] <= 0) attackers[defenderId] = null;
     }
   }
 
@@ -371,37 +377,69 @@ function advanceBaseCollapse(state: GameState, deltaSeconds: number): GameState 
     ...state,
     hasDeployedAnchor,
     baseCollapseProgressMs: progress,
+    baseCollapseAttacker: attackers,
   };
-  const collapsed = PLAYER_IDS.filter(
+  const collapsed = activePlayerIds.filter(
     (defenderId) => progress[defenderId] >= GAME_RULES.baseCollapseHoldMs,
   );
-  if (collapsed.length === 1) {
+  const collapseWinners = new Set(
+    collapsed
+      .map((defenderId) => attackers[defenderId])
+      .filter((playerId): playerId is PlayerId => playerId !== null),
+  );
+  if (collapsed.length > 0 && collapseWinners.size === 1) {
     nextState = finishMatch(
       nextState,
-      opponentOf(collapsed[0]),
+      [...collapseWinners][0],
       "base_collapse",
     );
-  } else if (collapsed.length > 1) {
+  } else if (collapsed.length > 0) {
     nextState = finishMatch(nextState, "draw", "base_collapse");
   }
   return nextState;
 }
 
-function scoresAreWithinOvertimeMargin(scores: Record<PlayerId, number>) {
-  const leadingScore = Math.max(scores.player, scores.rival);
+function scoresAreWithinOvertimeMargin(
+  scores: Record<PlayerId, number>,
+  activePlayerIds: readonly PlayerId[],
+) {
+  const ordered = activePlayerIds.map((playerId) => scores[playerId]).sort((a, b) => b - a);
+  const leadingScore = ordered[0] ?? 0;
   if (leadingScore === 0) return true;
-  return Math.abs(scores.player - scores.rival) <=
+  return leadingScore - (ordered[1] ?? 0) <=
     leadingScore * GAME_RULES.overtimeScoreMarginRatio;
 }
 
 function currentTerritoryWinner(state: GameState) {
   const territory = sampleScorableTerritory(state).totals;
-  return scoreWinner(territory);
+  return scoreWinner(territory, getActivePlayerIds(state));
 }
 
-function scoreWinner(scores: Record<PlayerId, number>): PlayerId | "draw" {
-  if (Math.abs(scores.player - scores.rival) <= 1e-9) return "draw";
-  return scores.player > scores.rival ? "player" : "rival";
+function scoreWinner(
+  scores: Record<PlayerId, number>,
+  activePlayerIds: readonly PlayerId[],
+): PlayerId | "draw" {
+  const best = Math.max(...activePlayerIds.map((playerId) => scores[playerId]));
+  const winners = activePlayerIds.filter(
+    (playerId) => Math.abs(scores[playerId] - best) <= 1e-9,
+  );
+  return winners.length === 1 ? winners[0] : "draw";
+}
+
+function leadingPlayer(
+  scores: Record<PlayerId, number>,
+  activePlayerIds: readonly PlayerId[],
+) {
+  const ordered = activePlayerIds
+    .map((playerId) => ({ playerId, score: scores[playerId] }))
+    .sort((a, b) => b.score - a.score);
+  if (!ordered[0] || !ordered[1] || Math.abs(ordered[0].score - ordered[1].score) <= 1e-9) {
+    return null;
+  }
+  return {
+    playerId: ordered[0].playerId,
+    lead: ordered[0].score - ordered[1].score,
+  };
 }
 
 function finishMatch(
@@ -438,23 +476,20 @@ function normalizePhase(
 function normalizeScores(
   scores: Partial<Record<PlayerId, number>> | undefined,
 ): Record<PlayerId, number> {
-  return {
-    player: finiteNonNegative(scores?.player, 0),
-    rival: finiteNonNegative(scores?.rival, 0),
-  };
+  return mapPlayerRecord((playerId) => finiteNonNegative(scores?.[playerId], 0));
 }
 
 function hasCompleteScoreRecord(
   scores: Partial<Record<PlayerId, number>> | undefined,
+  activePlayerIds: readonly PlayerId[],
 ) {
-  return Number.isFinite(scores?.player) && Number.isFinite(scores?.rival);
+  return activePlayerIds.every((playerId) => Number.isFinite(scores?.[playerId]));
 }
 
 function normalizeOutcome(outcome: MatchOutcome | null | undefined) {
   if (!outcome) return null;
   const validWinner =
-    outcome.winner === "player" ||
-    outcome.winner === "rival" ||
+    PLAYER_IDS.includes(outcome.winner as PlayerId) ||
     outcome.winner === "draw";
   const validReason =
     outcome.reason === "regulation_score" ||
@@ -462,10 +497,6 @@ function normalizeOutcome(outcome: MatchOutcome | null | undefined) {
     outcome.reason === "overtime_territory" ||
     outcome.reason === "base_collapse";
   return validWinner && validReason ? outcome : null;
-}
-
-function opponentOf(playerId: PlayerId): PlayerId {
-  return playerId === "player" ? "rival" : "player";
 }
 
 function distanceSquared(
@@ -483,4 +514,24 @@ function finiteNonNegative(value: number | undefined, fallback: number) {
 
 function clamp(value: number, minimum: number, maximum: number) {
   return Math.min(maximum, Math.max(minimum, value));
+}
+
+function getActivePlayerIds(state: GameState): PlayerId[] {
+  const requested = Array.isArray(state.activePlayerIds)
+    ? state.activePlayerIds.filter((playerId, index, all): playerId is PlayerId =>
+        PLAYER_IDS.includes(playerId as PlayerId) && all.indexOf(playerId) === index)
+    : [];
+  return requested.length >= 2 ? requested.slice(0, 4) : ["player", "rival"];
+}
+
+function createNumberRecord(value: number): Record<PlayerId, number> {
+  return mapPlayerRecord(() => value);
+}
+
+function mapPlayerRecord<T>(
+  mapValue: (playerId: PlayerId) => T,
+): Record<PlayerId, T> {
+  return Object.fromEntries(
+    PLAYER_IDS.map((playerId) => [playerId, mapValue(playerId)]),
+  ) as Record<PlayerId, T>;
 }

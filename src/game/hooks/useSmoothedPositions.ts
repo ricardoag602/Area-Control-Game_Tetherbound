@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import type { GameState, MovementMode, PlayerId, Vec2 } from "../types";
+import { PLAYER_IDS, type GameState, type MovementMode, type PlayerId, type Vec2 } from "../types";
 
-const PLAYER_IDS: PlayerId[] = ["player", "rival"];
 const CORRECTION_MS = 80;
 const BURST_CORRECTION_MS = 32;
 const SNAP_DISTANCE = 12;
@@ -19,10 +18,11 @@ type RenderPositions = Record<PlayerId, Vec2>;
 
 export function useSmoothedPositions(state: GameState, enabled: boolean): RenderPositions {
   const canonical = canonicalPositions(state);
-  const tracks = useRef<Record<PlayerId, PositionTrack>>({
-    player: createTrack(state, "player"),
-    rival: createTrack(state, "rival"),
-  });
+  const tracks = useRef<Record<PlayerId, PositionTrack>>(
+    Object.fromEntries(
+      PLAYER_IDS.map((playerId) => [playerId, createTrack(state, playerId)]),
+    ) as Record<PlayerId, PositionTrack>,
+  );
   const [rendered, setRendered] = useState<RenderPositions>(canonical);
   const [reduceMotion, setReduceMotion] = useState(prefersReducedMotion);
   const smoothingActive = useRef(enabled && !reduceMotion);
@@ -75,6 +75,12 @@ export function useSmoothedPositions(state: GameState, enabled: boolean): Render
     state.players.rival.astronaut.position.x,
     state.players.rival.astronaut.position.y,
     state.players.rival.astronaut.movement.mode,
+    state.players.player3.astronaut.position.x,
+    state.players.player3.astronaut.position.y,
+    state.players.player3.astronaut.movement.mode,
+    state.players.player4.astronaut.position.x,
+    state.players.player4.astronaut.position.y,
+    state.players.player4.astronaut.movement.mode,
   ]);
 
   useEffect(() => {
@@ -109,6 +115,12 @@ export function useSmoothedPositions(state: GameState, enabled: boolean): Render
     state.players.rival.astronaut.position.x,
     state.players.rival.astronaut.position.y,
     state.players.rival.astronaut.movement.mode,
+    state.players.player3.astronaut.position.x,
+    state.players.player3.astronaut.position.y,
+    state.players.player3.astronaut.movement.mode,
+    state.players.player4.astronaut.position.x,
+    state.players.player4.astronaut.position.y,
+    state.players.player4.astronaut.movement.mode,
   ]);
 
   return enabled && !reduceMotion ? rendered : canonical;
@@ -127,17 +139,17 @@ function createTrack(state: GameState, playerId: PlayerId): PositionTrack {
 }
 
 function canonicalPositions(state: GameState): RenderPositions {
-  return {
-    player: { ...state.players.player.astronaut.position },
-    rival: { ...state.players.rival.astronaut.position },
-  };
+  return Object.fromEntries(PLAYER_IDS.map((playerId) => [
+    playerId,
+    { ...state.players[playerId].astronaut.position },
+  ])) as RenderPositions;
 }
 
 function currentPositions(tracks: Record<PlayerId, PositionTrack>): RenderPositions {
-  return {
-    player: { ...tracks.player.displayed },
-    rival: { ...tracks.rival.displayed },
-  };
+  return Object.fromEntries(PLAYER_IDS.map((playerId) => [
+    playerId,
+    { ...tracks[playerId].displayed },
+  ])) as RenderPositions;
 }
 
 function interpolate(from: Vec2, to: Vec2, amount: number): Vec2 {

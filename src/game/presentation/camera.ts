@@ -11,14 +11,17 @@ export const CAMERA_RULES = {
   // Charging opens the frame further so the player can read the launch route.
   maximumChargeZoomOut: 0.14,
   chargeZoomDecayRate: 4,
-  // Allows charge zoom-out, spring overshoot, and low-oxygen zoom to combine.
-  minimumSpringZoom: 0.84,
+  // A wide browser can turn otherwise unused side gutters into a small view bonus.
+  maximumViewportBufferZoomOut: 0.06,
+  // Allows charge zoom-out, the desktop view bonus, and low-oxygen zoom to combine.
+  minimumSpringZoom: 0.8,
   maximumSpringZoom: 1.16,
   springAngularFrequency: 16,
   springDampingRatio: 0.78,
   maximumSpringDeltaSeconds: 1 / 30,
   springSettleDistance: 0.0001,
   springSettleVelocity: 0.0005,
+  matchEndOverviewDurationMs: 850,
 } as const;
 
 export interface CameraViewBox {
@@ -43,6 +46,27 @@ export function chargeZoomTarget(chargeProgress: number) {
   const eased = (1 - Math.exp(-decay * progress)) /
     (1 - Math.exp(-decay));
   return 1 - CAMERA_RULES.maximumChargeZoomOut * eased;
+}
+
+/**
+ * Converts unused horizontal browser space into a subtle camera advantage.
+ * The bonus grows with the combined side gutters and caps once those gutters
+ * equal the arena width, keeping ultrawide screens from revealing too much.
+ */
+export function calculateViewportBufferZoom(
+  viewportWidth: number,
+  arenaWidth: number,
+) {
+  const safeArenaWidth = finitePositiveOr(arenaWidth, 0);
+  const safeViewportWidth = finitePositiveOr(viewportWidth, safeArenaWidth);
+  if (safeArenaWidth === 0 || safeViewportWidth <= safeArenaWidth) return 1;
+
+  const bufferRatio = clamp(
+    (safeViewportWidth - safeArenaWidth) / safeArenaWidth,
+    0,
+    1,
+  );
+  return 1 - CAMERA_RULES.maximumViewportBufferZoomOut * bufferRatio;
 }
 
 /**
@@ -81,6 +105,50 @@ export function calculateCameraViewBox(
     y: safeCenter.y - height / 2,
     width,
     height,
+  };
+}
+
+/** Fits the complete arena around its fixed center without cropping an edge. */
+export function calculateOverviewViewBox(aspectRatio: number): CameraViewBox {
+  const safeAspect = sanitizeAspectRatio(aspectRatio);
+  const worldAspect = WORLD.width / WORLD.height;
+  const padding = 1.04;
+  let width: number;
+  let height: number;
+
+  if (safeAspect >= worldAspect) {
+    height = WORLD.height * padding;
+    width = height * safeAspect;
+  } else {
+    width = WORLD.width * padding;
+    height = width / safeAspect;
+  }
+
+  return {
+    x: WORLD.width / 2 - width / 2,
+    y: WORLD.height / 2 - height / 2,
+    width,
+    height,
+  };
+}
+
+/** Front-loads the pullback, then eases gently into the fixed overview. */
+export function easeMatchEndOverview(progress: number) {
+  const clamped = clamp(finiteOr(progress, 0), 0, 1);
+  return 1 - Math.pow(1 - clamped, 4);
+}
+
+export function interpolateCameraViewBox(
+  from: CameraViewBox,
+  to: CameraViewBox,
+  amount: number,
+): CameraViewBox {
+  const progress = clamp(finiteOr(amount, 0), 0, 1);
+  return {
+    x: from.x + (to.x - from.x) * progress,
+    y: from.y + (to.y - from.y) * progress,
+    width: from.width + (to.width - from.width) * progress,
+    height: from.height + (to.height - from.height) * progress,
   };
 }
 
@@ -144,6 +212,10 @@ function sanitizeAspectRatio(aspectRatio: number) {
 
 function finiteOr(value: number, fallback: number) {
   return Number.isFinite(value) ? value : fallback;
+}
+
+function finitePositiveOr(value: number, fallback: number) {
+  return Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
 function clamp(value: number, minimum: number, maximum: number) {

@@ -1,4 +1,4 @@
-import type { GameState, MovementCommand, PlayerId } from "../game/types";
+import type { GameState, MovementCommand, PlayerId, PlayerLimit } from "../game/types";
 import { createClientId } from "./clientId";
 import { resolveRoomServerUrl } from "./connectionInfo";
 import type { ClientMessage, RoomSnapshot, ServerMessage } from "./protocol";
@@ -17,7 +17,7 @@ export interface RoomClientSnapshot {
 
 type Listener = () => void;
 type SessionIntent =
-  | { kind: "create"; requestId: string; name: string; playerLimit: 2 }
+  | { kind: "create"; requestId: string; name: string; playerLimit: PlayerLimit }
   | { kind: "join"; requestId: string; name: string; roomCode: string };
 
 const RETRY_DELAYS = [250, 500, 1_000, 2_000, 4_000];
@@ -62,7 +62,7 @@ export class RoomClient {
 
   getSnapshot = () => this.snapshot;
 
-  createRoom(name: string, playerLimit: 2 = 2) {
+  createRoom(name: string, playerLimit: PlayerLimit = 2) {
     this.sessionToken = null;
     this.begin({ kind: "create", requestId: createClientId(), name: name.trim(), playerLimit });
   }

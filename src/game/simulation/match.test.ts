@@ -93,7 +93,7 @@ describe("Tetherbound simulation", () => {
 
   it("drains oxygen outside the network", () => {
     const state = createInitialGameState();
-    state.players.player.astronaut.position = { x: 105, y: 100 };
+    state.players.player.astronaut.position = { x: 175, y: 100 };
     const next = advanceGame(
       state,
       { sequence: 1, command: { type: "stop" } },
@@ -107,9 +107,9 @@ describe("Tetherbound simulation", () => {
 
   it("applies biome oxygen pressure and terrain drag authoritatively", () => {
     const neutral = createInitialGameState("terrain-test");
-    neutral.players.player.astronaut.position = { x: 105, y: 100 };
+    neutral.players.player.astronaut.position = { x: 175, y: 100 };
     const water = createInitialGameState("terrain-test");
-    water.players.player.astronaut.position = { x: 20, y: 80 };
+    water.players.player.astronaut.position = { x: 80, y: 80 };
 
     const command = {
       sequence: 1,
@@ -117,12 +117,12 @@ describe("Tetherbound simulation", () => {
     };
     const neutralNext = advanceGame(neutral, command, 0.5);
     const waterNext = advanceGame(water, command, 0.5);
-    const neutralDistance = neutralNext.players.player.astronaut.position.x - 105;
-    const waterDistance = waterNext.players.player.astronaut.position.x - 20;
+    const neutralDistance = neutralNext.players.player.astronaut.position.x - 175;
+    const waterDistance = waterNext.players.player.astronaut.position.x - 80;
 
     expect(waterDistance).toBeLessThan(neutralDistance);
     expect(waterNext.players.player.astronaut.oxygen).toBeCloseTo(
-      GAME_RULES.oxygenMaximum - GAME_RULES.oxygenDrainPerSecond * 1.22 * 0.5,
+      GAME_RULES.oxygenMaximum - GAME_RULES.oxygenDrainPerSecond * 1.21 * 0.5,
       8,
     );
   });
@@ -287,10 +287,20 @@ describe("Tetherbound simulation", () => {
 
   it("applies taiga weather to safe-zone oxygen recovery", () => {
     const state = createInitialGameState("recovery-weather");
-    const taigaPosition = { x: 150, y: 220 };
-    state.players.player.basePosition = taigaPosition;
+    const taigaPosition = { x: 270, y: 270 };
     state.players.player.astronaut.position = taigaPosition;
     state.players.player.astronaut.oxygen = 50;
+    state.anchors = [{
+      id: "taiga-life-support",
+      owner: "player",
+      position: taigaPosition,
+      parentId: "player-base",
+      powered: true,
+      disruptedUntilMs: null,
+      protectedUntilMs: null,
+      overloadProgress: 0,
+      repairProgress: 0,
+    }];
     state.activeWeather = [{
       id: "snow-test",
       sequence: 0,
@@ -308,7 +318,7 @@ describe("Tetherbound simulation", () => {
     const next = advanceMatch(state, {}, 0.05);
 
     expect(next.players.player.astronaut.oxygen).toBeCloseTo(
-      50 + GAME_RULES.oxygenRecoveryPerSecond * 0.9 * 0.85 * 0.05,
+      50 + GAME_RULES.oxygenRecoveryPerSecond * 0.89 * 0.85 * 0.05,
       8,
     );
   });

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { GAME_RULES, WORLD } from "../constants";
 import { createInitialGameState } from "../state";
-import type { Anchor, GameState, PlayerId, Vec2 } from "../types";
+import type { Anchor, GameState, PlayerId, PlayerLimit, Vec2 } from "../types";
 import { createWorldTimeline } from "../world/timeline";
 import { advanceMatch } from "./match";
 import { deployAnchor } from "./tetherNetwork";
@@ -16,8 +16,8 @@ describe("authoritative match scoring", () => {
     const state = regulationState();
     const empty = sampleScorableTerritory(state);
 
-    expect(empty.totals).toEqual({ player: 0, rival: 0 });
-    expect(empty.totalCells).toBeLessThan(21 * 35);
+    expect(empty.totals).toEqual({ player: 0, rival: 0, player3: 0, player4: 0 });
+    expect(empty.totalCells).toBeLessThan(35 * 35);
 
     state.anchors = [
       anchor("player-claim", "player", { x: 80, y: 175 }),
@@ -55,7 +55,7 @@ describe("authoritative match scoring", () => {
     const setupEnd = advanceMatch(state, {}, 0.05);
 
     expect(setupEnd.matchPhase).toBe("regulation");
-    expect(setupEnd.scores).toEqual({ player: 0, rival: 0 });
+    expect(setupEnd.scores).toEqual({ player: 0, rival: 0, player3: 0, player4: 0 });
     expect(setupEnd.baseCollapseProgressMs.rival).toBe(0);
 
     const firstScoredTick = advanceMatch(setupEnd, {}, 0.05);
@@ -82,14 +82,14 @@ describe("authoritative match scoring", () => {
   it("enters overtime within three percent without applying the lead rule early", () => {
     const state = regulationState();
     state.remainingMs = 50;
-    state.scores = { player: 200, rival: 194.1 };
+    state.scores = { ...state.scores, player: 200, rival: 194.1 };
 
     const overtime = advanceMatch(state, {}, 0.05);
 
     expect(overtime.matchPhase).toBe("overtime");
     expect(overtime.remainingMs).toBe(GAME_RULES.overtimeDurationMs);
     expect(overtime.matchOutcome).toBeNull();
-    expect(overtime.overtimeScores).toEqual({ player: 0, rival: 0 });
+    expect(overtime.overtimeScores).toEqual({ player: 0, rival: 0, player3: 0, player4: 0 });
 
     const firstOvertimeTick = advanceMatch(overtime, {}, 0.05);
     expect(firstOvertimeTick.matchPhase).toBe("overtime");
@@ -99,7 +99,7 @@ describe("authoritative match scoring", () => {
   it("finishes regulation when the cumulative scores are outside three percent", () => {
     const state = regulationState();
     state.remainingMs = 50;
-    state.scores = { player: 100, rival: 96.9 };
+    state.scores = { ...state.scores, player: 100, rival: 96.9 };
 
     const finished = advanceMatch(state, {}, 0.05);
 
@@ -110,10 +110,45 @@ describe("authoritative match scoring", () => {
     });
   });
 
+  it("awards a four-player regulation match to the sole highest score", () => {
+    const state = regulationState(4);
+    state.remainingMs = 50;
+    state.scores = {
+      player: 100,
+      rival: 98,
+      player3: 110,
+      player4: 72,
+    };
+
+    const finished = advanceMatch(state, {}, 0.05);
+
+    expect(finished.matchOutcome).toEqual({
+      winner: "player3",
+      reason: "regulation_score",
+    });
+  });
+
+  it("compares the leader with the runner-up for multiplayer overtime", () => {
+    const state = regulationState(4);
+    state.remainingMs = 50;
+    state.scores = {
+      player: 60,
+      rival: 98,
+      player3: 100,
+      player4: 40,
+    };
+
+    const overtime = advanceMatch(state, {}, 0.05);
+
+    expect(overtime.matchPhase).toBe("overtime");
+    expect(overtime.matchOutcome).toBeNull();
+  });
+
   it("ends overtime on a five-point overtime-only lead", () => {
     const state = overtimeState();
-    state.scores = { player: 200, rival: 194.1 };
+    state.scores = { ...state.scores, player: 200, rival: 194.1 };
     state.overtimeScores = {
+      ...state.overtimeScores,
       player: GAME_RULES.overtimeLeadPoints - 0.01,
       rival: 0,
     };
@@ -176,7 +211,7 @@ describe("authoritative match scoring", () => {
   it("does not generate a supply drop on the regulation-to-overtime tick", () => {
     const state = regulationState();
     state.remainingMs = 50;
-    state.scores = { player: 100, rival: 100 };
+    state.scores = { ...state.scores, player: 100, rival: 100 };
     state.worldTimeline = createWorldTimeline("no-boundary-drop", {
       rules: {
         ticksPerSecond: 20,
@@ -253,6 +288,34 @@ describe("authoritative match scoring", () => {
     expect(next.matchOutcome).toBeNull();
   });
 
+  it("contests a multiplayer base hold and does not transfer saved progress", () => {
+    const state = regulationState(3);
+    const rivalBase = state.players.rival.basePosition;
+    state.anchors = [{
+      ...anchor("rival-offline", "rival", { x: rivalBase.x, y: rivalBase.y + 50 }, false),
+      disruptedUntilMs: state.elapsedMs + GAME_RULES.anchorDisruptionDurationMs,
+    }];
+    state.hasDeployedAnchor.rival = true;
+    state.players.player.astronaut.position = { ...rivalBase };
+    state.players.player3.astronaut.position = { ...rivalBase };
+    state.players.rival.astronaut.position = { x: rivalBase.x, y: rivalBase.y + 30 };
+
+    const contested = advanceMatch(state, {}, 1);
+    expect(contested.baseCollapseProgressMs.rival).toBe(0);
+    expect(contested.baseCollapseAttacker.rival).toBeNull();
+
+    contested.players.player3.astronaut.position = { x: 175, y: 175 };
+    const claimedByPlayer = advanceMatch(contested, {}, 1);
+    expect(claimedByPlayer.baseCollapseProgressMs.rival).toBe(1_000);
+    expect(claimedByPlayer.baseCollapseAttacker.rival).toBe("player");
+
+    claimedByPlayer.players.player.astronaut.position = { x: 175, y: 175 };
+    claimedByPlayer.players.player3.astronaut.position = { ...rivalBase };
+    const switched = advanceMatch(claimedByPlayer, {}, 1);
+    expect(switched.baseCollapseProgressMs.rival).toBe(1_000);
+    expect(switched.baseCollapseAttacker.rival).toBe("player3");
+  });
+
   it("decays an abandoned hold, clears it faster when defended, and resets on power", () => {
     const state = vulnerableBaseState();
     state.baseCollapseProgressMs.rival = 6_000;
@@ -284,6 +347,7 @@ describe("authoritative match scoring", () => {
     const base = state.players.player.basePosition;
     state.hasDeployedAnchor.player = true;
     state.baseCollapseProgressMs.player = 6_000;
+    state.baseCollapseAttacker.player = "rival";
     state.players.player.astronaut.position = { x: base.x, y: base.y - 8 };
 
     const restored = deployAnchor(state, "player");
@@ -294,6 +358,7 @@ describe("authoritative match scoring", () => {
       powered: true,
     });
     expect(restored.baseCollapseProgressMs.player).toBe(0);
+    expect(restored.baseCollapseAttacker.player).toBeNull();
   });
 
   it("normalizes active states serialized before the match-rule fields existed", () => {
@@ -328,7 +393,7 @@ describe("authoritative match scoring", () => {
   it("resolves an expired current regulation state from cumulative score", () => {
     const state = regulationState();
     state.remainingMs = 0;
-    state.scores = { player: 10, rival: 1 };
+    state.scores = { ...state.scores, player: 10, rival: 1 };
     state.anchors = [anchor("rival-map-lead", "rival", { x: 80, y: 175 })];
 
     const normalized = normalizeMatchState(state);
@@ -343,13 +408,13 @@ describe("authoritative match scoring", () => {
   it("restores an expired close regulation state into overtime", () => {
     const state = regulationState();
     state.remainingMs = 0;
-    state.scores = { player: 100, rival: 98 };
+    state.scores = { ...state.scores, player: 100, rival: 98 };
 
     const normalized = normalizeMatchState(state);
 
     expect(normalized.matchPhase).toBe("overtime");
     expect(normalized.remainingMs).toBe(GAME_RULES.overtimeDurationMs);
-    expect(normalized.overtimeScores).toEqual({ player: 0, rival: 0 });
+    expect(normalized.overtimeScores).toEqual({ player: 0, rival: 0, player3: 0, player4: 0 });
     expect(normalized.matchOutcome).toBeNull();
   });
 
@@ -378,8 +443,8 @@ describe("authoritative match scoring", () => {
   });
 });
 
-function regulationState() {
-  const state = createInitialGameState("scoring-rules");
+function regulationState(playerLimit: PlayerLimit = 2) {
+  const state = createInitialGameState("scoring-rules", playerLimit);
   state.matchPhase = "regulation";
   state.elapsedMs = GAME_RULES.setupDurationMs;
   state.remainingMs = GAME_RULES.matchDurationMs - state.elapsedMs;

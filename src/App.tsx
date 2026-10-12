@@ -147,7 +147,7 @@ export function App() {
         {view === "create-room" && (
           <CreateRoomView connection={roomSession.connection} error={roomSession.error}
             onBack={() => setView("menu")}
-            onCreate={(name) => { roomClient.createRoom(name, 2); setView("lobby"); }} />
+            onCreate={(name, playerLimit) => { roomClient.createRoom(name, playerLimit); setView("lobby"); }} />
         )}
         {view === "join-room" && (
           <JoinRoomView code={joinRoomCode} connection={roomSession.connection} error={roomSession.error}
@@ -231,7 +231,7 @@ function MainMenu({
         </button>
         <button className="button button--secondary" onClick={onCreateRoom}>
           <span>Create Multiplayer Room</span>
-          <small>Invite another astronaut</small>
+          <small>Invite up to three astronauts</small>
         </button>
         <button className="button button--secondary" onClick={onJoinRoom}>
           <span>Join Multiplayer Room</span>

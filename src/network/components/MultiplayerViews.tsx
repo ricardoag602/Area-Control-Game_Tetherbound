@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
+import { PostMatchScene } from "../../game/components/PostMatchScene";
 import { sampleScorableTerritory } from "../../game/simulation/scoring";
-import type { GameState, MatchFinishReason, PlayerId } from "../../game/types";
+import { PLAYER_IDS, type GameState, type MatchFinishReason, type PlayerId, type PlayerLimit } from "../../game/types";
 import type { ConnectionStatus } from "../RoomClient";
 import { isValidRoomCode, normalizeRoomCode } from "../connectionInfo";
 import type { RoomSnapshot } from "../protocol";
@@ -9,11 +10,12 @@ interface CreateRoomViewProps {
   connection: ConnectionStatus;
   error: string | null;
   onBack: () => void;
-  onCreate: (name: string) => void;
+  onCreate: (name: string, playerLimit: PlayerLimit) => void;
 }
 
 export function CreateRoomView({ connection, error, onBack, onCreate }: CreateRoomViewProps) {
   const [name, setName] = useState("Explorer 1");
+  const [playerLimit, setPlayerLimit] = useState<PlayerLimit>(2);
   const busy = connection === "connecting";
 
   return (
@@ -22,18 +24,32 @@ export function CreateRoomView({ connection, error, onBack, onCreate }: CreateRo
       <header className="section-heading">
         <p className="eyebrow">Establish a link</p>
         <h2>Create room</h2>
-        <p>The server will reserve a private two-player room and generate its invitation link.</p>
+        <p>Choose a balanced room for two, three, or four astronauts.</p>
       </header>
       <div className="room-card">
         <label className="field-label" htmlFor="host-name">Astronaut name</label>
         <input id="host-name" className="text-input" value={name} maxLength={20}
           onChange={(event) => setName(event.target.value)} autoComplete="nickname" />
-        <div className="room-rule-row"><span>Player limit</span><strong>2</strong></div>
-        <p className="notice">Additional player counts remain disabled until two-player balance is stable.</p>
+        <span className="field-label">Player limit</span>
+        <div className="player-limit-picker" aria-label="Player limit">
+          {([2, 3, 4] as const).map((limit) => (
+            <button
+              key={limit}
+              type="button"
+              className={limit === playerLimit ? "player-limit-option player-limit-option--selected" : "player-limit-option"}
+              aria-pressed={limit === playerLimit}
+              onClick={() => setPlayerLimit(limit)}
+            >
+              <strong>{limit}</strong>
+              <span>players</span>
+            </button>
+          ))}
+        </div>
+        <p className="notice">Every room size uses equal-distance spawns and mirrored starting resources.</p>
         {error && <p className="form-error" role="alert">{error}</p>}
       </div>
       <button className="button button--primary" disabled={busy || !name.trim()}
-        onClick={() => onCreate(name)}>
+        onClick={() => onCreate(name, playerLimit)}>
         {busy ? "Contacting room server…" : "Create Multiplayer Room"}
       </button>
     </div>
@@ -132,7 +148,7 @@ export function RoomLobby({ room, localPlayerId, connection, latencyMs, invitati
         <div className="room-code-block">
           <span>Room code</span>
           <strong>{room.code}</strong>
-          <p>The other player can choose Join Multiplayer Room and enter this code.</p>
+          <p>Other players can choose Join Multiplayer Room and enter this code.</p>
         </div>
         <span className="field-label">Invitation link</span>
         <code className="invite-url">{invitationLink}</code>
@@ -144,7 +160,7 @@ export function RoomLobby({ room, localPlayerId, connection, latencyMs, invitati
         )}
       </div>
       <div className="room-card lobby-card">
-        {(["player", "rival"] as const).map((slot) => {
+        {PLAYER_IDS.slice(0, room.playerLimit).map((slot) => {
           const player = room.players.find((candidate) => candidate.id === slot);
           return (
             <div className="lobby-player" key={slot}>
@@ -162,7 +178,7 @@ export function RoomLobby({ room, localPlayerId, connection, latencyMs, invitati
         onClick={() => onReadyChange(!localPlayer?.ready)}>
         {localPlayer?.ready ? "Cancel Ready" : "Ready Up"}
       </button>
-      <p className="lobby-help">The match starts automatically when both astronauts are connected and ready.</p>
+      <p className="lobby-help">The match starts automatically when all astronauts are connected and ready.</p>
     </div>
   );
 }
@@ -184,31 +200,27 @@ export function MatchResultView({
   onRequestRematch,
   onLeave,
 }: MatchResultViewProps) {
-  const opponentId: PlayerId = localPlayerId === "player" ? "rival" : "player";
   const territory = sampleScorableTerritory(state).fractions;
-  const localTerritory = territory[localPlayerId] * 100;
-  const opponentTerritory = territory[opponentId] * 100;
   const localPlayer = room.players.find((player) => player.id === localPlayerId);
-  const opponent = room.players.find((player) => player.id === opponentId);
   const canRematch =
     room.players.length === room.playerLimit && room.players.every((player) => player.connected);
   const winner = room.winner ?? state.matchOutcome?.winner ?? scoreWinner(state);
   const finishReason = room.finishReason ?? state.matchOutcome?.reason ?? "regulation_score";
   const isDraw = winner === "draw";
   const didWin = winner === localPlayerId;
+  const winnerName = winner === "draw"
+    ? null
+    : winner === localPlayerId
+      ? "You"
+      : room.players.find((player) => player.id === winner)?.name ?? "A rival";
   const result = isDraw ? "Draw" : didWin ? "Victory" : "Defeat";
   const decidedInOvertime =
     finishReason === "overtime_lead" || finishReason === "overtime_territory";
-  const resultSummary = describeFinish(
-    finishReason,
-    didWin,
-    isDraw,
-    opponent?.name ?? "The rival",
-  );
+  const resultSummary = describeFinish(finishReason, didWin, isDraw, winnerName);
   const connectionLabel = getConnectionLabel(connection);
 
   return (
-    <div className="screen screen--room screen--result">
+    <PostMatchScene state={state} localPlayerId={localPlayerId}>
       <header className="section-heading result-heading">
         <p className="eyebrow">{finishLabel(finishReason)}</p>
         <h2>{result}</h2>
@@ -216,24 +228,28 @@ export function MatchResultView({
       </header>
 
       <div className="result-scores" aria-label="Final scores">
-        <div className={`result-score result-score--${localPlayerId}`}>
-          <span>You</span>
-          <strong>{state.scores[localPlayerId].toFixed(1)}</strong>
-          <small>signal · {Math.round(localTerritory)}% final territory</small>
-        </div>
-        <div className={`result-score result-score--${opponentId}`}>
-          <span>{opponent?.name ?? "Rival"}</span>
-          <strong>{state.scores[opponentId].toFixed(1)}</strong>
-          <small>signal · {Math.round(opponentTerritory)}% final territory</small>
-        </div>
+        {state.activePlayerIds.map((playerId) => {
+          const player = room.players.find((candidate) => candidate.id === playerId);
+          return (
+            <div className={`result-score result-score--${playerId}`} key={playerId}>
+              <span>{playerId === localPlayerId ? "You" : player?.name ?? "Rival"}</span>
+              <strong>{state.scores[playerId].toFixed(1)}</strong>
+              <small>signal · {Math.round(territory[playerId] * 100)}% final territory</small>
+            </div>
+          );
+        })}
       </div>
 
       {decidedInOvertime && (
         <p className="result-overtime-score">
           <span>Overtime-only signal</span>
           <strong>
-            You {state.overtimeScores[localPlayerId].toFixed(1)} ·{" "}
-            {opponent?.name ?? "Rival"} {state.overtimeScores[opponentId].toFixed(1)}
+            {state.activePlayerIds.map((playerId) => {
+              const name = playerId === localPlayerId
+                ? "You"
+                : room.players.find((player) => player.id === playerId)?.name ?? "Rival";
+              return `${name} ${state.overtimeScores[playerId].toFixed(1)}`;
+            }).join(" · ")}
           </strong>
         </p>
       )}
@@ -252,7 +268,7 @@ export function MatchResultView({
       </div>
 
       <div className="room-card lobby-card">
-        {(["player", "rival"] as const).map((playerId) => {
+        {state.activePlayerIds.map((playerId) => {
           const player = room.players.find((candidate) => candidate.id === playerId);
           const name = playerId === localPlayerId
             ? `${player?.name ?? "You"} (You)`
@@ -282,10 +298,10 @@ export function MatchResultView({
       </div>
       <p className="lobby-help">
         {canRematch
-          ? "A new match starts when both astronauts request a rematch."
-          : "The other astronaut has left; return to the menu to create another room."}
+          ? "A new match starts when every astronaut requests a rematch."
+          : "An astronaut has left; return to the menu to create another room."}
       </p>
-    </div>
+    </PostMatchScene>
   );
 }
 
@@ -299,8 +315,11 @@ function getConnectionLabel(connection: ConnectionStatus) {
 }
 
 function scoreWinner(state: GameState): PlayerId | "draw" {
-  if (state.scores.player === state.scores.rival) return "draw";
-  return state.scores.player > state.scores.rival ? "player" : "rival";
+  const best = Math.max(...state.activePlayerIds.map((playerId) => state.scores[playerId]));
+  const leaders = state.activePlayerIds.filter(
+    (playerId) => Math.abs(state.scores[playerId] - best) <= 1e-9,
+  );
+  return leaders.length === 1 ? leaders[0] : "draw";
 }
 
 function finishLabel(reason: MatchFinishReason | "disconnect") {
@@ -317,14 +336,14 @@ function describeFinish(
   reason: MatchFinishReason | "disconnect",
   didWin: boolean,
   isDraw: boolean,
-  opponentName: string,
+  winnerName: string | null,
 ) {
   if (reason === "disconnect") {
     if (isDraw) {
       return "Both signals were lost before either astronaut could reconnect.";
     }
     return didWin
-      ? `${opponentName}'s signal was lost before it could reconnect.`
+      ? "The disconnected signal did not recover in time."
       : "Your signal was lost before it could reconnect.";
   }
   if (isDraw) {
@@ -339,19 +358,19 @@ function describeFinish(
   switch (reason) {
     case "base_collapse":
       return didWin
-        ? `You held ${opponentName}'s exposed base until its network collapsed.`
-        : `${opponentName} held your exposed base until your network collapsed.`;
+        ? "You held an exposed base until its network collapsed."
+        : `${winnerName ?? "A rival"} completed a decisive base collapse.`;
     case "overtime_lead":
       return didWin
         ? "You established the decisive signal lead in overtime."
-        : `${opponentName} established the decisive signal lead in overtime.`;
+        : `${winnerName ?? "A rival"} established the decisive signal lead in overtime.`;
     case "overtime_territory":
       return didWin
         ? "You controlled more live territory when overtime expired."
-        : `${opponentName} controlled more live territory when overtime expired.`;
+        : `${winnerName ?? "A rival"} controlled more live territory when overtime expired.`;
     default:
       return didWin
         ? "Your network accumulated more signal during regulation."
-        : `${opponentName}'s network accumulated more signal during regulation.`;
+        : `${winnerName ?? "A rival"} accumulated the most signal during regulation.`;
   }
 }

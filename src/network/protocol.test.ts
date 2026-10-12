@@ -3,6 +3,29 @@ import { WORLD } from "../game/constants";
 import { parseClientMessage } from "./protocol";
 
 describe("movement protocol", () => {
+  it.each([2, 3, 4] as const)("accepts a %i-player room", (playerLimit) => {
+    expect(parseClientMessage(JSON.stringify({
+      type: "create_room",
+      requestId: "room-request-123",
+      name: "Host",
+      playerLimit,
+    }))).toEqual({
+      type: "create_room",
+      requestId: "room-request-123",
+      name: "Host",
+      playerLimit,
+    });
+  });
+
+  it.each([1, 5, 2.5, "4"])("rejects invalid room limit %j", (playerLimit) => {
+    expect(parseClientMessage(JSON.stringify({
+      type: "create_room",
+      requestId: "room-request-123",
+      name: "Host",
+      playerLimit,
+    }))).toBeNull();
+  });
+
   it.each([
     { type: "tank_drive", throttle: 1, steering: -1 },
     { type: "tank_drive", throttle: 0, steering: 1 },

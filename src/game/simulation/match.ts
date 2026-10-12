@@ -1,7 +1,7 @@
 import { GAME_RULES, SIMULATION_RULES, WORLD } from "../constants";
 import { clampToWorld, distanceToSegment } from "../geometry";
 import { advanceMovement, cancelMovement } from "../movement/movement";
-import type { GameInput, GameState, MatchInputs, PlayerId, Vec2 } from "../types";
+import { PLAYER_IDS, type GameInput, type GameState, type MatchInputs, type PlayerId, type Vec2 } from "../types";
 import {
   getAmbientDrift,
   getEnvironmentModifiers,
@@ -80,7 +80,7 @@ function mergeMatchInputs(
   incoming: MatchInputs,
 ): MatchInputs {
   const merged: MatchInputs = {};
-  for (const playerId of ["player", "rival"] as const) {
+  for (const playerId of PLAYER_IDS) {
     const commands = [
       ...(pending?.[playerId] ?? []),
       ...(incoming[playerId] ?? []),
@@ -102,9 +102,9 @@ function advanceMatchStep(
     remainingMs: Math.max(0, state.remainingMs - deltaSeconds * 1000),
   };
   const activePlayers: PlayerId[] = [];
-  const movementPaths = {} as Record<PlayerId, { start: Vec2; end: Vec2 }>;
+  const movementPaths: Partial<Record<PlayerId, { start: Vec2; end: Vec2 }>> = {};
 
-  for (const playerId of ["player", "rival"] as const) {
+  for (const playerId of state.activePlayerIds) {
     const result = advancePlayer(nextState, playerId, inputs[playerId] ?? [], deltaSeconds);
     nextState = result.state;
     movementPaths[playerId] = result.path;
@@ -221,11 +221,11 @@ function advancePlayer(
 function collectSalvage(
   state: GameState,
   activePlayers: PlayerId[],
-  movementPaths: Record<PlayerId, { start: Vec2; end: Vec2 }>,
+  movementPaths: Partial<Record<PlayerId, { start: Vec2; end: Vec2 }>>,
 ): GameState {
   let players = state.players;
   // Exact ties rotate using the number of deposits already claimed. This keeps
-  // either player slot from permanently owning the simultaneous-pickup advantage.
+  // any player slot from permanently owning the simultaneous-pickup advantage.
   let tieBreakTurn = state.salvage.filter((deposit) => deposit.collected).length;
 
   const salvage = state.salvage.map((deposit) => {
@@ -240,8 +240,8 @@ function collectSalvage(
         playerId,
         distance: distanceToSegment(
           deposit.position,
-          movementPaths[playerId].start,
-          movementPaths[playerId].end,
+          movementPaths[playerId]!.start,
+          movementPaths[playerId]!.end,
         ),
       }))
       .filter((contender) => contender.distance <= GAME_RULES.collectionRadius)
@@ -249,12 +249,13 @@ function collectSalvage(
 
     if (contenders.length === 0) return deposit;
 
+    const nearestDistance = contenders[0].distance;
+    const tied = contenders.filter(
+      (contender) => Math.abs(contender.distance - nearestDistance) <= DISTANCE_TIE_EPSILON,
+    );
     let winner = contenders[0].playerId;
-    if (
-      contenders.length === 2 &&
-      Math.abs(contenders[0].distance - contenders[1].distance) <= DISTANCE_TIE_EPSILON
-    ) {
-      winner = tieBreakTurn % 2 === 0 ? "player" : "rival";
+    if (tied.length > 1) {
+      winner = tied[tieBreakTurn % tied.length].playerId;
       tieBreakTurn += 1;
     }
 

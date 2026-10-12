@@ -28,7 +28,7 @@ and result screens resolve the same outcome.
 Tether conflict is proximity-driven inside the authoritative fixed-step
 simulation. Components may derive rings, hatching, and cable treatments from
 the compact anchor state, but presentation-only geometry must not be serialized
-into `GameState`. Scoring samples the world grid, excludes cells inside either
+into `GameState`. Scoring samples the world grid, excludes cells inside any
 guaranteed home safe-zone radius from its numerator and denominator, and awards
 each player that owned fraction per second. The opening setup phase contributes
 no points, the final regulation minute applies the Signal Surge multiplier, and

@@ -3,9 +3,11 @@ import { GAME_RULES } from "../constants";
 import {
   getAnchorPowerState,
   getAnchorPresence,
+  getPlayerConflictTarget,
   type AnchorPowerState,
 } from "../simulation/tetherConflict";
 import { baseId } from "../state";
+import { OBJECT_SPRITES } from "../presentation/objectSprites";
 import type { Anchor, GameState, PlayerId, Vec2 } from "../types";
 
 interface TetherNetworkLayerProps {
@@ -21,8 +23,8 @@ interface NetworkNode {
 
 interface ZoneOverlap {
   id: string;
-  playerNode: NetworkNode;
-  rivalNode: NetworkNode;
+  firstNode: NetworkNode;
+  secondNode: NetworkNode;
 }
 
 /**
@@ -36,9 +38,9 @@ export function TetherNetworkLayer({
 }: TetherNetworkLayerProps) {
   const instanceId = useId().replaceAll(":", "");
   const hatchId = `tether-contested-hatch-${instanceId}`;
-  const playerNodes = collectPoweredNodes(state, "player");
-  const rivalNodes = collectPoweredNodes(state, "rival");
-  const overlaps = collectZoneOverlaps(playerNodes, rivalNodes);
+  const networkNodes = state.activePlayerIds.map((playerId) =>
+    collectPoweredNodes(state, playerId));
+  const overlaps = collectZoneOverlaps(networkNodes);
 
   return (
     <g className="world__tether-layer">
@@ -55,24 +57,26 @@ export function TetherNetworkLayer({
         {overlaps.map((overlap) => (
           <clipPath key={overlap.id} id={`${overlap.id}-${instanceId}`}>
             <circle
-              cx={overlap.rivalNode.position.x}
-              cy={overlap.rivalNode.position.y}
+              cx={overlap.secondNode.position.x}
+              cy={overlap.secondNode.position.y}
               r={GAME_RULES.safeZoneRadius}
             />
           </clipPath>
         ))}
       </defs>
 
-      <NetworkZones state={state} playerId="rival" highlightDelivery={localPlayerId === "rival"} />
-      <NetworkZones state={state} playerId="player" highlightDelivery={localPlayerId === "player"} />
+      {state.activePlayerIds.map((playerId) => (
+        <NetworkZones key={playerId} state={state} playerId={playerId}
+          highlightDelivery={localPlayerId === playerId} />
+      ))}
 
       <g className="world__contested-zones" aria-hidden="true">
         {overlaps.map((overlap) => (
           <circle
             key={overlap.id}
             className="world__contested-zone"
-            cx={overlap.playerNode.position.x}
-            cy={overlap.playerNode.position.y}
+            cx={overlap.firstNode.position.x}
+            cy={overlap.firstNode.position.y}
             r={GAME_RULES.safeZoneRadius}
             fill={`url(#${hatchId})`}
             clipPath={`url(#${overlap.id}-${instanceId})`}
@@ -80,15 +84,23 @@ export function TetherNetworkLayer({
         ))}
       </g>
 
-      <NetworkConnections state={state} playerId="rival" />
-      <NetworkConnections state={state} playerId="player" />
-
       <InteractionFilaments state={state} renderPositions={renderPositions} />
 
-      <NetworkNodes state={state} playerId="rival" highlightDelivery={localPlayerId === "rival"}
-        isLocalBase={localPlayerId === "rival"} />
-      <NetworkNodes state={state} playerId="player" highlightDelivery={localPlayerId === "player"}
-        isLocalBase={localPlayerId === "player"} />
+      {state.activePlayerIds.map((playerId) => (
+        <NetworkNodes key={playerId} state={state} playerId={playerId}
+          highlightDelivery={localPlayerId === playerId}
+          isLocalBase={localPlayerId === playerId} />
+      ))}
+    </g>
+  );
+}
+
+export function TetherCableLayer({ state }: { state: GameState }) {
+  return (
+    <g className="world__tether-layer">
+      {state.activePlayerIds.map((playerId) => (
+        <NetworkConnections key={playerId} state={state} playerId={playerId} />
+      ))}
     </g>
   );
 }
@@ -149,14 +161,24 @@ function NetworkConnections({
         const parent = nodes.get(anchor.parentId);
         if (!parent) return null;
         const powerState = getAnchorPowerState(anchor, state.elapsedMs);
+        const deltaX = anchor.position.x - parent.x;
+        const deltaY = anchor.position.y - parent.y;
+        const length = Math.hypot(deltaX, deltaY);
+        if (length <= 0.01) return null;
+        const midpointX = (parent.x + anchor.position.x) / 2;
+        const midpointY = (parent.y + anchor.position.y) / 2;
+        const angle = Math.atan2(deltaY, deltaX) * 180 / Math.PI;
         return (
-          <line
+          <image
             key={anchor.id}
-            className={`world__cable world__cable--${powerState}`}
-            x1={parent.x}
-            y1={parent.y}
-            x2={anchor.position.x}
-            y2={anchor.position.y}
+            className={`world__cable-sprite world__cable-sprite--${powerState}`}
+            href={OBJECT_SPRITES[playerId].tether}
+            x={-length / 2}
+            y="-3"
+            width={length}
+            height="6"
+            preserveAspectRatio="none"
+            transform={`translate(${midpointX} ${midpointY}) rotate(${angle})`}
           />
         );
       })}
@@ -201,15 +223,22 @@ function NetworkNodes({
         role="img"
         aria-label={`${isLocalBase ? "Your" : "Rival"} base${collapseProgressMs > 0 ? ` collapse ${Math.round(collapseProgressMs / GAME_RULES.baseCollapseHoldMs * 100)} percent` : baseVulnerable ? " exposed" : " secure"}`}
       >
+        <image
+          className="world__base-sprite"
+          href={OBJECT_SPRITES[playerId].homeBase}
+          x="-9.75"
+          y="-9.75"
+          width="19.5"
+          height="19.5"
+          preserveAspectRatio="xMidYMid meet"
+          aria-hidden="true"
+        />
         {baseVulnerable && (
           <BaseCollapseIndicator
             progressMs={collapseProgressMs}
             isLocalBase={isLocalBase}
           />
         )}
-        <circle className="world__base-ring" r="5" />
-        <path className="world__base-spokes" d="M -3 0 H 3 M 0 -3 V 3" />
-        <circle className="world__base-core" r="2.5" />
       </g>
     </g>
   );
@@ -276,6 +305,16 @@ function AnchorMarker({
       aria-label={`${anchor.owner} tether ${stateDescription}`}
     >
       <title>{`${anchor.owner} tether: ${stateDescription}`}</title>
+      <image
+        className={`world__break-point-sprite world__break-point-sprite--${powerState}`}
+        href={OBJECT_SPRITES[anchor.owner].breakPoint}
+        x="-3.8"
+        y="-3.8"
+        width="7.6"
+        height="7.6"
+        preserveAspectRatio="xMidYMid meet"
+        aria-hidden="true"
+      />
       {(powerState === "powered" || powerState === "shielded") && (
         <>
           <circle
@@ -283,8 +322,6 @@ function AnchorMarker({
             r={GAME_RULES.deliveryRadius}
             aria-hidden="true"
           />
-          <circle className="world__anchor world__anchor--powered" r="2.2" />
-          <circle className="world__anchor-core" r=".8" />
           {powerState === "shielded" && (
             <>
               <circle className="world__anchor-shield" r="3.35" />
@@ -295,21 +332,12 @@ function AnchorMarker({
       )}
       {powerState === "disrupted" && (
         <>
-          <circle className="world__anchor world__anchor--disrupted" r="2.45" />
           <path className="world__anchor-break" d="M -2.8 -2.8 L -1 -1 L -2.4 .7 M 2.8 2.8 L 1 1 L 2.4 -.7" />
           <circle className="world__anchor-disruption-pulse" r="3.25" />
         </>
       )}
       {powerState === "severed" && (
         <>
-          <rect
-            className="world__anchor world__anchor--severed"
-            x="-1.8"
-            y="-1.8"
-            width="3.6"
-            height="3.6"
-            transform="rotate(45)"
-          />
           <path className="world__anchor-severed-mark" d="M -2.5 0 H -1 M 1 0 H 2.5" />
         </>
       )}
@@ -357,9 +385,10 @@ function InteractionFilaments({
   state,
   renderPositions,
 }: Pick<TetherNetworkLayerProps, "state" | "renderPositions">) {
-  const collapseFilaments = (["player", "rival"] as const).flatMap((defenderId) => {
+  const collapseFilaments = state.activePlayerIds.flatMap((defenderId) => {
     if (state.baseCollapseProgressMs[defenderId] <= 0) return [];
-    const attackerId: PlayerId = defenderId === "player" ? "rival" : "player";
+    const attackerId = state.baseCollapseAttacker[defenderId];
+    if (!attackerId) return [];
     const defenderBase = state.players[defenderId].basePosition;
     const attackerPosition = state.players[attackerId].astronaut.position;
     if (
@@ -384,18 +413,21 @@ function InteractionFilaments({
     <g className="world__interaction-filaments" aria-hidden="true">
       {state.anchors.flatMap((anchor) => {
         const presence = getAnchorPresence(state, anchor);
-        const attackerId: PlayerId = anchor.owner === "player" ? "rival" : "player";
         const strands: ReactElement[] = [];
 
         if (anchor.overloadProgress > 0 && presence.attackerNearby) {
-          strands.push(
+          const attackers = state.activePlayerIds.filter((playerId) => {
+            const target = getPlayerConflictTarget(state, playerId);
+            return target?.kind === "overload" && target.anchorId === anchor.id;
+          });
+          strands.push(...attackers.map((attackerId) =>
             <InteractionFilament
-              key={`${anchor.id}-overload`}
+              key={`${anchor.id}-${attackerId}-overload`}
               kind="overload"
               start={renderPositions[attackerId]}
               end={anchor.position}
             />,
-          );
+          ));
         }
         if (
           anchor.repairProgress > 0 &&
@@ -461,25 +493,26 @@ function collectPoweredNodes(
   ];
 }
 
-function collectZoneOverlaps(
-  playerNodes: readonly NetworkNode[],
-  rivalNodes: readonly NetworkNode[],
-): ZoneOverlap[] {
+function collectZoneOverlaps(networks: readonly (readonly NetworkNode[])[]): ZoneOverlap[] {
   const diameter = GAME_RULES.safeZoneRadius * 2;
   const overlaps: ZoneOverlap[] = [];
 
-  for (const playerNode of playerNodes) {
-    for (const rivalNode of rivalNodes) {
+  for (let first = 0; first < networks.length; first += 1) {
+    for (let second = first + 1; second < networks.length; second += 1) {
+      for (const firstNode of networks[first]) {
+        for (const secondNode of networks[second]) {
       const distance = Math.hypot(
-        rivalNode.position.x - playerNode.position.x,
-        rivalNode.position.y - playerNode.position.y,
+        secondNode.position.x - firstNode.position.x,
+        secondNode.position.y - firstNode.position.y,
       );
       if (distance >= diameter) continue;
       overlaps.push({
         id: `tether-overlap-${overlaps.length}`,
-        playerNode,
-        rivalNode,
+        firstNode,
+        secondNode,
       });
+        }
+      }
     }
   }
 

@@ -1,10 +1,23 @@
-import { useCallback, useEffect, useRef, useState, type PointerEvent } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type PointerEvent,
+} from "react";
 import { WORLD } from "../constants";
 import {
   buildChargeRadarPath,
   calculateChargeRadar,
   chargeRadarEndpoint,
 } from "../presentation/chargeRadar";
+import {
+  ASTRONAUT_SPRITES,
+  getAstronautSpriteFrame,
+} from "../presentation/astronautSprites";
+import { DROPPED_MATERIAL_SPRITE } from "../presentation/objectSprites";
 import { MOVEMENT_RULES } from "../movement/movement";
 import { getEnvironmentModifiers } from "../simulation/environment";
 import {
@@ -31,8 +44,10 @@ import type {
 } from "../types";
 import { useFollowCamera } from "../hooks/useFollowCamera";
 import { useSmoothedPositions } from "../hooks/useSmoothedPositions";
-import { BiomeLayer } from "./BiomeLayer";
-import { TetherNetworkLayer } from "./TetherNetworkLayer";
+import { PixiTerrainLayer } from "./PixiTerrainLayer";
+import { TetherCableLayer, TetherNetworkLayer } from "./TetherNetworkLayer";
+
+const ThreeAstronautLayer = lazy(() => import("./ThreeAstronautLayer"));
 
 interface ArenaRendererProps {
   state: GameState;
@@ -41,6 +56,8 @@ interface ArenaRendererProps {
   disabled?: boolean;
   interpolatePositions?: boolean;
   oxygenZoomMultiplier?: number;
+  cameraMode?: "follow" | "overview";
+  onOverviewSettled?: () => void;
 }
 
 type GestureMode =
@@ -69,6 +86,8 @@ export function ArenaRenderer({
   disabled = false,
   interpolatePositions = false,
   oxygenZoomMultiplier = 1,
+  cameraMode = "follow",
+  onOverviewSettled,
 }: ArenaRendererProps) {
   const renderPositions = useSmoothedPositions(state, interpolatePositions);
   const localAstronaut = state.players[localPlayerId].astronaut;
@@ -77,6 +96,8 @@ export function ArenaRenderer({
     localAstronaut.position,
   );
   const arenaRef = useRef<SVGSVGElement>(null);
+  const [threeAstronautsReady, setThreeAstronautsReady] = useState(false);
+  const [threeObjectsReady, setThreeObjectsReady] = useState(false);
   const [chargeIntentActive, setChargeIntentActive] = useState(false);
   const camera = useFollowCamera(
     arenaRef,
@@ -84,6 +105,8 @@ export function ArenaRenderer({
     localAstronaut.movement,
     chargeIntentActive,
     oxygenZoomMultiplier,
+    cameraMode,
+    onOverviewSettled,
   );
   const commandRef = useRef(onMovementCommand);
   const localAstronautRef = useRef(localAstronaut);
@@ -399,73 +422,81 @@ export function ArenaRenderer({
   }
 
   return (
-    <svg
-      ref={arenaRef}
-      className="world"
-      viewBox={`${camera.x} ${camera.y} ${camera.width} ${camera.height}`}
-      role="application"
-      tabIndex={0}
-      aria-roledescription="game arena"
-      aria-label="Tetherbound game arena. Keyboard controls stay active throughout the match. Use W and S or the up and down arrows to drive forward and reverse. Use A and D or the left and right arrows to turn. Tap W or S, then press and hold that same key to charge; release it to burst. Press T to deploy a tether and Escape to cancel keyboard movement. Drag to move with a pointer. On a touch screen, tap once, then press and hold nearby to charge toward your finger; release to burst."
-      aria-keyshortcuts="W A S D T ArrowUp ArrowDown ArrowLeft ArrowRight"
-      aria-disabled={disabled}
-      onContextMenu={(event) => event.preventDefault()}
-      onPointerDown={beginGesture}
-      onPointerMove={continueGesture}
-      onPointerUp={finishGesture}
-      onPointerCancel={cancelPointer}
-      onLostPointerCapture={losePointerCapture}
-    >
-      <defs>
-        <pattern id="world-grid" width="5" height="5" patternUnits="userSpaceOnUse">
-          <circle cx="1" cy="1" r="0.22" fill="#76909b" opacity=".22" />
-        </pattern>
-      </defs>
-      <rect className="world__void" x={-WORLD.width} y={-WORLD.height}
-        width={WORLD.width * 3} height={WORLD.height * 3} />
-      <rect className="world__surface" width={WORLD.width} height={WORLD.height} />
-      <BiomeLayer />
-      <rect width={WORLD.width} height={WORLD.height} fill="url(#world-grid)" />
-      <rect className="world__boundary" width={WORLD.width} height={WORLD.height} />
+    <div className={`world-stage${threeAstronautsReady ? " world-stage--three-astronauts" : ""}${threeObjectsReady ? " world-stage--three-objects" : ""}`}>
+      <PixiTerrainLayer state={state} camera={camera} />
+      <svg
+        className="world world--tether-sprites"
+        viewBox={`${camera.x} ${camera.y} ${camera.width} ${camera.height}`}
+        aria-hidden="true"
+      >
+        <TetherCableLayer state={state} />
+      </svg>
+      <svg
+        ref={arenaRef}
+        className="world"
+        viewBox={`${camera.x} ${camera.y} ${camera.width} ${camera.height}`}
+        role="application"
+        tabIndex={0}
+        aria-roledescription="game arena"
+        aria-label="Tetherbound game arena. Keyboard controls stay active throughout the match. Use W and S or the up and down arrows to drive forward and reverse. Use A and D or the left and right arrows to turn. Tap W or S, then press and hold that same key to charge; release it to burst. Press T to deploy a tether and Escape to cancel keyboard movement. Drag to move with a pointer. On a touch screen, tap once, then press and hold nearby to charge toward your finger; release to burst."
+        aria-keyshortcuts="W A S D T ArrowUp ArrowDown ArrowLeft ArrowRight"
+        aria-disabled={disabled}
+        onContextMenu={(event) => event.preventDefault()}
+        onPointerDown={beginGesture}
+        onPointerMove={continueGesture}
+        onPointerUp={finishGesture}
+        onPointerCancel={cancelPointer}
+        onLostPointerCapture={losePointerCapture}
+      >
+        <rect className="world__boundary" width={WORLD.width} height={WORLD.height} />
 
-      <TetherNetworkLayer
-        state={state}
-        renderPositions={renderPositions}
-        localPlayerId={localPlayerId}
-      />
-
-      {state.salvage.filter((deposit) => !deposit.collected).map((deposit) => (
-        <rect
-          key={deposit.id}
-          className="world__salvage"
-          x={deposit.position.x - 1.7}
-          y={deposit.position.y - 1.7}
-          width="3.4"
-          height="3.4"
-          rx=".4"
-          transform={`rotate(45 ${deposit.position.x} ${deposit.position.y})`}
+        <TetherNetworkLayer
+          state={state}
+          renderPositions={renderPositions}
+          localPlayerId={localPlayerId}
         />
-      ))}
 
-      <ChargeFeedback
-        astronaut={localAstronaut}
-        position={renderPositions[localPlayerId]}
-        playerId={localPlayerId}
-        touchChargePreview={touchChargePreview}
-        turnRateMultiplier={localEnvironment.turnRateMultiplier}
-      />
+        {state.salvage.filter((deposit) => !deposit.collected).map((deposit) => (
+          <image
+            key={deposit.id}
+            className="world__salvage-sprite"
+            href={DROPPED_MATERIAL_SPRITE}
+            x={deposit.position.x - 2.1}
+            y={deposit.position.y - 2.1}
+            width="4.2"
+            height="4.2"
+            preserveAspectRatio="xMidYMid meet"
+            aria-hidden="true"
+          />
+        ))}
 
-      <Astronaut
-        astronaut={state.players.rival.astronaut}
-        position={renderPositions.rival}
-        playerId="rival"
-      />
-      <Astronaut
-        astronaut={state.players.player.astronaut}
-        position={renderPositions.player}
-        playerId="player"
-      />
-    </svg>
+        <ChargeFeedback
+          astronaut={localAstronaut}
+          position={renderPositions[localPlayerId]}
+          playerId={localPlayerId}
+          touchChargePreview={touchChargePreview}
+          turnRateMultiplier={localEnvironment.turnRateMultiplier}
+        />
+
+        {state.activePlayerIds.map((playerId) => (
+          <Astronaut
+            key={playerId}
+            astronaut={state.players[playerId].astronaut}
+            position={renderPositions[playerId]}
+            playerId={playerId}
+          />
+        ))}
+      </svg>
+      <Suspense fallback={null}>
+        <ThreeAstronautLayer
+          state={state}
+          renderPositions={renderPositions}
+          camera={camera}
+          onReadyChange={setThreeAstronautsReady}
+          onObjectReadyChange={setThreeObjectsReady}
+        />
+      </Suspense>
+    </div>
   );
 }
 
@@ -547,7 +578,9 @@ function Astronaut({
 }) {
   const movement = astronaut.movement;
   const speed = Math.hypot(movement.velocity.x, movement.velocity.y);
-  const moving = movement.mode !== "burst" && speed > 0.01;
+  const walking = movement.mode === "walking" && speed > 0.01;
+  const activeFrame = getAstronautSpriteFrame(movement);
+  const sprites = ASTRONAUT_SPRITES[playerId];
   const movementBlend = Math.min(1, speed / MOVEMENT_RULES.walkMaximumSpeed);
   const directionLength = Math.hypot(movement.facing.x, movement.facing.y);
   const direction = directionLength > 0
@@ -556,15 +589,16 @@ function Astronaut({
   const headingRadians = Number.isFinite(movement.headingRadians)
     ? movement.headingRadians
     : Math.atan2(direction.y, direction.x);
-  const headingDegrees = headingRadians * 180 / Math.PI + 90;
-  const sway = moving
+  // The painted astronaut faces toward the bottom of its source image.
+  const headingDegrees = headingRadians * 180 / Math.PI - 90;
+  const sway = walking
     ? Math.sin(movement.gaitPhase) * MOVEMENT_RULES.visualSwayDistance * movementBlend
     : 0;
-  const bob = moving
+  const bob = walking
     ? (1 - Math.cos(movement.gaitPhase * 2)) * 0.5 *
       MOVEMENT_RULES.visualBobDistance * movementBlend
     : 0;
-  const lean = moving
+  const lean = walking
     ? Math.sin(movement.gaitPhase) * MOVEMENT_RULES.visualLeanDegrees * movementBlend
     : 0;
   return (
@@ -573,9 +607,21 @@ function Astronaut({
       <g className="world__astronaut-facing" transform={`rotate(${headingDegrees})`}>
         <g className="world__astronaut-body"
           transform={`translate(${sway} ${-bob}) rotate(${lean})`}>
-          <circle r="3" />
-          <rect x="-1.6" y="-.9" width="3.2" height="1.8" rx=".9" />
-          <path className="world__astronaut-nose" d="M 0 -4 L 1 -2.3 L -1 -2.3 Z" />
+          {Object.entries(sprites).map(([frame, href]) => (
+            <image
+              key={frame}
+              className={`world__astronaut-sprite world__astronaut-sprite--${frame}${
+                activeFrame === frame ? " world__astronaut-sprite--active" : ""
+              }`}
+              href={href}
+              x="-6"
+              y="-6"
+              width="12"
+              height="12"
+              preserveAspectRatio="xMidYMid meet"
+              aria-hidden="true"
+            />
+          ))}
         </g>
       </g>
     </g>

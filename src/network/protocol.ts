@@ -4,6 +4,7 @@ import type {
   MatchFinishReason,
   MovementCommand,
   PlayerId,
+  PlayerLimit,
   Vec2,
 } from "../game/types";
 
@@ -19,7 +20,7 @@ export interface RoomPlayerSummary {
 export interface RoomSnapshot {
   code: string;
   revision: number;
-  playerLimit: number;
+  playerLimit: PlayerLimit;
   phase: RoomPhase;
   players: RoomPlayerSummary[];
   winner: PlayerId | "draw" | null;
@@ -27,7 +28,7 @@ export interface RoomSnapshot {
 }
 
 export type ClientMessage =
-  | { type: "create_room"; requestId: string; name: string; playerLimit: 2 }
+  | { type: "create_room"; requestId: string; name: string; playerLimit: PlayerLimit }
   | { type: "join_room"; requestId: string; code: string; name: string; sessionToken?: string }
   | { type: "set_ready"; ready: boolean }
   | { type: "movement_input"; seq: number; command: MovementCommand }
@@ -63,12 +64,12 @@ export function parseClientMessage(value: string): ClientMessage | null {
 
     switch (candidate.type) {
       case "create_room":
-        return validRequestId(candidate.requestId) && validName(candidate.name) && candidate.playerLimit === 2
+        return validRequestId(candidate.requestId) && validName(candidate.name) && validPlayerLimit(candidate.playerLimit)
           ? {
               type: "create_room",
               requestId: candidate.requestId,
               name: candidate.name,
-              playerLimit: 2,
+              playerLimit: candidate.playerLimit,
             }
           : null;
       case "join_room":
@@ -134,6 +135,10 @@ function validActionId(value: unknown): value is string {
 
 function validSequence(value: unknown): value is number {
   return Number.isSafeInteger(value) && (value as number) >= 0;
+}
+
+function validPlayerLimit(value: unknown): value is PlayerLimit {
+  return value === 2 || value === 3 || value === 4;
 }
 
 function validTarget(value: unknown): value is Vec2 | null {

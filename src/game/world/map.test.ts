@@ -14,20 +14,20 @@ import {
 } from "./map";
 
 describe("deterministic world model", () => {
-  it("grows the prototype arena by four to five times its area", () => {
-    expect(WORLD_BOUNDS).toEqual({ width: 210, height: 350 });
-    expect(WORLD_AREA_SCALE_FROM_PROTOTYPE).toBeCloseTo(4.59375, 8);
-    expect(WORLD_AREA_SCALE_FROM_PROTOTYPE).toBeGreaterThanOrEqual(4);
-    expect(WORLD_AREA_SCALE_FROM_PROTOTYPE).toBeLessThanOrEqual(5);
+  it("uses an expanded square arena for equal radial starts", () => {
+    expect(WORLD_BOUNDS).toEqual({ width: 350, height: 350 });
+    expect(WORLD_AREA_SCALE_FROM_PROTOTYPE).toBeCloseTo(7.65625, 8);
+    expect(WORLD_AREA_SCALE_FROM_PROTOTYPE).toBeGreaterThan(7);
+    expect(WORLD_AREA_SCALE_FROM_PROTOTYPE).toBeLessThanOrEqual(8);
   });
 
   it.each([
-    [{ x: 20, y: 80 }, "water"],
-    [{ x: 190, y: 80 }, "jungle"],
-    [{ x: 20, y: 270 }, "desert"],
-    [{ x: 190, y: 270 }, "taiga"],
-    [{ x: 105, y: 100 }, "neutral"],
-    [{ x: 20, y: 175 }, "neutral"],
+    [{ x: 80, y: 80 }, "water"],
+    [{ x: 270, y: 80 }, "jungle"],
+    [{ x: 80, y: 270 }, "desert"],
+    [{ x: 270, y: 270 }, "taiga"],
+    [{ x: 175, y: 100 }, "neutral"],
+    [{ x: 100, y: 175 }, "neutral"],
     [WORLD_BASE_SLOTS.north.basePosition, "base_corridor"],
     [WORLD_BASE_SLOTS.south.basePosition, "base_corridor"],
   ] as const)("classifies %o as %s", (position, expectedBiome) => {
@@ -35,27 +35,27 @@ describe("deterministic world model", () => {
   });
 
   it("uses list order to resolve overlapping corridor boundaries", () => {
-    expect(getBiomeRegionAt({ x: 105, y: 62 })?.id).toBe("north-base-corridor");
-    expect(getBiomeRegionAt({ x: 105, y: 62.0001 })?.id).toBe(
+    expect(getBiomeRegionAt({ x: 175, y: 62 })?.id).toBe("north-base-corridor");
+    expect(getBiomeRegionAt({ x: 175, y: 62.0001 })?.id).toBe(
       "vertical-neutral-corridor",
     );
-    expect(getBiomeRegionAt({ x: 50, y: 168 })?.id).toBe(
-      "equatorial-neutral-corridor",
+    expect(getBiomeRegionAt({ x: 100, y: 166 })?.id).toBe(
+      "horizontal-neutral-corridor",
     );
-    expect(getBiomeRegionAt({ x: 50, y: 182 })?.id).toBe(
-      "equatorial-neutral-corridor",
+    expect(getBiomeRegionAt({ x: 100, y: 184 })?.id).toBe(
+      "horizontal-neutral-corridor",
     );
   });
 
   it("includes every outer edge while rejecting invalid positions", () => {
     expect(isInsideWorld({ x: 0, y: 0 })).toBe(true);
-    expect(isInsideWorld({ x: 210, y: 350 })).toBe(true);
+    expect(isInsideWorld({ x: 350, y: 350 })).toBe(true);
     expect(getBiomeAt({ x: 0, y: 0 })).toBe("water");
-    expect(getBiomeAt({ x: 210, y: 350 })).toBe("taiga");
+    expect(getBiomeAt({ x: 350, y: 350 })).toBe("taiga");
 
     for (const position of [
       { x: -0.0001, y: 10 },
-      { x: 210.0001, y: 10 },
+      { x: 350.0001, y: 10 },
       { x: 10, y: -0.0001 },
       { x: 10, y: 350.0001 },
       { x: Number.NaN, y: 10 },
@@ -81,23 +81,15 @@ describe("deterministic world model", () => {
 
   it("keeps all region geometry inside the arena", () => {
     for (const region of WORLD_REGIONS) {
-      if (region.shape === "rectangle") {
-        expect(region.width).toBeGreaterThan(0);
-        expect(region.height).toBeGreaterThan(0);
-        expect(isInsideWorld({ x: region.x, y: region.y })).toBe(true);
-        expect(
-          isInsideWorld({
-            x: region.x + region.width,
-            y: region.y + region.height,
-          }),
-        ).toBe(true);
-        continue;
-      }
-
-      expect(region.vertices.length).toBeGreaterThanOrEqual(3);
-      for (const vertex of region.vertices) {
-        expect(isInsideWorld(vertex)).toBe(true);
-      }
+      expect(region.width).toBeGreaterThan(0);
+      expect(region.height).toBeGreaterThan(0);
+      expect(isInsideWorld({ x: region.x, y: region.y })).toBe(true);
+      expect(
+        isInsideWorld({
+          x: region.x + region.width,
+          y: region.y + region.height,
+        }),
+      ).toBe(true);
     }
   });
 
@@ -142,7 +134,7 @@ describe("deterministic world model", () => {
   });
 
   it("returns the biome, region, and exact shared effect metadata together", () => {
-    const sample = sampleWorld({ x: 20, y: 80 });
+    const sample = sampleWorld({ x: 80, y: 80 });
 
     expect(sample).toEqual({
       regionId: "water-shelf",

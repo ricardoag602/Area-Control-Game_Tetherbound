@@ -1,7 +1,7 @@
 import { GAME_RULES } from "../constants";
 import { distance } from "../geometry";
 import { baseId } from "../state";
-import type { Anchor, GameState, PlayerId } from "../types";
+import { PLAYER_IDS, type Anchor, type GameState, type PlayerId } from "../types";
 
 export type AnchorPowerState = "powered" | "shielded" | "disrupted" | "severed";
 
@@ -25,7 +25,7 @@ export interface PlayerConflictTarget {
 export function advanceTetherConflict(
   state: GameState,
   deltaSeconds: number,
-  activePlayerIds: readonly PlayerId[] = ["player", "rival"],
+  activePlayerIds: readonly PlayerId[] = state.activePlayerIds,
 ): GameState {
   const safeDeltaSeconds = Number.isFinite(deltaSeconds)
     ? Math.max(0, deltaSeconds)
@@ -38,14 +38,12 @@ export function advanceTetherConflict(
     anchors.map((anchor) => [anchor.id, anchor.powered]),
   );
   const interactionState = { ...state, anchors };
-  const targets: Record<PlayerId, PlayerConflictTarget | null> = {
-    player: activePlayerIds.includes("player")
-      ? getPlayerConflictTarget(interactionState, "player")
+  const targets = Object.fromEntries(PLAYER_IDS.map((playerId) => [
+    playerId,
+    activePlayerIds.includes(playerId)
+      ? getPlayerConflictTarget(interactionState, playerId)
       : null,
-    rival: activePlayerIds.includes("rival")
-      ? getPlayerConflictTarget(interactionState, "rival")
-      : null,
-  };
+  ])) as Record<PlayerId, PlayerConflictTarget | null>;
   const activePlayers = new Set(activePlayerIds);
 
   anchors = anchors.map((anchor) => {
@@ -193,22 +191,26 @@ export function getAnchorPowerState(
 export function getAnchorPresence(
   state: GameState,
   anchor: Anchor,
-  targets: Record<PlayerId, PlayerConflictTarget | null> = {
-    player: getPlayerConflictTarget(state, "player"),
-    rival: getPlayerConflictTarget(state, "rival"),
-  },
-  activePlayerIds: ReadonlySet<PlayerId> = new Set(["player", "rival"]),
+  targets: Record<PlayerId, PlayerConflictTarget | null> = Object.fromEntries(
+    PLAYER_IDS.map((playerId) => [
+      playerId,
+      state.activePlayerIds.includes(playerId)
+        ? getPlayerConflictTarget(state, playerId)
+        : null,
+    ]),
+  ) as Record<PlayerId, PlayerConflictTarget | null>,
+  activePlayerIds: ReadonlySet<PlayerId> = new Set(state.activePlayerIds),
 ): AnchorPresence {
-  const attackerId: PlayerId = anchor.owner === "player" ? "rival" : "player";
+  const hostilePlayerIds = [...activePlayerIds].filter(
+    (playerId) => playerId !== anchor.owner,
+  );
   return {
-    attackerNearby: targets[attackerId]?.kind === "overload" &&
-      targets[attackerId]?.anchorId === anchor.id,
-    hostileNearby:
-      activePlayerIds.has(attackerId) &&
-      distance(
-        state.players[attackerId].astronaut.position,
-        anchor.position,
-      ) <= GAME_RULES.anchorInteractionRadius,
+    attackerNearby: hostilePlayerIds.some((playerId) =>
+      targets[playerId]?.kind === "overload" &&
+      targets[playerId]?.anchorId === anchor.id),
+    hostileNearby: hostilePlayerIds.some((playerId) =>
+      distance(state.players[playerId].astronaut.position, anchor.position) <=
+        GAME_RULES.anchorInteractionRadius),
     defenderNearby:
       activePlayerIds.has(anchor.owner) &&
       distance(

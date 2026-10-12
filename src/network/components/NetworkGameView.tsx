@@ -15,14 +15,18 @@ interface NetworkGameViewProps {
 }
 
 export function NetworkGameView({ state, room, localPlayerId, connection, latencyMs, onMovementCommand, onDeploy, onLeave }: NetworkGameViewProps) {
-  const opponent = room.players.find((player) => player.id !== localPlayerId);
-  const controlsDisabled = connection !== "connected" || !opponent?.connected;
+  const opponents = room.players.filter((player) => player.id !== localPlayerId);
+  const disconnectedOpponent = opponents.find((player) => !player.connected);
+  const controlsDisabled = connection !== "connected" || Boolean(disconnectedOpponent);
   const statusText = connection !== "connected"
     ? "Reconnecting · Match paused"
-    : !opponent?.connected
-      ? "Opponent reconnecting · Match paused"
+    : disconnectedOpponent
+      ? `${disconnectedOpponent.name} reconnecting · Match paused`
       : "Room synchronized";
-  return <MatchScreen state={state} localPlayerId={localPlayerId} opponentName={opponent?.name ?? "Rival"}
+  const playerNames = Object.fromEntries(
+    room.players.map((player) => [player.id, player.name]),
+  ) as Partial<Record<PlayerId, string>>;
+  return <MatchScreen state={state} localPlayerId={localPlayerId} playerNames={playerNames}
     statusText={statusText} latencyMs={latencyMs} controlsDisabled={controlsDisabled}
     interpolatePositions={true}
     onMovementCommand={onMovementCommand} onDeploy={onDeploy} onLeave={onLeave} />;

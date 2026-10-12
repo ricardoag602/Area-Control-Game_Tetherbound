@@ -4,7 +4,9 @@ import type {
   WorldTimelineState,
 } from "./world/timeline";
 
-export type PlayerId = "player" | "rival";
+export const PLAYER_IDS = ["player", "rival", "player3", "player4"] as const;
+export type PlayerId = (typeof PLAYER_IDS)[number];
+export type PlayerLimit = 2 | 3 | 4;
 export type GameMode = "bot" | "multiplayer";
 export type MatchPhase = "setup" | "regulation" | "overtime" | "finished";
 export type MatchWinner = PlayerId | "draw";
@@ -111,6 +113,8 @@ export interface GameState {
   simulationRemainderMs: number;
   /** Commands received between fixed ticks, consumed together in sequence order. */
   pendingInputs: MatchInputs;
+  /** Ordered roster participating in this match. Inactive maximum slots are ignored. */
+  activePlayerIds: PlayerId[];
   /** Current authoritative rules phase. Setup is part of regulation time. */
   matchPhase: MatchPhase;
   /** Cumulative scorable-map-fraction seconds earned by each player. */
@@ -122,6 +126,8 @@ export interface GameState {
   hasDeployedAnchor: Record<PlayerId, boolean>;
   /** Hold progress indexed by the defender whose base is being collapsed. */
   baseCollapseProgressMs: Record<PlayerId, number>;
+  /** Sole attacker currently credited with each defender's collapse progress. */
+  baseCollapseAttacker: Record<PlayerId, PlayerId | null>;
   /** Set once and only once when authoritative play has finished. */
   matchOutcome: MatchOutcome | null;
   /** Remaining time in regulation, or in overtime after regulation expires. */

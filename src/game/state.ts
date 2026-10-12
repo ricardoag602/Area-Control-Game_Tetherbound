@@ -1,87 +1,138 @@
 import { GAME_RULES, SIMULATION_RULES, WORLD } from "./constants";
 import { createMovementState } from "./movement/movement";
-import type { GameState, PlayerId } from "./types";
-import { WORLD_BASE_SLOTS } from "./world/map";
+import { PLAYER_IDS, type GameState, type PlayerId, type PlayerLimit, type Vec2 } from "./types";
 import {
   createWorldTimeline,
   type BiomeRegion as TimelineBiomeRegion,
 } from "./world/timeline";
 
-const PLAYER_BASE = WORLD_BASE_SLOTS.south.basePosition;
-const RIVAL_BASE = WORLD_BASE_SLOTS.north.basePosition;
-
 const TIMELINE_BIOME_REGIONS: TimelineBiomeRegion[] = [
-  { id: "water-event-zone", biome: "water", x: 6, y: 65, width: 82, height: 90 },
-  { id: "jungle-event-zone", biome: "jungle", x: 122, y: 65, width: 82, height: 90 },
-  { id: "desert-event-zone", biome: "desert", x: 6, y: 195, width: 82, height: 90 },
-  { id: "taiga-event-zone", biome: "taiga", x: 122, y: 195, width: 82, height: 90 },
+  { id: "water-event-zone", biome: "water", x: 70, y: 70, width: 68, height: 68 },
+  { id: "jungle-event-zone", biome: "jungle", x: 212, y: 70, width: 68, height: 68 },
+  { id: "desert-event-zone", biome: "desert", x: 70, y: 212, width: 68, height: 68 },
+  { id: "taiga-event-zone", biome: "taiga", x: 212, y: 212, width: 68, height: 68 },
 ];
 
-export function createInitialGameState(seed: number | string = "local-sandbox"): GameState {
+export function createInitialGameState(
+  seed: number | string = "local-sandbox",
+  playerLimit: PlayerLimit = 2,
+): GameState {
+  const activePlayerIds = PLAYER_IDS.slice(0, playerLimit);
+  const activeLayout = createPlayerLayout(playerLimit);
+  const fallbackLayout = createPlayerLayout(4);
+  const players = Object.fromEntries(
+    PLAYER_IDS.map((playerId) => {
+      const placement = activeLayout[playerId] ?? fallbackLayout[playerId]!;
+      return [playerId, {
+        id: playerId,
+        basePosition: { ...placement.basePosition },
+        astronaut: {
+          position: { ...placement.spawnPosition },
+          movement: createMovementState(placement.facing),
+          oxygen: GAME_RULES.oxygenMaximum,
+          carriedSalvage: 0,
+          bankedSalvage: 0,
+          tetherKits: 2,
+          respawns: 0,
+        },
+      }];
+    }),
+  ) as GameState["players"];
+
   return {
     elapsedMs: 0,
     simulationRemainderMs: 0,
     pendingInputs: {},
+    activePlayerIds,
     matchPhase: "setup",
-    scores: { player: 0, rival: 0 },
-    overtimeScores: { player: 0, rival: 0 },
+    scores: createNumberRecord(0),
+    overtimeScores: createNumberRecord(0),
     overtimeElapsedMs: 0,
-    hasDeployedAnchor: { player: false, rival: false },
-    baseCollapseProgressMs: { player: 0, rival: 0 },
+    hasDeployedAnchor: createBooleanRecord(false),
+    baseCollapseProgressMs: createNumberRecord(0),
+    baseCollapseAttacker: createNullablePlayerRecord(),
     matchOutcome: null,
     remainingMs: GAME_RULES.matchDurationMs,
     nextAnchorId: 1,
     worldTimeline: createGameWorldTimeline(seed),
     activeWeather: [],
     lastWorldEvent: null,
-    players: {
-      player: {
-        id: "player",
-        basePosition: { ...PLAYER_BASE },
-        astronaut: {
-          position: { ...WORLD_BASE_SLOTS.south.spawnPosition },
-          movement: createMovementState(WORLD_BASE_SLOTS.south.facing),
-          oxygen: GAME_RULES.oxygenMaximum,
-          carriedSalvage: 0,
-          bankedSalvage: 0,
-          tetherKits: 2,
-          respawns: 0,
-        },
-      },
-      rival: {
-        id: "rival",
-        basePosition: { ...RIVAL_BASE },
-        astronaut: {
-          position: { ...WORLD_BASE_SLOTS.north.spawnPosition },
-          movement: createMovementState(WORLD_BASE_SLOTS.north.facing),
-          oxygen: GAME_RULES.oxygenMaximum,
-          carriedSalvage: 0,
-          bankedSalvage: 0,
-          tetherKits: 2,
-          respawns: 0,
-        },
-      },
-    },
+    players,
     anchors: [],
-    salvage: [
-      { id: "salvage-1", position: { x: 90, y: 300 }, collected: false },
-      { id: "salvage-2", position: { x: 120, y: 50 }, collected: false },
-      { id: "salvage-3", position: { x: 125, y: 290 }, collected: false },
-      { id: "salvage-4", position: { x: 85, y: 60 }, collected: false },
-      { id: "salvage-5", position: { x: 65, y: 265 }, collected: false },
-      { id: "salvage-6", position: { x: 145, y: 85 }, collected: false },
-      { id: "salvage-7", position: { x: 155, y: 250 }, collected: false },
-      { id: "salvage-8", position: { x: 55, y: 100 }, collected: false },
-      { id: "salvage-9", position: { x: 90, y: 225 }, collected: false },
-      { id: "salvage-10", position: { x: 120, y: 125 }, collected: false },
-      { id: "salvage-11", position: { x: 50, y: 200 }, collected: false },
-      { id: "salvage-12", position: { x: 160, y: 150 }, collected: false },
-      { id: "salvage-13", position: { x: 150, y: 205 }, collected: false },
-      { id: "salvage-14", position: { x: 60, y: 145 }, collected: false },
-      { id: "salvage-15", position: { x: 90, y: 175 }, collected: false },
-      { id: "salvage-16", position: { x: 120, y: 175 }, collected: false },
-    ],
+    salvage: createSymmetricSalvage(activePlayerIds, activeLayout),
   };
+}
+
+interface PlayerPlacement {
+  basePosition: Vec2;
+  spawnPosition: Vec2;
+  facing: Vec2;
+  angle: number;
+}
+
+export function createPlayerLayout(playerLimit: PlayerLimit) {
+  const center = { x: WORLD.width / 2, y: WORLD.height / 2 };
+  const baseRadius = Math.min(WORLD.width, WORLD.height) / 2 - 16;
+  const angles = playerLimit === 2
+    ? [Math.PI / 2, -Math.PI / 2]
+    : playerLimit === 3
+      ? [Math.PI / 2, 7 * Math.PI / 6, 11 * Math.PI / 6]
+      : [Math.PI / 2, -Math.PI / 2, Math.PI, 0];
+
+  return Object.fromEntries(
+    PLAYER_IDS.slice(0, playerLimit).map((playerId, index) => {
+      const angle = angles[index];
+      const outward = { x: Math.cos(angle), y: Math.sin(angle) };
+      return [playerId, {
+        angle,
+        basePosition: {
+          x: center.x + outward.x * baseRadius,
+          y: center.y + outward.y * baseRadius,
+        },
+        spawnPosition: {
+          x: center.x + outward.x * (baseRadius - 18),
+          y: center.y + outward.y * (baseRadius - 18),
+        },
+        facing: { x: -outward.x, y: -outward.y },
+      }];
+    }),
+  ) as Partial<Record<PlayerId, PlayerPlacement>>;
+}
+
+function createSymmetricSalvage(
+  activePlayerIds: readonly PlayerId[],
+  layout: Partial<Record<PlayerId, PlayerPlacement>>,
+) {
+  const center = { x: WORLD.width / 2, y: WORLD.height / 2 };
+  const baseRadius = Math.min(WORLD.width, WORLD.height) / 2 - 16;
+  const offsets = [-0.16, 0.16, -0.24, 0.24, -0.32, 0.32, -0.4, 0.4];
+  let sequence = 0;
+  return activePlayerIds.flatMap((playerId) => offsets.map((offset, index) => {
+    const placement = layout[playerId]!;
+    const radius = baseRadius - 30 - Math.floor(index / 2) * 25;
+    const angle = placement.angle + offset;
+    sequence += 1;
+    return {
+      id: `salvage-${sequence}`,
+      position: {
+        x: center.x + Math.cos(angle) * radius,
+        y: center.y + Math.sin(angle) * radius,
+      },
+      collected: false,
+    };
+  }));
+}
+
+function createNumberRecord(value: number): Record<PlayerId, number> {
+  return Object.fromEntries(PLAYER_IDS.map((playerId) => [playerId, value])) as Record<PlayerId, number>;
+}
+
+function createBooleanRecord(value: boolean): Record<PlayerId, boolean> {
+  return Object.fromEntries(PLAYER_IDS.map((playerId) => [playerId, value])) as Record<PlayerId, boolean>;
+}
+
+function createNullablePlayerRecord(): Record<PlayerId, PlayerId | null> {
+  return Object.fromEntries(PLAYER_IDS.map((playerId) => [playerId, null])) as Record<PlayerId, PlayerId | null>;
 }
 
 export function createGameWorldTimeline(

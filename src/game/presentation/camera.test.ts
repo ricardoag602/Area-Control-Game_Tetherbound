@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   calculateCameraViewBox,
+  calculateOverviewViewBox,
+  calculateViewportBufferZoom,
   CAMERA_RULES,
   chargeZoomTarget,
+  easeMatchEndOverview,
+  interpolateCameraViewBox,
   stepCameraZoomSpring,
   type CameraZoomSpring,
 } from "./camera";
@@ -23,19 +27,14 @@ describe("camera framing", () => {
     expect(view.y + view.height).toBe(WORLD.height + 33);
   });
 
-  it("fits very wide viewports to the world width", () => {
+  it("keeps the expanded arena zoomed for very wide viewports", () => {
     const view = calculateCameraViewBox(
       { x: WORLD.width / 2, y: WORLD.height / 2 },
       3,
       1,
     );
 
-    expect(view).toEqual({
-      x: 0,
-      y: WORLD.height / 2 - WORLD.width / 6,
-      width: WORLD.width,
-      height: WORLD.width / 3,
-    });
+    expect(view).toEqual({ x: 31, y: 127, width: 288, height: 96 });
   });
 
   it("falls back safely for invalid aspect, center, and zoom values", () => {
@@ -45,9 +44,9 @@ describe("camera framing", () => {
       Number.NaN,
     );
 
-    expect(view.x).toBeCloseTo(WORLD.width / 2 - 28.8, 10);
+    expect(view.x).toBeCloseTo(WORLD.width / 2 - 48, 10);
     expect(view.y).toBeCloseTo(WORLD.height / 2 - 48, 10);
-    expect(view.width).toBeCloseTo(57.6, 10);
+    expect(view.width).toBeCloseTo(96, 10);
     expect(view.height).toBeCloseTo(96, 10);
     expect(Object.values(view).every(Number.isFinite)).toBe(true);
   });
@@ -72,6 +71,66 @@ describe("camera framing", () => {
 
     expect(charged.height).toBeGreaterThan(resting.height * 1.15);
     expect(charged.width).toBeGreaterThan(resting.width * 1.15);
+  });
+});
+
+describe("match-end overview", () => {
+  it.each([0.5, 1, 2])(
+    "centers and fits the entire arena at aspect ratio %s",
+    (aspectRatio) => {
+      const view = calculateOverviewViewBox(aspectRatio);
+
+      expect(view.x + view.width / 2).toBeCloseTo(WORLD.width / 2, 10);
+      expect(view.y + view.height / 2).toBeCloseTo(WORLD.height / 2, 10);
+      expect(view.width).toBeGreaterThan(WORLD.width);
+      expect(view.height).toBeGreaterThan(WORLD.height);
+      expect(view.width / view.height).toBeCloseTo(aspectRatio, 10);
+    },
+  );
+
+  it("pulls back quickly before easing into the overview", () => {
+    expect(easeMatchEndOverview(0)).toBe(0);
+    expect(easeMatchEndOverview(0.25)).toBeGreaterThan(0.65);
+    expect(easeMatchEndOverview(0.75)).toBeGreaterThan(0.99);
+    expect(easeMatchEndOverview(1)).toBe(1);
+  });
+
+  it("interpolates every view-box edge without overshooting", () => {
+    const start = { x: 10, y: 20, width: 50, height: 100 };
+    const end = { x: -5, y: -10, width: 400, height: 500 };
+
+    expect(interpolateCameraViewBox(start, end, 0)).toEqual(start);
+    expect(interpolateCameraViewBox(start, end, 0.5)).toEqual({
+      x: 2.5,
+      y: 5,
+      width: 225,
+      height: 300,
+    });
+    expect(interpolateCameraViewBox(start, end, 2)).toEqual(end);
+  });
+});
+
+describe("viewport-buffer camera bonus", () => {
+  it("keeps mobile and edge-to-edge layouts at the normal zoom", () => {
+    expect(calculateViewportBufferZoom(390, 390)).toBe(1);
+    expect(calculateViewportBufferZoom(360, 390)).toBe(1);
+  });
+
+  it("gradually reveals more arena as desktop side gutters grow", () => {
+    const smallBuffer = calculateViewportBufferZoom(1_000, 800);
+    const largeBuffer = calculateViewportBufferZoom(1_400, 800);
+
+    expect(smallBuffer).toBeCloseTo(0.985, 10);
+    expect(largeBuffer).toBeCloseTo(0.955, 10);
+    expect(largeBuffer).toBeLessThan(smallBuffer);
+  });
+
+  it("caps the ultrawide bonus and safely ignores invalid measurements", () => {
+    const maximumBonus = 1 - CAMERA_RULES.maximumViewportBufferZoomOut;
+
+    expect(calculateViewportBufferZoom(1_600, 800)).toBe(maximumBonus);
+    expect(calculateViewportBufferZoom(4_000, 800)).toBe(maximumBonus);
+    expect(calculateViewportBufferZoom(Number.NaN, 0)).toBe(1);
   });
 });
 

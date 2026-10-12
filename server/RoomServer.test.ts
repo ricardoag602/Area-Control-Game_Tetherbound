@@ -112,6 +112,59 @@ async function createStartedRoom(server: RoomServer) {
 }
 
 describe("RoomServer", () => {
+  it.each([3, 4] as const)(
+    "starts a fair %i-player room only after every slot is ready",
+    async (playerLimit) => {
+      const server = await createServer();
+      const sockets: WebSocket[] = [];
+
+      const host = await connect(server);
+      sockets.push(host);
+      const hostWelcomePromise = waitForMessage(host, isWelcome);
+      send(host, {
+        type: "create_room",
+        requestId: `multiplayer-${playerLimit}-host`,
+        name: "Host",
+        playerLimit,
+      });
+      const hostWelcome = await hostWelcomePromise;
+
+      for (let index = 1; index < playerLimit; index += 1) {
+        const socket = await connect(server);
+        sockets.push(socket);
+        const welcomePromise = waitForMessage(socket, isWelcome);
+        send(socket, {
+          type: "join_room",
+          requestId: `multiplayer-${playerLimit}-guest-${index}`,
+          code: hostWelcome.room.code,
+          name: `Guest ${index}`,
+        });
+        const welcome = await welcomePromise;
+        expect(welcome.playerId).toBe(["rival", "player3", "player4"][index - 1]);
+      }
+
+      send(host, { type: "set_ready", ready: true });
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      expect(server.rooms.get(hostWelcome.room.code)?.phase).toBe("lobby");
+
+      const initialStates = sockets.map((socket) => waitForMessage(socket, isGameState));
+      for (const socket of sockets.slice(1)) {
+        send(socket, { type: "set_ready", ready: true });
+      }
+      const states = await Promise.all(initialStates);
+      const state = states[0].state;
+      expect(states.every((snapshot) => JSON.stringify(snapshot.state) === JSON.stringify(state))).toBe(true);
+      expect(state.activePlayerIds).toEqual(["player", "rival", "player3", "player4"].slice(0, playerLimit));
+
+      const center = { x: WORLD.width / 2, y: WORLD.height / 2 };
+      const radii = state.activePlayerIds.map((playerId) => {
+        const base = state.players[playerId].basePosition;
+        return Math.hypot(base.x - center.x, base.y - center.y);
+      });
+      expect(radii.every((radius) => Math.abs(radius - radii[0]) < 1e-9)).toBe(true);
+    },
+  );
+
   it("creates, joins, starts, synchronizes, measures RTT, and resumes a two-player room", async () => {
     const server = await createServer();
     const host = await connect(server);
@@ -753,7 +806,7 @@ describe("RoomServer", () => {
 
     room.gameState.matchPhase = "regulation";
     room.gameState.elapsedMs = GAME_RULES.setupDurationMs;
-    room.gameState.scores = { player: 20, rival: 10 };
+    room.gameState.scores = { ...room.gameState.scores, player: 20, rival: 10 };
     room.gameState.remainingMs = 1;
 
     const finished = await waitForMessage(

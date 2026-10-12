@@ -8,8 +8,13 @@ import {
 import {
   CAMERA_RULES,
   calculateCameraViewBox,
+  calculateOverviewViewBox,
+  calculateViewportBufferZoom,
   chargeZoomTarget,
+  easeMatchEndOverview,
+  interpolateCameraViewBox,
   stepCameraZoomSpring,
+  type CameraViewBox,
   type CameraZoomSpring,
 } from "../presentation/camera";
 import { MOVEMENT_RULES } from "../movement/movement";
@@ -21,17 +26,24 @@ export function useFollowCamera(
   movement: MovementState,
   chargeIntentActive: boolean,
   oxygenZoomMultiplier = 1,
+  cameraMode: "follow" | "overview" = "follow",
+  onOverviewSettled?: () => void,
 ) {
   const [aspectRatio, setAspectRatio] = useState(1);
+  const [hasMeasured, setHasMeasured] = useState(false);
   const [zoom, setZoom] = useState(1);
+  const [viewportBufferZoom, setViewportBufferZoom] = useState(1);
+  const [overviewView, setOverviewView] = useState<CameraViewBox | null>(null);
   const [reduceMotion, setReduceMotion] = useState(prefersReducedMotion);
   const springRef = useRef<CameraZoomSpring>({ zoom: 1, velocity: 0 });
   const chargeStartedAt = useRef<number | null>(null);
   const chargeIntentRef = useRef(chargeIntentActive);
   const authoritativeProgressRef = useRef(0);
   const oxygenZoomRef = useRef(oxygenZoomMultiplier);
+  const overviewSettledRef = useRef(onOverviewSettled);
   chargeIntentRef.current = chargeIntentActive;
   oxygenZoomRef.current = oxygenZoomMultiplier;
+  overviewSettledRef.current = onOverviewSettled;
   authoritativeProgressRef.current = movement.mode === "charging"
     ? Math.min(1, movement.chargeSeconds / MOVEMENT_RULES.fullChargeSeconds)
     : 0;
@@ -57,12 +69,26 @@ export function useFollowCamera(
         setAspectRatio((current) =>
           Math.abs(current - nextAspect) > 0.0001 ? nextAspect : current,
         );
+        const nextBufferZoom = calculateViewportBufferZoom(
+          window.innerWidth,
+          rect.width,
+        );
+        setViewportBufferZoom((current) =>
+          Math.abs(current - nextBufferZoom) > 0.0001
+            ? nextBufferZoom
+            : current,
+        );
+        setHasMeasured(true);
       }
     };
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(element);
-    return () => observer.disconnect();
+    window.addEventListener("resize", measure);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", measure);
+    };
   }, [targetRef]);
 
   useEffect(() => {
@@ -131,11 +157,69 @@ export function useFollowCamera(
     reduceMotion,
   ]);
 
-  return calculateCameraViewBox(
+  useEffect(() => {
+    if (cameraMode !== "overview") {
+      setOverviewView(null);
+      return;
+    }
+    if (!hasMeasured) return;
+
+    const startView = calculateCameraViewBox(
+      center,
+      aspectRatio,
+      (reduceMotion ? oxygenZoomMultiplier : springRef.current.zoom) *
+        viewportBufferZoom,
+    );
+    const targetView = calculateOverviewViewBox(aspectRatio);
+
+    if (reduceMotion) {
+      setOverviewView(targetView);
+      overviewSettledRef.current?.();
+      return;
+    }
+
+    let frameId = 0;
+    let startedAt: number | null = null;
+    const frame = (time: number) => {
+      if (startedAt === null) startedAt = time;
+      const progress = Math.min(
+        1,
+        (time - startedAt) / CAMERA_RULES.matchEndOverviewDurationMs,
+      );
+      setOverviewView(interpolateCameraViewBox(
+        startView,
+        targetView,
+        easeMatchEndOverview(progress),
+      ));
+      if (progress < 1) {
+        frameId = requestAnimationFrame(frame);
+      } else {
+        overviewSettledRef.current?.();
+      }
+    };
+
+    setOverviewView(startView);
+    frameId = requestAnimationFrame(frame);
+    return () => cancelAnimationFrame(frameId);
+  }, [
+    aspectRatio,
+    cameraMode,
+    center.x,
+    center.y,
+    hasMeasured,
+    oxygenZoomMultiplier,
+    reduceMotion,
+    viewportBufferZoom,
+  ]);
+
+  const followView = calculateCameraViewBox(
     center,
     aspectRatio,
-    reduceMotion ? oxygenZoomMultiplier : zoom,
+    (reduceMotion ? oxygenZoomMultiplier : zoom) * viewportBufferZoom,
   );
+  return cameraMode === "overview" && overviewView
+    ? overviewView
+    : followView;
 }
 
 function prefersReducedMotion() {

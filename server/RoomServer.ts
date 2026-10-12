@@ -6,11 +6,13 @@ import { advanceMatch } from "../src/game/simulation/match";
 import { deployAnchor } from "../src/game/simulation/tetherNetwork";
 import { cancelMovement } from "../src/game/movement/movement";
 import { createInitialGameState } from "../src/game/state";
-import type {
-  GameInput,
-  GameState,
-  MatchFinishReason,
-  PlayerId,
+import {
+  PLAYER_IDS,
+  type GameInput,
+  type GameState,
+  type MatchFinishReason,
+  type PlayerId,
+  type PlayerLimit,
 } from "../src/game/types";
 import {
   parseClientMessage,
@@ -21,7 +23,6 @@ import {
 } from "../src/network/protocol";
 
 const ROOM_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-const PLAYER_IDS: PlayerId[] = ["player", "rival"];
 const MAX_ACTION_HISTORY = 256;
 const MAX_PENDING_INPUTS = 64;
 const MAX_REQUEST_KEYS_PER_PLAYER = 16;
@@ -50,7 +51,7 @@ interface MatchRoom {
   revision: number;
   stateVersion: number;
   phase: "lobby" | "playing" | "finished";
-  playerLimit: number;
+  playerLimit: PlayerLimit;
   players: Map<PlayerId, ConnectedPlayer>;
   gameState: GameState | null;
   winner: PlayerId | "draw" | null;
@@ -197,7 +198,7 @@ export class RoomServer {
       revision: 1,
       stateVersion: 0,
       phase: "lobby",
-      playerLimit: 2,
+      playerLimit: message.playerLimit,
       players: new Map(),
       gameState: null,
       winner: null,
@@ -323,9 +324,8 @@ export class RoomServer {
     });
     if (room.gameState) this.sendGameState(room, socket);
     this.broadcastRoom(room);
-    // Rematch votes survive a temporary disconnect. If the second vote arrived
-    // while one player was offline, reconnecting that ready player completes
-    // the same two-vote handshake instead of leaving the room stuck.
+    // Rematch votes survive a temporary disconnect. Reconnecting the final
+    // ready player completes the same unanimous handshake.
     if (
       room.phase === "finished" &&
       room.players.size === room.playerLimit &&
@@ -412,7 +412,10 @@ export class RoomServer {
 
   private startMatch(room: MatchRoom) {
     room.phase = "playing";
-    room.gameState = createInitialGameState(`${room.code}:${room.revision}`);
+    room.gameState = createInitialGameState(
+      `${room.code}:${room.revision}`,
+      room.playerLimit,
+    );
     room.winner = null;
     room.finishReason = null;
     room.lastTickAt = Date.now();
@@ -557,7 +560,7 @@ export class RoomServer {
 
     if (wasPlaying) {
       const remaining = [...room.players.values()];
-      this.finishMatch(room, "disconnect", remaining.length === 1 ? remaining[0].id : "draw");
+      this.finishMatch(room, "disconnect", this.disconnectWinner(room, remaining));
     } else if (broadcast) {
       this.broadcastRoom(room);
     }
@@ -657,7 +660,27 @@ export class RoomServer {
   }
 
   private cancelAllMovement(state: GameState): GameState {
-    return this.cancelPlayerMovement(this.cancelPlayerMovement(state, "player"), "rival");
+    return state.activePlayerIds.reduce(
+      (nextState, playerId) => this.cancelPlayerMovement(nextState, playerId),
+      state,
+    );
+  }
+
+  private disconnectWinner(
+    room: MatchRoom,
+    remaining: readonly ConnectedPlayer[],
+  ): PlayerId | "draw" {
+    if (remaining.length === 0) return "draw";
+    if (remaining.length === 1) return remaining[0].id;
+    if (!room.gameState) return "draw";
+
+    const bestScore = Math.max(
+      ...remaining.map((player) => room.gameState!.scores[player.id]),
+    );
+    const leaders = remaining.filter(
+      (player) => Math.abs(room.gameState!.scores[player.id] - bestScore) <= 1e-9,
+    );
+    return leaders.length === 1 ? leaders[0].id : "draw";
   }
 
   private consumeMessageAllowance(socket: WebSocket) {

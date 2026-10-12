@@ -71,7 +71,7 @@ export function Minimap({
             powerState={getAnchorPowerState(anchor, state.elapsedMs)}
           />
         ))}
-        {(["player", "rival"] as const).map((playerId) => {
+        {state.activePlayerIds.map((playerId) => {
           const position = state.players[playerId].astronaut.position;
           return (
             <circle

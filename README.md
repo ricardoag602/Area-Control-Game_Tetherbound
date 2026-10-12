@@ -2,9 +2,9 @@
 
 **How far from safety will you go for power?**
 
-Tetherbound is a mobile-first, two-player territory game about extending fragile life-support networks across an alien surface.
+Tetherbound is a mobile-first, two-to-four-player territory game about extending fragile life-support networks across an alien surface.
 
-The current arena is a 210 × 350 world divided into water, jungle, desert, taiga, and protected base corridors. Terrain changes authoritative movement and oxygen behavior, while a seeded match timeline synchronizes frequent supply drops in bot and multiplayer games.
+The current arena is a 350 × 350 world divided into water, jungle, desert, taiga, and protected base corridors. Two players start opposite one another, three form an equilateral triangle, and four use the cardinal edges. Every layout gives each astronaut the same distance to center, the same radial route tuning, and mirrored starting resources. A seeded match timeline synchronizes frequent supply drops in bot and multiplayer games.
 
 Where opposing life-support zones overlap, the ground becomes contested and stops scoring for either side. Exclusive powered territory outside the guaranteed home safe zones adds to a cumulative match score, rewarding control throughout the match instead of only the final map state. Hold position beside an enemy tether to overload it and sever every downstream zone; return to your own broken tether to repair it early. The network communicates this through closing progress rings, solid or broken cable shapes, and crossed territory hatching rather than another text-heavy HUD.
 
@@ -33,7 +33,7 @@ The terminal prints both a local URL and a network URL.
 - The astronaut lunges briefly, then slows throughout the charge. Release when the ring flashes after one second for maximum distance, or release sooner for a shorter burst.
 - The camera follows your astronaut, eases outward during a charge, and springs back when you launch.
 - Below 40% oxygen, the camera closes in slightly while a red edge vignette and subtle wash intensify toward empty.
-- The translucent pixel minimap shows biome blocks, tether territory, anchors, and both astronauts. A brief amber landing signal marks each new supply drop.
+- The translucent pixel minimap shows biome blocks, tether territory, anchors, and every astronaut. A brief amber landing signal marks each new supply drop.
 - Three salvage materials fabricate one tether. The whole home zone accepts deliveries; powered remote anchors use the smaller pulsing hand-in ring. Gold recipe slots are carried material and cyan slots are safely banked.
 - Select **Deploy** or press **T** within 84 world units of a powered node to place an available anchor. The long cable connects the nodes, but oxygen and territory still come from their circular zones.
 - Stay inside the ring around an enemy anchor to overload it automatically. A nearby defender reverses your progress.
@@ -43,26 +43,27 @@ The terminal prints both a local URL and a network URL.
 ## Match flow and victory
 
 - Regulation lasts five minutes. The opening 30 seconds are a protected setup period in which players can explore, collect, and deploy, but territory does not score and bases cannot be collapsed.
-- After setup, each player earns the fraction of the scorable grid they exclusively control every second: controlling the entire scorable map would earn one point per second. Cells inside either guaranteed home safe zone are excluded from both the owned count and the total; neutral and contested cells earn nothing.
+- After setup, each player earns the fraction of the scorable grid they exclusively control every second: controlling the entire scorable map would earn one point per second. Cells inside any guaranteed home safe zone are excluded from both the owned count and the total; neutral and contested cells earn nothing.
+- The top HUD leads with every player's cumulative win points and shows territory share as supporting text. The match clock sits separately on the left.
 - The final minute of regulation is the announced **Signal Surge**, when territory contributes at 1.5× its normal rate.
 - The four quadrants retain different biome art, while rotationally mirrored routes share the same movement and oxygen tuning so neither spawn receives an opening-speed advantage.
 - When regulation expires, a result outside the configured close-score threshold is final. A cumulative-score margin within the 3% threshold sends the match to overtime.
-- Overtime lasts at most 60 seconds. Supply drops stop, and the first player to earn five points more than the opponent during overtime wins. Regulation's cumulative score remains visible but does not cause an instant overtime finish.
-- If neither player reaches that lead, the player controlling more exclusive non-base territory when overtime expires wins. An exact territory tie is a draw.
+- Overtime lasts at most 60 seconds. Supply drops stop, and the first player to earn five points more than the runner-up during overtime wins. Regulation's cumulative score remains visible but does not cause an instant overtime finish.
+- If nobody reaches that lead, the player controlling the most exclusive non-base territory when overtime expires wins. A tie for the lead is a draw.
 - Base collapse is the alternate instant win. It cannot begin until the defender has deployed at least one anchor; while none of that player's anchors are powered, an uncontested attacker inside the base zone builds the 12-second collapse meter. Leaving makes progress decay, a defender in the zone reverses it faster, and restoring any powered anchor resets it.
-- Bot and multiplayer matches both end on a result screen. Bot games can restart immediately; multiplayer rematches begin after both players vote to play again.
+- Bot and multiplayer matches both end on a result screen. Bot games can restart immediately; multiplayer rematches begin after every player votes to play again.
 
 ## Test multiplayer
 
-### Two browser tabs
+### Multiple browser tabs
 
 1. Open the local URL in the first tab.
-2. Select **Create Multiplayer Room**, enter a name, and create the room.
+2. Select **Create Multiplayer Room**, enter a name, choose a two-, three-, or four-player limit, and create the room.
 3. Copy the invitation link or note the five-character room code.
-4. In a second tab, open the link or select **Join Multiplayer Room** and enter the code, then join with a different name.
-5. Mark both players ready.
-6. Move or deploy a tether in either tab and verify the other tab updates.
-7. Refresh either tab to verify it reconnects to the same player slot.
+4. In the required additional tabs, open the link or select **Join Multiplayer Room** and enter the code, then join with different names.
+5. Mark every player ready.
+6. Move or deploy a tether in any tab and verify the others update.
+7. Refresh a tab to verify it reconnects to the same player slot.
 
 ### Computer and phone
 
@@ -87,7 +88,7 @@ Open the printed **Network** URL on the computer before creating the room. The r
 - Application ping/pong messages report smoothed round-trip latency in the lobby and match HUD.
 - Reconnect attempts use capped exponential backoff with jitter.
 - Runtime validation, message-rate limits, bounded action history, and snapshot backpressure protect the server from malformed or slow clients.
-- Finished bot and multiplayer matches show a result screen. Bot matches can restart immediately, while multiplayer uses a two-player rematch vote.
+- Finished bot and multiplayer matches show a result screen. Bot matches can restart immediately, while multiplayer requires a unanimous rematch vote.
 
 ## Main modules
 
@@ -112,7 +113,7 @@ npm run build
 npm audit
 ```
 
-The test suite includes deterministic rules coverage for setup, cumulative scoring, Signal Surge, overtime, base collapse, and result resolution, plus real two-client WebSocket coverage for room creation, joining, ready/start, synchronized movement, malformed traffic, idempotent requests and deployment, action acknowledgement, latency echo, disconnect pausing, session resume, and rematches.
+The test suite includes deterministic rules coverage for setup, cumulative scoring, Signal Surge, overtime, multiplayer base collapse, fair two-/three-/four-player placement, and result resolution, plus real multi-client WebSocket coverage for room creation, joining, ready/start, synchronized movement, malformed traffic, idempotent requests and deployment, action acknowledgement, latency echo, disconnect pausing, session resume, and rematches.
 
 ## Configuration
 

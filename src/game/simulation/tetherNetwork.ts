@@ -123,6 +123,10 @@ export function deployAnchor(state: GameState, playerId: PlayerId): GameState {
       ...state.baseCollapseProgressMs,
       [playerId]: 0,
     },
+    baseCollapseAttacker: {
+      ...state.baseCollapseAttacker,
+      [playerId]: null,
+    },
     players: {
       ...state.players,
       [playerId]: {

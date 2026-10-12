@@ -1,5 +1,7 @@
-import type { GameState, PlayerId, Vec2 } from "../types";
-import { sampleWorld, type BiomeId } from "../world/map";
+import { PLAYER_IDS, type GameState, type PlayerId, type Vec2 } from "../types";
+import { WORLD } from "../constants";
+import { distanceToSegment } from "../geometry";
+import { getBiomeEffects, sampleWorld, type BiomeId } from "../world/map";
 import type { BiomeWeatherEvent } from "../world/timeline";
 
 export interface EnvironmentModifiers {
@@ -17,8 +19,18 @@ export function getEnvironmentModifiers(
   position: Vec2,
 ): EnvironmentModifiers {
   const sample = sampleWorld(position);
-  const biome = sample?.biome ?? "neutral";
-  const effects = sample?.effects ?? {
+  const fairStartCorridor = state.activePlayerIds.some((playerId) =>
+    distanceToSegment(
+      position,
+      state.players[playerId].basePosition,
+      { x: WORLD.width / 2, y: WORLD.height / 2 },
+    ) <= 9);
+  const biome: BiomeId = fairStartCorridor
+    ? "base_corridor"
+    : sample?.biome ?? "neutral";
+  const effects = fairStartCorridor
+    ? getBiomeEffects("base_corridor")
+    : sample?.effects ?? {
     movement: { speedMultiplier: 1, turnRateMultiplier: 1, ambientDrift: null },
     oxygen: { drainMultiplier: 1, recoveryMultiplier: 1 },
   };
@@ -90,7 +102,7 @@ export function getAmbientDrift(
 
   // Match-clock-driven waves feel irregular in motion while remaining exactly
   // reproducible on the server, in replays, and after reconnection.
-  const playerPhase = playerId === "player" ? 0 : Math.PI;
+  const playerPhase = PLAYER_IDS.indexOf(playerId) * Math.PI / 2;
   const endSeconds = state.elapsedMs / 1_000;
   const startSeconds = Math.max(0, endSeconds - deltaSeconds);
   const angularFrequency = (Math.PI * 2) / drift.cycleSeconds;

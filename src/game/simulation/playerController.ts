@@ -9,8 +9,6 @@ export interface PlayerCommand {
 
 export type PlayerCommands = Partial<Record<PlayerId, PlayerCommand>>;
 
-const PLAYER_ORDER: PlayerId[] = ["player", "rival"];
-
 /**
  * Applies commands without caring whether they came from a person, a bot, or
  * the network. All controllers therefore use the same game-rule functions.
@@ -23,7 +21,7 @@ export function applyPlayerCommands(
   let nextState = state;
   const inputs: Partial<Record<PlayerId, GameInput[]>> = {};
 
-  for (const playerId of PLAYER_ORDER) {
+  for (const playerId of state.activePlayerIds) {
     const command = commands[playerId];
     if (!command) continue;
 

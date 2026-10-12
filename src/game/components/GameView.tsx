@@ -3,6 +3,7 @@ import { useLocalMatch } from "../hooks/useLocalMatch";
 import { sampleScorableTerritory } from "../simulation/scoring";
 import type { GameState, MatchFinishReason, PlayerId } from "../types";
 import { MatchScreen } from "./MatchScreen";
+import { PostMatchScene } from "./PostMatchScene";
 
 interface GameViewProps {
   onLeave: () => void;
@@ -41,7 +42,7 @@ function LocalMatch({
     );
   }
 
-  return <MatchScreen state={state} localPlayerId="player" opponentName="Bot" statusText="Mechanics sandbox"
+  return <MatchScreen state={state} localPlayerId="player" playerNames={{ rival: "Bot" }} statusText="Mechanics sandbox"
     interpolatePositions={true} onMovementCommand={sendMovementCommand} onDeploy={deploy} onLeave={onLeave} />;
 }
 
@@ -69,7 +70,7 @@ function BotMatchResultView({
     reason === "overtime_lead" || reason === "overtime_territory";
 
   return (
-    <div className="screen screen--room screen--result">
+    <PostMatchScene state={state} localPlayerId={localPlayerId}>
       <header className="section-heading result-heading">
         <p className="eyebrow">{finishLabel(reason)}</p>
         <h2>{result}</h2>
@@ -117,7 +118,7 @@ function BotMatchResultView({
           Return to menu
         </button>
       </div>
-    </div>
+    </PostMatchScene>
   );
 }
 

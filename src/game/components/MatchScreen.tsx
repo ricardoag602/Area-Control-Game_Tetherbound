@@ -20,7 +20,7 @@ import { TetherResources } from "./TetherResources";
 interface MatchScreenProps {
   state: GameState;
   localPlayerId: PlayerId;
-  opponentName: string;
+  playerNames?: Partial<Record<PlayerId, string>>;
   statusText: string;
   latencyMs?: number | null;
   controlsDisabled?: boolean;
@@ -35,22 +35,17 @@ function formatTime(milliseconds: number) {
   return `${Math.floor(totalSeconds / 60)}:${(totalSeconds % 60).toString().padStart(2, "0")}`;
 }
 
-export function MatchScreen({ state, localPlayerId, opponentName, statusText, latencyMs, controlsDisabled = false, interpolatePositions = false, onMovementCommand, onDeploy, onLeave }: MatchScreenProps) {
-  const opponentId: PlayerId = localPlayerId === "player" ? "rival" : "player";
+export function MatchScreen({ state, localPlayerId, playerNames = {}, statusText, latencyMs, controlsDisabled = false, interpolatePositions = false, onMovementCommand, onDeploy, onLeave }: MatchScreenProps) {
   const astronaut = state.players[localPlayerId].astronaut;
   const territoryGrid = useMemo(() => sampleTerritoryGrid(state), [
     state.anchors,
-    state.players.player.basePosition.x,
-    state.players.player.basePosition.y,
-    state.players.rival.basePosition.x,
-    state.players.rival.basePosition.y,
+    state.players,
+    state.activePlayerIds,
   ]);
   const scorableTerritory = useMemo(() => sampleScorableTerritory(state).fractions, [
     state.anchors,
-    state.players.player.basePosition.x,
-    state.players.player.basePosition.y,
-    state.players.rival.basePosition.x,
-    state.players.rival.basePosition.y,
+    state.players,
+    state.activePlayerIds,
   ]);
   const safe = isInsideSafeZone(state, localPlayerId, astronaut.position);
   const oxygenRounded = Math.round(astronaut.oxygen);
@@ -82,12 +77,11 @@ export function MatchScreen({ state, localPlayerId, opponentName, statusText, la
   );
   const phase = getPhasePresentation(state, localPlayerId);
   const localCollapseProgress = state.baseCollapseProgressMs[localPlayerId];
-  const opponentCollapseProgress = state.baseCollapseProgressMs[opponentId];
   const collapsingBaseId = localCollapseProgress > 0
     ? localPlayerId
-    : opponentCollapseProgress > 0
-      ? opponentId
-      : null;
+    : state.activePlayerIds.find(
+        (playerId) => state.baseCollapseProgressMs[playerId] > 0,
+      ) ?? null;
   const collapseProgressMs = collapsingBaseId
     ? state.baseCollapseProgressMs[collapsingBaseId]
     : 0;
@@ -116,46 +110,70 @@ export function MatchScreen({ state, localPlayerId, opponentName, statusText, la
         ? "Momentum burst"
         : null;
   const deployDisabled = controlsDisabled || !canDeployAnchor(state, localPlayerId);
+  const showFinalMinuteFlash = state.matchPhase === "regulation" &&
+    state.remainingMs <= GAME_RULES.scoreSurgeDurationMs &&
+    state.remainingMs > GAME_RULES.scoreSurgeDurationMs - 5_000;
+  const finalCountdownSeconds = state.matchPhase !== "finished" &&
+    state.remainingMs > 0 && state.remainingMs <= 5_000
+    ? Math.ceil(state.remainingMs / 1_000)
+    : null;
+  const hideMatchProgress = finalCountdownSeconds !== null;
   useDeployShortcut({ disabled: deployDisabled, onDeploy });
 
   return (
-    <div className="screen screen--game">
-      <div className="game-hud game-hud--top">
-        <button className="icon-button" onClick={onLeave} aria-label="Leave match">×</button>
-        <div className={`score-panel score-panel--${localPlayerId === "player" ? "cyan" : "coral"}`}>
-          <span>You</span>
-          <strong>{state.scores[localPlayerId].toFixed(1)}</strong>
-          <small>{Math.round(scorableTerritory[localPlayerId] * 100)}% territory</small>
+    <div className={`screen screen--game${hideMatchProgress ? " screen--final-countdown" : ""}`}>
+      {!hideMatchProgress && (
+        <div className="game-top-bar">
+          <button className="icon-button" onClick={onLeave} aria-label="Leave match">×</button>
+          <div className="match-scoreboard" aria-label="Live win points">
+            {state.activePlayerIds.map((playerId) => (
+              <div
+                className={`score-panel score-panel--${playerId}${playerId === localPlayerId ? " score-panel--local" : ""}`}
+                key={playerId}
+              >
+                <span>{playerId === localPlayerId ? "You" : playerNames[playerId] ?? "Rival"}</span>
+                <strong>{state.scores[playerId].toFixed(1)} <em>pts</em></strong>
+                <small>{Math.round(scorableTerritory[playerId] * 100)}% area</small>
+              </div>
+            ))}
+          </div>
         </div>
-        <div className="match-clock" data-phase={phase.kind}>
-          <span className="match-clock__phase">{phase.label}</span>
-          <strong>{formatTime(phase.clockMs)}</strong>
-          <small>{phase.detail}</small>
-          <small className="match-clock__status">
-            {statusText}{latencyMs !== undefined && ` · ${latencyMs ?? "—"} ms`}
-          </small>
-        </div>
-        <div className={`score-panel score-panel--${opponentId === "player" ? "cyan" : "coral"}`}>
-          <span>{opponentName}</span>
-          <strong>{state.scores[opponentId].toFixed(1)}</strong>
-          <small>{Math.round(scorableTerritory[opponentId] * 100)}% territory</small>
-        </div>
-      </div>
+      )}
       <div className="arena">
         <ArenaRenderer state={state} localPlayerId={localPlayerId} disabled={controlsDisabled}
           interpolatePositions={interpolatePositions}
           oxygenZoomMultiplier={oxygenPresentation.cameraZoomMultiplier}
           onMovementCommand={onMovementCommand} />
         <div className="oxygen-danger-overlay" style={oxygenEffectStyle} aria-hidden="true" />
-        <Minimap state={state} localPlayerId={localPlayerId} grid={territoryGrid} />
-        <div className="biome-status">
-          <span>Biome</span>
-          <strong>{formatBiome(worldSample?.biome ?? "neutral")}</strong>
-        </div>
-        {eventAnnouncement && (
+        {!hideMatchProgress && (
+          <>
+            <Minimap state={state} localPlayerId={localPlayerId} grid={territoryGrid} />
+            <div className="match-timer-panel" data-phase={phase.kind}>
+              <span>{phase.label}</span>
+              <strong>{formatTime(phase.clockMs)}</strong>
+              <small>{phase.detail}</small>
+              <small className="match-timer-panel__status">
+                {statusText}{latencyMs !== undefined && ` · ${latencyMs ?? "—"} ms`}
+              </small>
+            </div>
+          </>
+        )}
+        {showFinalMinuteFlash && (
+          <div className="signal-surge-flash" role="status" aria-live="assertive">
+            <strong>Signal rates boosted</strong>
+            <span>1 minute left</span>
+          </div>
+        )}
+        {!hideMatchProgress && (
+          <div className="biome-status">
+            <span>Biome</span>
+            <strong>{formatBiome(worldSample?.biome ?? "neutral")}</strong>
+          </div>
+        )}
+        {!hideMatchProgress && eventAnnouncement && (
           <div className="world-event-toast" role="status">{eventAnnouncement}</div>
         )}
-        {collapsingBaseId && (
+        {!hideMatchProgress && collapsingBaseId && (
           <div
             className={`base-collapse-alert${collapsingBaseId === localPlayerId ? " base-collapse-alert--danger" : ""}`}
             data-progress={collapseTrend}
@@ -170,21 +188,35 @@ export function MatchScreen({ state, localPlayerId, opponentName, statusText, la
             </div>
           </div>
         )}
-        <div className={safe ? "zone-status zone-status--safe" : "zone-status zone-status--exposed"}>
-          {safe ? "Life support connected" : "Emergency oxygen draining"}
-        </div>
-        <p className={astronaut.movement.mode === "charging" ? "control-hint control-hint--charging" : "control-hint"}>
-          {controlHint ?? (
-            <>
-              <span className="control-hint__keyboard control-hint__keyboard--active">
-                Drive: W/S · Turn: A/D · Boost: tap, then hold W or S · T: tether
-              </span>
-              <span className="control-hint__pointer">
-                drag to move · tap, then hold nearby to charge
-              </span>
-            </>
-          )}
-        </p>
+        {finalCountdownSeconds !== null && (
+          <div
+            className="final-countdown"
+            role="timer"
+            aria-live="assertive"
+            aria-label={`${finalCountdownSeconds} seconds remaining`}
+          >
+            <strong key={finalCountdownSeconds}>{finalCountdownSeconds}</strong>
+          </div>
+        )}
+        {!hideMatchProgress && (
+          <>
+            <div className={safe ? "zone-status zone-status--safe" : "zone-status zone-status--exposed"}>
+              {safe ? "Life support connected" : "Emergency oxygen draining"}
+            </div>
+            <p className={astronaut.movement.mode === "charging" ? "control-hint control-hint--charging" : "control-hint"}>
+              {controlHint ?? (
+                <>
+                  <span className="control-hint__keyboard control-hint__keyboard--active">
+                    Drive: W/S · Turn: A/D · Boost: tap, then hold W or S · T: tether
+                  </span>
+                  <span className="control-hint__pointer">
+                    drag to move · tap, then hold nearby to charge
+                  </span>
+                </>
+              )}
+            </p>
+          </>
+        )}
       </div>
       <div className="game-hud game-hud--bottom">
         <div className="meter-group">
@@ -212,18 +244,17 @@ function getCollapseTrend(
   state: GameState,
   defenderId: PlayerId,
 ): CollapseTrend {
-  const attackerId: PlayerId = defenderId === "player" ? "rival" : "player";
   const base = state.players[defenderId].basePosition;
-  const attackerInside = distance(
-    state.players[attackerId].astronaut.position,
-    base,
-  ) <= GAME_RULES.baseCollapseRadius;
+  const attackersInside = state.activePlayerIds.filter((playerId) =>
+    playerId !== defenderId &&
+    distance(state.players[playerId].astronaut.position, base) <=
+      GAME_RULES.baseCollapseRadius);
   const defenderInside = distance(
     state.players[defenderId].astronaut.position,
     base,
   ) <= GAME_RULES.baseCollapseRadius;
 
-  if (attackerInside && !defenderInside) return "capturing";
+  if (attackersInside.length === 1 && !defenderInside) return "capturing";
   return defenderInside ? "defended" : "decaying";
 }
 
@@ -272,11 +303,10 @@ function getPhasePresentation(state: GameState, localPlayerId: PlayerId): {
     };
   }
   if (state.matchPhase === "overtime") {
-    const opponentId: PlayerId = localPlayerId === "player" ? "rival" : "player";
     return {
       kind: "overtime",
       label: "Overtime",
-      detail: `OT race ${state.overtimeScores[localPlayerId].toFixed(1)}–${state.overtimeScores[opponentId].toFixed(1)} · first to +${GAME_RULES.overtimeLeadPoints}`,
+      detail: `You: ${state.overtimeScores[localPlayerId].toFixed(1)} · first to a +${GAME_RULES.overtimeLeadPoints} lead`,
       clockMs: state.remainingMs,
     };
   }
