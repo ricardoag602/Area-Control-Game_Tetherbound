@@ -16,6 +16,10 @@ import {
   RoomLobby,
 } from "./network/components/MultiplayerViews";
 import { useRoomClient } from "./network/useRoomClient";
+import {
+  AUDIO_PREFERENCE_KEY,
+  readAudioPreference,
+} from "./game/audio/gameAudio";
 
 type View = "menu" | "create-room" | "join-room" | "lobby" | "game" | "result";
 
@@ -36,10 +40,19 @@ export function App() {
   const [largeControls, setLargeControls] = useState(
     () => localStorage.getItem(LARGE_CONTROLS_KEY) === "true",
   );
+  const [audioEnabled, setAudioEnabled] = useState(readAudioPreference);
 
   useEffect(() => {
     localStorage.setItem(LARGE_CONTROLS_KEY, String(largeControls));
   }, [largeControls]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(AUDIO_PREFERENCE_KEY, String(audioEnabled));
+    } catch {
+      // Audio still follows the in-memory preference when storage is blocked.
+    }
+  }, [audioEnabled]);
 
   useEffect(() => {
     if (resumeAttempted.current || !initialRoomCode) return;
@@ -134,7 +147,9 @@ export function App() {
       <section className="view-stage">
         {view === "menu" && (
           <MainMenu
+            audioEnabled={audioEnabled}
             largeControls={largeControls}
+            onAudioEnabledChange={setAudioEnabled}
             onLargeControlsChange={setLargeControls}
             onBotGame={startBotGame}
             onCreateRoom={() => setView("create-room")}
@@ -170,10 +185,14 @@ export function App() {
           </div>
         )}
         {view === "game" && gameMode === "bot" && (
-          <GameView onLeave={() => setView("menu")} />
+          <GameView
+            audioEnabled={audioEnabled}
+            onLeave={() => setView("menu")}
+          />
         )}
         {view === "game" && gameMode === "multiplayer" && roomSession.room && roomSession.gameState && roomSession.playerId && (
           <NetworkGameView state={roomSession.gameState} room={roomSession.room}
+            audioEnabled={audioEnabled}
             localPlayerId={roomSession.playerId} connection={roomSession.connection}
             latencyMs={roomSession.latencyMs}
             onMovementCommand={(command) => roomClient.sendMovementCommand(command)}
@@ -190,7 +209,9 @@ export function App() {
 }
 
 interface MainMenuProps {
+  audioEnabled: boolean;
   largeControls: boolean;
+  onAudioEnabledChange: (enabled: boolean) => void;
   onLargeControlsChange: (enabled: boolean) => void;
   onBotGame: () => void;
   onCreateRoom: () => void;
@@ -201,7 +222,9 @@ interface MainMenuProps {
 }
 
 function MainMenu({
+  audioEnabled,
   largeControls,
+  onAudioEnabledChange,
   onLargeControlsChange,
   onBotGame,
   onCreateRoom,
@@ -260,6 +283,19 @@ function MainMenu({
           type="checkbox"
           checked={largeControls}
           onChange={(event) => onLargeControlsChange(event.target.checked)}
+        />
+        <span className="switch" aria-hidden="true" />
+      </label>
+
+      <label className="setting-card">
+        <span>
+          <strong>Audio</strong>
+          <small>Music, biome footsteps, movement, and world effects</small>
+        </span>
+        <input
+          type="checkbox"
+          checked={audioEnabled}
+          onChange={(event) => onAudioEnabledChange(event.target.checked)}
         />
         <span className="switch" aria-hidden="true" />
       </label>

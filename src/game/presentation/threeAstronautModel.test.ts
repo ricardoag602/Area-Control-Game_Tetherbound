@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
+import * as THREE from "three";
+import type { GLTF } from "three/examples/jsm/loaders/GLTFLoader.js";
 import {
   calculateThreeAstronautPose,
+  createThreeAstronautModel,
+  disposeThreeAstronautModel,
   getThreeAstronautAnimationState,
 } from "./threeAstronautModel";
 
@@ -54,3 +58,36 @@ describe("getThreeAstronautAnimationState", () => {
     }))).toBe("idle");
   });
 });
+
+describe("createThreeAstronautModel", () => {
+  it("uses a circular contact shadow", () => {
+    const rig = createThreeAstronautModel("player", astronautAsset());
+    const shadow = rig.root.getObjectByName("astronaut-player-shadow") as THREE.Mesh;
+    const geometry = shadow.geometry as THREE.CircleGeometry;
+
+    expect(shadow.scale.x).toBe(1);
+    expect(shadow.scale.y).toBe(1);
+    expect(geometry.parameters.radius).toBeCloseTo(14.3 * 0.3);
+
+    disposeThreeAstronautModel(rig);
+  });
+});
+
+function astronautAsset(): GLTF {
+  const scene = new THREE.Group();
+  scene.add(new THREE.Mesh(
+    new THREE.BoxGeometry(1, 2, 1),
+    new THREE.MeshStandardMaterial({ color: 0xffffff }),
+  ));
+  return {
+    scene,
+    scenes: [scene],
+    animations: ["Idle_5", "Running", "Quad_Jump_Up"].map(
+      (name) => new THREE.AnimationClip(name, 1, []),
+    ),
+    cameras: [],
+    asset: { version: "2.0" },
+    parser: {} as GLTF["parser"],
+    userData: {},
+  };
+}

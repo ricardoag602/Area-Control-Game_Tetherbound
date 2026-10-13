@@ -20,6 +20,8 @@ import {
 } from "../presentation/terrainTheme";
 import type { GameState } from "../types";
 
+const MAX_RENDER_RESOLUTION = 1.5;
+
 interface PixiTerrainLayerProps {
   state: GameState;
   camera: CameraViewBox;
@@ -34,6 +36,9 @@ interface TerrainScene {
   glow: Graphics;
   glowCore: Graphics;
   pads: Graphics;
+  viewportWidth: number;
+  viewportHeight: number;
+  resolution: number;
 }
 
 /**
@@ -52,6 +57,14 @@ export function PixiTerrainLayer({
   const latestCameraRef = useRef(camera);
   latestStateRef.current = state;
   latestCameraRef.current = camera;
+  const terrainLightingKey = [
+    ...state.activePlayerIds.map((playerId) => {
+      const position = state.players[playerId].basePosition;
+      return `b:${playerId}:${position.x}:${position.y}`;
+    }),
+    ...state.anchors.map((anchor) =>
+      `a:${anchor.id}:${anchor.owner}:${anchor.position.x}:${anchor.position.y}:${anchor.powered}`),
+  ].join("|");
 
   useEffect(() => {
     const host = hostRef.current;
@@ -71,7 +84,7 @@ export function PixiTerrainLayer({
         autoDensity: true,
         autoStart: false,
         backgroundColor: theme.backgroundColor,
-        resolution: Math.min(2, window.devicePixelRatio || 1),
+        resolution: Math.min(MAX_RENDER_RESOLUTION, window.devicePixelRatio || 1),
       });
       if (cancelled) {
         app.destroy({ removeView: true }, { children: true });
@@ -95,7 +108,7 @@ export function PixiTerrainLayer({
       const revealMask = new Graphics();
       revealMask.filters = [new BlurFilter({
         strength: theme.illumination.featherWorldUnits,
-        quality: 2,
+        quality: 1,
       })];
 
       // The source map stays untouched. This translucent veil is the night
@@ -109,14 +122,14 @@ export function PixiTerrainLayer({
       teamTint.blendMode = "screen";
       teamTint.filters = [new BlurFilter({
         strength: theme.illumination.teamTintBlurWorldUnits,
-        quality: 2,
+        quality: 1,
       })];
 
       const glow = new Graphics();
       glow.blendMode = "screen";
       glow.filters = [new BlurFilter({
         strength: theme.illumination.outerGlowBlurWorldUnits,
-        quality: 2,
+        quality: 1,
       })];
       const glowCore = new Graphics();
       glowCore.blendMode = "screen";
@@ -141,6 +154,9 @@ export function PixiTerrainLayer({
         glow,
         glowCore,
         pads,
+        viewportWidth: width,
+        viewportHeight: height,
+        resolution: Math.min(MAX_RENDER_RESOLUTION, window.devicePixelRatio || 1),
       };
       sceneRef.current = scene;
       updateTerrainLighting(scene, latestStateRef.current, theme);
@@ -171,9 +187,9 @@ export function PixiTerrainLayer({
   useEffect(() => {
     const scene = sceneRef.current;
     if (!scene) return;
-    updateTerrainLighting(scene, state, theme);
+    updateTerrainLighting(scene, latestStateRef.current, theme);
     scene.app.render();
-  }, [state.activePlayerIds, state.anchors, state.players, theme]);
+  }, [terrainLightingKey, theme]);
 
   useEffect(() => {
     const scene = sceneRef.current;
@@ -226,6 +242,17 @@ function updateTerrainLighting(
         width: theme.illumination.rimWidth,
         alpha: theme.illumination.rimOpacity,
       });
+    if (zone.kind === "anchor") {
+      // A compact bloom and crisp core make the powered anchor itself read as
+      // the source of the larger terrain reveal. These reuse the existing
+      // batched Graphics and blur pass rather than adding per-anchor lights.
+      scene.glow
+        .circle(zone.position.x, zone.position.y, 5.2)
+        .fill({ color, alpha: 0.24 });
+      scene.glowCore
+        .circle(zone.position.x, zone.position.y, 4.7)
+        .stroke({ color, width: 0.8, alpha: 0.78 });
+    }
   }
 
   for (const playerId of state.activePlayerIds) {
@@ -260,7 +287,17 @@ function resizeAndPosition(
 ) {
   const width = Math.max(1, host.clientWidth);
   const height = Math.max(1, host.clientHeight);
-  scene.app.renderer.resize(width, height, Math.min(2, window.devicePixelRatio || 1));
+  const resolution = Math.min(MAX_RENDER_RESOLUTION, window.devicePixelRatio || 1);
+  if (
+    scene.viewportWidth !== width
+    || scene.viewportHeight !== height
+    || scene.resolution !== resolution
+  ) {
+    scene.app.renderer.resize(width, height, resolution);
+    scene.viewportWidth = width;
+    scene.viewportHeight = height;
+    scene.resolution = resolution;
+  }
   const scaleX = width / camera.width;
   const scaleY = height / camera.height;
   scene.world.scale.set(scaleX, scaleY);

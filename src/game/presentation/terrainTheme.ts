@@ -20,6 +20,21 @@ export interface TerrainVisualTheme {
     readonly rimWidth: number;
     readonly rimOpacity: number;
   };
+  readonly modelLighting: {
+    readonly skyColor: number;
+    readonly groundColor: number;
+    readonly keyColor: number;
+    readonly fillColor: number;
+    readonly hemisphereIntensity: number;
+    readonly keyIntensity: number;
+    readonly fillIntensity: number;
+    readonly duskIntensityMultiplier: number;
+    readonly daylightExposure: number;
+    readonly duskExposure: number;
+    readonly transitionRate: number;
+    readonly keyPosition: readonly [number, number, number];
+    readonly fillPosition: readonly [number, number, number];
+  };
 }
 
 /**
@@ -31,18 +46,36 @@ export const ACTIVE_TERRAIN_THEME: TerrainVisualTheme = {
   textureUrl: "/assets/tetherbound-exoplanet-terrain-v2.png",
   backgroundColor: 0x050a10,
   dusk: {
-    // Cool neutral overcast light: closer to a cloudy 4pm than nighttime.
+    // Keep unpowered ground distinctly overcast so the daylight reveals read
+    // immediately, even on a small screen.
     color: 0x283640,
-    opacity: 0.62,
+    opacity: 0.68,
   },
   illumination: {
     featherWorldUnits: 6.2,
-    teamTintOpacity: 0.05,
+    teamTintOpacity: 0.08,
     teamTintBlurWorldUnits: 3.2,
-    outerGlowWidth: 4.8,
+    outerGlowWidth: 5.6,
     outerGlowBlurWorldUnits: 5.2,
-    outerGlowOpacity: 0.14,
-    rimWidth: 0.3,
-    rimOpacity: 0.18,
+    outerGlowOpacity: 0.24,
+    rimWidth: 0.45,
+    rimOpacity: 0.36,
+  },
+  modelLighting: {
+    // A cool ambient source and two shadowless directional lights mirror the
+    // painted terrain without per-object lights or real-time shadow maps.
+    skyColor: 0xa9c3cc,
+    groundColor: 0x16242b,
+    keyColor: 0xffd9ad,
+    fillColor: 0x6eb6e8,
+    hemisphereIntensity: 1.45,
+    keyIntensity: 2.4,
+    fillIntensity: 0.42,
+    duskIntensityMultiplier: 0.68,
+    daylightExposure: 1.03,
+    duskExposure: 0.79,
+    transitionRate: 4,
+    keyPosition: [-45, 55, 80],
+    fillPosition: [35, -25, 55],
   },
 };

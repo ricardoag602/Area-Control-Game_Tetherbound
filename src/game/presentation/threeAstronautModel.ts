@@ -19,6 +19,7 @@ const REQUIRED_CLIPS = {
 } as const;
 
 const TARGET_FOOTPRINT_SIZE = 14.3;
+const SHADOW_RADIUS = TARGET_FOOTPRINT_SIZE * 0.3;
 const TRANSITION_SECONDS = 0.14;
 const MOVING_SPEED_EPSILON = 0.01;
 
@@ -82,15 +83,16 @@ export function createThreeAstronautModel(
   const root = new THREE.Group();
   root.name = `astronaut-${playerId}`;
   const shadow = new THREE.Mesh(
-    new THREE.CircleGeometry(TARGET_FOOTPRINT_SIZE / 2, 24),
+    new THREE.CircleGeometry(SHADOW_RADIUS, 24),
     new THREE.MeshBasicMaterial({
       color: 0x02070b,
       transparent: true,
-      opacity: 0.24,
+      opacity: 0.16,
       depthWrite: false,
     }),
   );
-  shadow.position.z = 0.02;
+  shadow.name = `astronaut-${playerId}-shadow`;
+  shadow.position.set(TARGET_FOOTPRINT_SIZE * 0.045, -TARGET_FOOTPRINT_SIZE * 0.04, 0.02);
   shadow.renderOrder = -1;
   root.add(shadow);
 

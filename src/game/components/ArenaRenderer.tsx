@@ -429,7 +429,7 @@ export function ArenaRenderer({
         viewBox={`${camera.x} ${camera.y} ${camera.width} ${camera.height}`}
         aria-hidden="true"
       >
-        <TetherCableLayer state={state} />
+        <TetherCableLayer state={state} localPlayerId={localPlayerId} />
       </svg>
       <svg
         ref={arenaRef}

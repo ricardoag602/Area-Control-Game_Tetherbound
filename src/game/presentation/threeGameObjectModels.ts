@@ -7,6 +7,7 @@ import {
   getAnchorPowerState,
   type AnchorPowerState,
 } from "../simulation/tetherConflict";
+import { TERRAIN_TEAM_COLORS } from "./terrainLighting";
 import type { GameState, PlayerId, Vec2 } from "../types";
 
 const MODEL_URLS = {
@@ -35,19 +36,36 @@ export const THREE_OBJECT_FOOTPRINTS = {
   salvage: 4.2,
 } as const;
 
-const TEAM_COLORS = {
-  player: 0x25cfff,
-  rival: 0xff6548,
-  player3: 0x35dc75,
-  player4: 0xffc92f,
-} as const satisfies Readonly<Record<PlayerId, number>>;
-
 const TETHER_NUGGET_MAX_TILT = Math.PI / 18;
 
-type ObjectKind = keyof typeof THREE_OBJECT_FOOTPRINTS;
+interface ObjectShadowStyle {
+  readonly radiusScale: number;
+  readonly opacity: number;
+  readonly offsetXScale: number;
+  readonly offsetYScale: number;
+  readonly scaleY: number;
+}
+
+const DEFAULT_OBJECT_SHADOW: ObjectShadowStyle = {
+  radiusScale: 0.43,
+  opacity: 0.15,
+  offsetXScale: 0.045,
+  offsetYScale: -0.04,
+  scaleY: 0.72,
+};
+
+const TETHER_NUGGET_SHADOW: ObjectShadowStyle = {
+  radiusScale: 0.34,
+  opacity: 0.24,
+  offsetXScale: 0.07,
+  offsetYScale: -0.06,
+  scaleY: 0.82,
+};
+
+export type ThreeGameObjectKind = keyof typeof THREE_OBJECT_FOOTPRINTS;
 
 interface AssetSlot {
-  readonly kind: ObjectKind;
+  readonly kind: ThreeGameObjectKind;
   readonly playerId?: PlayerId;
   readonly url: string;
 }
@@ -70,6 +88,7 @@ interface MaterialRecord {
 
 export interface ThreeGameObjectInstance {
   readonly root: THREE.Group;
+  readonly idlePivot: THREE.Group;
   readonly model: THREE.Group;
   readonly source: THREE.Object3D;
   readonly ownedGeometries: readonly THREE.BufferGeometry[];
@@ -81,6 +100,11 @@ export interface TetherNuggetOrientation {
   readonly x: number;
   readonly y: number;
   readonly z: number;
+}
+
+export interface ThreeGameObjectIdlePose {
+  readonly scale: number;
+  readonly rotationZ: number;
 }
 
 interface TeamObjectInstance extends ThreeGameObjectInstance {
@@ -139,6 +163,7 @@ export async function loadThreeGameObjectAssets(
 export function createThreeGameObjectRuntime(
   assets: ThreeGameObjectAssets,
   state: Pick<GameState, "activePlayerIds" | "players" | "anchors" | "salvage" | "elapsedMs">,
+  reduceMotion = false,
 ): ThreeGameObjectRuntime {
   const root = new THREE.Group();
   root.name = "game-object-models";
@@ -162,7 +187,7 @@ export function createThreeGameObjectRuntime(
       runtime.homeBases.set(playerId, instance);
       root.add(instance.root);
     }
-    updateThreeGameObjectRuntime(runtime, state);
+    updateThreeGameObjectRuntime(runtime, state, reduceMotion);
     return runtime;
   } catch (error) {
     disposeRuntimeOwnedResources(runtime);
@@ -175,6 +200,7 @@ export function createThreeGameObjectInstance(
   targetFootprint: number,
   name: string,
   cloneMaterials = false,
+  shadowStyle: ObjectShadowStyle = DEFAULT_OBJECT_SHADOW,
 ): ThreeGameObjectInstance {
   const source = asset.scene.clone(true);
   source.name = `${name}-source`;
@@ -183,7 +209,6 @@ export function createThreeGameObjectInstance(
   const materialRecords: MaterialRecord[] = [];
   source.traverse((object) => {
     if (!(object instanceof THREE.Mesh)) return;
-    object.frustumCulled = false;
     if (!cloneMaterials) return;
     const cloned = (Array.isArray(object.material)
       ? object.material.map((material) => material.clone())
@@ -219,23 +244,35 @@ export function createThreeGameObjectInstance(
 
   const root = new THREE.Group();
   root.name = name;
-  const shadowGeometry = new THREE.CircleGeometry(targetFootprint * 0.43, 24);
+  const idlePivot = new THREE.Group();
+  idlePivot.name = `${name}-idle`;
+  idlePivot.add(model);
+  const shadowGeometry = new THREE.CircleGeometry(
+    targetFootprint * shadowStyle.radiusScale,
+    24,
+  );
   const shadowMaterial = new THREE.MeshBasicMaterial({
     color: 0x02070b,
     transparent: true,
-    opacity: 0.2,
+    opacity: shadowStyle.opacity,
     depthWrite: false,
   });
   ownedGeometries.push(shadowGeometry);
   ownedMaterials.push(shadowMaterial);
   const shadow = new THREE.Mesh(shadowGeometry, shadowMaterial);
   shadow.name = `${name}-shadow`;
-  shadow.position.z = 0.01;
+  shadow.position.set(
+    targetFootprint * shadowStyle.offsetXScale,
+    targetFootprint * shadowStyle.offsetYScale,
+    0.01,
+  );
+  shadow.scale.y = shadowStyle.scaleY;
   shadow.renderOrder = -1;
-  root.add(shadow, model);
+  root.add(shadow, idlePivot);
 
   return {
     root,
+    idlePivot,
     model,
     source,
     ownedGeometries,
@@ -247,10 +284,14 @@ export function createThreeGameObjectInstance(
 export function updateThreeGameObjectRuntime(
   runtime: ThreeGameObjectRuntime,
   state: Pick<GameState, "activePlayerIds" | "players" | "anchors" | "salvage" | "elapsedMs">,
+  reduceMotion = false,
+  animationTimeMs = state.elapsedMs,
 ) {
   for (const playerId of state.activePlayerIds) {
     const base = runtime.homeBases.get(playerId);
-    if (base) placeAt(base.root, state.players[playerId].basePosition);
+    if (base) {
+      placeAt(base.root, state.players[playerId].basePosition);
+    }
   }
 
   const visibleSalvage = new Set<string>();
@@ -263,6 +304,8 @@ export function updateThreeGameObjectRuntime(
         runtime.assets.salvage,
         THREE_OBJECT_FOOTPRINTS.salvage,
         `salvage-${deposit.id}`,
+        false,
+        TETHER_NUGGET_SHADOW,
       );
       orientTetherNugget(instance, deposit.id);
       runtime.salvage.set(deposit.id, instance);
@@ -298,12 +341,91 @@ export function updateThreeGameObjectRuntime(
       runtime.root.add(instance.root);
     }
     placeAt(instance.root, anchor.position);
-    setAnchorPowerState(instance, getAnchorPowerState(anchor, state.elapsedMs));
+    const powerState = getAnchorPowerState(anchor, state.elapsedMs);
+    setAnchorPowerState(instance, powerState);
   }
   for (const [id, instance] of runtime.anchors) {
     if (visibleAnchors.has(id)) continue;
     removeTeamInstance(runtime, id, instance);
   }
+  updateThreeGameObjectIdleEffects(runtime, animationTimeMs, reduceMotion);
+}
+
+export function updateThreeGameObjectIdleEffects(
+  runtime: ThreeGameObjectRuntime,
+  animationTimeMs: number,
+  reduceMotion = false,
+) {
+  for (const [playerId, instance] of runtime.homeBases) {
+    applyIdlePose(instance, "homeBase", playerId, animationTimeMs, reduceMotion);
+  }
+  for (const [id, instance] of runtime.salvage) {
+    applyIdlePose(instance, "salvage", id, animationTimeMs, reduceMotion);
+  }
+  for (const [id, instance] of runtime.anchors) {
+    applyIdlePose(
+      instance,
+      "anchor",
+      id,
+      animationTimeMs,
+      reduceMotion,
+      instance.powerState,
+    );
+  }
+}
+
+export function calculateThreeGameObjectIdlePose(
+  kind: ThreeGameObjectKind,
+  id: string,
+  elapsedMs: number,
+  reduceMotion = false,
+  powerState: AnchorPowerState = "powered",
+): ThreeGameObjectIdlePose {
+  if (reduceMotion || (kind === "anchor" && powerState !== "powered" && powerState !== "shielded")) {
+    return { scale: 1, rotationZ: 0 };
+  }
+
+  const seconds = Math.max(0, Number.isFinite(elapsedMs) ? elapsedMs : 0) / 1_000;
+  const phase = stableUnitInterval(`${id}:${kind}:idle-phase`) * Math.PI * 2;
+  if (kind === "homeBase") {
+    return {
+      scale: 1 + Math.sin(seconds * Math.PI * 2 / 4.8 + phase) * 0.01,
+      rotationZ: 0,
+    };
+  }
+  if (kind === "anchor") {
+    return {
+      scale: 1 + Math.sin(seconds * Math.PI * 2 / 3.2 + phase) * 0.012,
+      rotationZ: Math.sin(seconds * Math.PI * 2 / 3.2 + phase + Math.PI / 2)
+        * Math.PI / 120,
+    };
+  }
+
+  const direction = stableUnitInterval(`${id}:salvage:idle-direction`) < 0.5 ? -1 : 1;
+  return {
+    scale: 1 + Math.sin(seconds * Math.PI * 2 / 2.8 + phase) * 0.02,
+    rotationZ: phase + direction * seconds * Math.PI * 2 / 22,
+  };
+}
+
+function applyIdlePose(
+  instance: ThreeGameObjectInstance,
+  kind: ThreeGameObjectKind,
+  id: string,
+  elapsedMs: number,
+  reduceMotion: boolean,
+  powerState: AnchorPowerState = "powered",
+) {
+  const pose = calculateThreeGameObjectIdlePose(
+    kind,
+    id,
+    elapsedMs,
+    reduceMotion,
+    powerState,
+  );
+  instance.idlePivot.position.set(0, 0, 0);
+  instance.idlePivot.rotation.set(0, 0, pose.rotationZ);
+  instance.idlePivot.scale.setScalar(pose.scale);
 }
 
 export function getTetherNuggetOrientation(id: string): TetherNuggetOrientation {
@@ -355,7 +477,7 @@ export function disposeThreeGameObjectAssets(assets: ThreeGameObjectAssets) {
 
 function setAnchorPowerState(instance: TeamObjectInstance, state: AnchorPowerState) {
   if (instance.powerState === state) return;
-  const teamColor = new THREE.Color(TEAM_COLORS[instance.playerId]);
+  const teamColor = new THREE.Color(TERRAIN_TEAM_COLORS[instance.playerId]);
   const neutral = new THREE.Color(0x71787d);
   for (const record of instance.materialRecords) {
     const { material } = record;
@@ -367,7 +489,7 @@ function setAnchorPowerState(instance: TeamObjectInstance, state: AnchorPowerSta
     material.depthWrite = record.baseDepthWrite;
     if (state === "shielded") {
       material.emissive.lerp(teamColor, 0.42);
-      material.emissiveIntensity = Math.max(0.55, record.baseEmissiveIntensity);
+      material.emissiveIntensity = Math.max(0.68, record.baseEmissiveIntensity);
     } else if (state === "disrupted") {
       material.color.lerp(neutral, 0.48);
       material.opacity = 0.72;

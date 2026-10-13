@@ -2,6 +2,24 @@ import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import type { CameraViewBox } from "../presentation/camera";
 import {
+  clearThreeBoostChargeSmoke,
+  createThreeBoostChargeSmoke,
+  disposeThreeBoostChargeSmoke,
+  updateThreeBoostChargeSmoke,
+  type ThreeBoostChargeSmokeRuntime,
+} from "../presentation/threeBoostChargeSmoke";
+import {
+  clearThreeInteractionEffects,
+  createThreeInteractionEffects,
+  disposeThreeInteractionEffects,
+  updateThreeInteractionEffects,
+  type ThreeInteractionEffectsRuntime,
+} from "../presentation/threeInteractionEffects";
+import {
+  collectTerrainLightZones,
+  type TerrainLightZone,
+} from "../presentation/terrainLighting";
+import {
   createThreeAstronautModel,
   disposeThreeAstronautAsset,
   disposeThreeAstronautModel,
@@ -14,9 +32,14 @@ import {
   disposeThreeGameObjectAssets,
   disposeThreeGameObjectRuntime,
   loadThreeGameObjectAssets,
+  updateThreeGameObjectIdleEffects,
   updateThreeGameObjectRuntime,
   type ThreeGameObjectRuntime,
 } from "../presentation/threeGameObjectModels";
+import {
+  createThreeSceneLighting,
+  updateThreeSceneLighting,
+} from "../presentation/threeSceneLighting";
 import type { GameState, PlayerId, Vec2 } from "../types";
 
 interface ThreeAstronautLayerProps {
@@ -31,6 +54,7 @@ interface LatestFrame {
   state: GameState;
   renderPositions: Readonly<Record<PlayerId, Vec2>>;
   camera: CameraViewBox;
+  terrainLightZones: readonly TerrainLightZone[];
 }
 
 export default function ThreeAstronautLayer({
@@ -41,10 +65,16 @@ export default function ThreeAstronautLayer({
   onObjectReadyChange,
 }: ThreeAstronautLayerProps) {
   const hostRef = useRef<HTMLDivElement>(null);
-  const latestRef = useRef<LatestFrame>({ state, renderPositions, camera });
+  const terrainLightZones = collectTerrainLightZones(state);
+  const latestRef = useRef<LatestFrame>({
+    state,
+    renderPositions,
+    camera,
+    terrainLightZones,
+  });
   const readyCallbackRef = useRef(onReadyChange);
   const objectReadyCallbackRef = useRef(onObjectReadyChange);
-  latestRef.current = { state, renderPositions, camera };
+  latestRef.current = { state, renderPositions, camera, terrainLightZones };
   readyCallbackRef.current = onReadyChange;
   objectReadyCallbackRef.current = onObjectReadyChange;
   const playerKey = state.activePlayerIds.join("|");
@@ -58,24 +88,49 @@ export default function ThreeAstronautLayer({
     let contextLost = false;
     let resizeDirty = true;
     let renderer: THREE.WebGLRenderer | null = null;
+    let boostSmokeRuntime: ThreeBoostChargeSmokeRuntime | null = null;
+    let interactionEffectsRuntime: ThreeInteractionEffectsRuntime | null = null;
     let astronautRenderReady = false;
     let astronautAssetsReady = false;
     let objectRenderReady = false;
     let objectAssetsReady = false;
     let previousFrameMs: number | null = null;
-    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const motionPreference = window.matchMedia("(prefers-reduced-motion: reduce)");
+    let reduceMotion = motionPreference.matches;
+    const handleMotionPreference = (event: MediaQueryListEvent) => {
+      reduceMotion = event.matches;
+      if (reduceMotion && interactionEffectsRuntime) {
+        clearThreeInteractionEffects(
+          interactionEffectsRuntime,
+          latestRef.current.state,
+        );
+      }
+    };
+    motionPreference.addEventListener("change", handleMotionPreference);
+    const handleVisibilityChange = () => {
+      previousFrameMs = null;
+      if (interactionEffectsRuntime) {
+        clearThreeInteractionEffects(
+          interactionEffectsRuntime,
+          latestRef.current.state,
+        );
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
     const scene = new THREE.Scene();
     const viewCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 180);
     viewCamera.up.set(0, 1, 0);
     const rigs = new Map<PlayerId, ThreeAstronautRig>();
     let objectRuntime: ThreeGameObjectRuntime | null = null;
+    let reconciledObjectState: GameState | null = null;
+    let reconciledObjectElapsedMs = -1;
 
-    const hemisphere = new THREE.HemisphereLight(0xddf7ff, 0x07111b, 1.85);
-    const keyLight = new THREE.DirectionalLight(0xfff2d6, 3.1);
-    keyLight.position.set(-45, 55, 80);
-    const fillLight = new THREE.DirectionalLight(0x6ebbff, 0.72);
-    fillLight.position.set(35, -25, 55);
-    scene.add(hemisphere, keyLight, fillLight);
+    const initial = latestRef.current;
+    const sceneLighting = createThreeSceneLighting(
+      initial.camera,
+      initial.terrainLightZones,
+    );
+    scene.add(sceneLighting.hemisphere, sceneLighting.key, sceneLighting.fill);
 
     const resizeObserver = new ResizeObserver(() => {
       resizeDirty = true;
@@ -91,18 +146,36 @@ export default function ThreeAstronautLayer({
       });
       renderer.setClearColor(0x000000, 0);
       renderer.setPixelRatio(Math.min(1.5, window.devicePixelRatio || 1));
+      renderer.shadowMap.enabled = false;
       renderer.outputColorSpace = THREE.SRGBColorSpace;
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
-      renderer.toneMappingExposure = 1.08;
+      renderer.toneMappingExposure = sceneLighting.exposure;
       renderer.domElement.className = "three-astronaut-layer__canvas";
       renderer.domElement.setAttribute("aria-hidden", "true");
       renderer.domElement.addEventListener("webglcontextlost", handleContextLost);
       renderer.domElement.addEventListener("webglcontextrestored", handleContextRestored);
       host.appendChild(renderer.domElement);
+      boostSmokeRuntime = createThreeBoostChargeSmoke(latestRef.current.state.activePlayerIds);
+      scene.add(boostSmokeRuntime.mesh);
+      interactionEffectsRuntime = createThreeInteractionEffects(latestRef.current.state);
+      scene.add(interactionEffectsRuntime.mesh);
     } catch (error) {
       console.error("Unable to initialize 3D astronaut renderer", error);
       resizeObserver.disconnect();
+      motionPreference.removeEventListener("change", handleMotionPreference);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      if (interactionEffectsRuntime) {
+        disposeThreeInteractionEffects(interactionEffectsRuntime);
+      }
+      if (boostSmokeRuntime) disposeThreeBoostChargeSmoke(boostSmokeRuntime);
       for (const rig of rigs.values()) disposeThreeAstronautModel(rig);
+      if (renderer) {
+        renderer.domElement.removeEventListener("webglcontextlost", handleContextLost);
+        renderer.domElement.removeEventListener("webglcontextrestored", handleContextRestored);
+        renderer.dispose();
+        renderer.forceContextLoss();
+        renderer.domElement.remove();
+      }
       return;
     }
 
@@ -154,8 +227,14 @@ export default function ThreeAstronautLayer({
         return;
       }
       try {
-        objectRuntime = createThreeGameObjectRuntime(assets, latestRef.current.state);
+        objectRuntime = createThreeGameObjectRuntime(
+          assets,
+          latestRef.current.state,
+          reduceMotion,
+        );
         scene.add(objectRuntime.root);
+        reconciledObjectState = latestRef.current.state;
+        reconciledObjectElapsedMs = latestRef.current.state.elapsedMs;
         objectAssetsReady = true;
       } catch (error) {
         disposeThreeGameObjectAssets(assets);
@@ -186,6 +265,12 @@ export default function ThreeAstronautLayer({
       }
 
       positionCamera(viewCamera, latest.camera);
+      renderer.toneMappingExposure = updateThreeSceneLighting(
+        sceneLighting,
+        latest.camera,
+        latest.terrainLightZones,
+        deltaSeconds,
+      );
       for (const playerId of latest.state.activePlayerIds) {
         const rig = rigs.get(playerId);
         if (!rig) continue;
@@ -197,7 +282,40 @@ export default function ThreeAstronautLayer({
           reduceMotion,
         );
       }
-      if (objectRuntime) updateThreeGameObjectRuntime(objectRuntime, latest.state);
+      if (boostSmokeRuntime) {
+        updateThreeBoostChargeSmoke(
+          boostSmokeRuntime,
+          latest.state,
+          latest.renderPositions,
+          deltaSeconds,
+          reduceMotion,
+        );
+      }
+      if (objectRuntime) {
+        if (
+          reconciledObjectState !== latest.state
+          || reconciledObjectElapsedMs !== latest.state.elapsedMs
+        ) {
+          updateThreeGameObjectRuntime(
+            objectRuntime,
+            latest.state,
+            reduceMotion,
+            timeMs,
+          );
+          reconciledObjectState = latest.state;
+          reconciledObjectElapsedMs = latest.state.elapsedMs;
+        } else {
+          updateThreeGameObjectIdleEffects(objectRuntime, timeMs, reduceMotion);
+        }
+      }
+      if (interactionEffectsRuntime) {
+        updateThreeInteractionEffects(
+          interactionEffectsRuntime,
+          latest.state,
+          deltaSeconds,
+          reduceMotion,
+        );
+      }
       renderer.render(scene, viewCamera);
       if (astronautAssetsReady && !astronautRenderReady) {
         astronautRenderReady = true;
@@ -216,8 +334,14 @@ export default function ThreeAstronautLayer({
       cancelled = true;
       cancelAnimationFrame(animationFrame);
       resizeObserver.disconnect();
+      motionPreference.removeEventListener("change", handleMotionPreference);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
       readyCallbackRef.current?.(false);
       objectReadyCallbackRef.current?.(false);
+      if (interactionEffectsRuntime) {
+        disposeThreeInteractionEffects(interactionEffectsRuntime);
+      }
+      if (boostSmokeRuntime) disposeThreeBoostChargeSmoke(boostSmokeRuntime);
       for (const rig of rigs.values()) disposeThreeAstronautModel(rig);
       if (objectRuntime) disposeThreeGameObjectRuntime(objectRuntime);
       if (renderer) {
@@ -234,6 +358,13 @@ export default function ThreeAstronautLayer({
       contextLost = true;
       astronautRenderReady = false;
       objectRenderReady = false;
+      if (boostSmokeRuntime) clearThreeBoostChargeSmoke(boostSmokeRuntime);
+      if (interactionEffectsRuntime) {
+        clearThreeInteractionEffects(
+          interactionEffectsRuntime,
+          latestRef.current.state,
+        );
+      }
       readyCallbackRef.current?.(false);
       objectReadyCallbackRef.current?.(false);
     }
@@ -243,6 +374,12 @@ export default function ThreeAstronautLayer({
       astronautRenderReady = false;
       objectRenderReady = false;
       resizeDirty = true;
+      if (interactionEffectsRuntime) {
+        clearThreeInteractionEffects(
+          interactionEffectsRuntime,
+          latestRef.current.state,
+        );
+      }
     }
   }, [playerKey]);
 

@@ -3,6 +3,7 @@ import * as THREE from "three";
 import type { GLTF } from "three/examples/jsm/loaders/GLTFLoader.js";
 import type { Anchor, GameState, PlayerId } from "../types";
 import {
+  calculateThreeGameObjectIdlePose,
   createThreeGameObjectInstance,
   createThreeGameObjectRuntime,
   disposeThreeGameObjectRuntime,
@@ -11,6 +12,35 @@ import {
   updateThreeGameObjectRuntime,
   type ThreeGameObjectAssets,
 } from "./threeGameObjectModels";
+
+describe("calculateThreeGameObjectIdlePose", () => {
+  it("is deterministic and stays within the subtle transform limits", () => {
+    const random = vi.spyOn(Math, "random");
+    const base = calculateThreeGameObjectIdlePose("homeBase", "player", 1_200);
+    const anchor = calculateThreeGameObjectIdlePose("anchor", "anchor-1", 1_200);
+    const nugget = calculateThreeGameObjectIdlePose("salvage", "salvage-1", 1_200);
+
+    expect(calculateThreeGameObjectIdlePose("salvage", "salvage-1", 1_200)).toEqual(nugget);
+    expect(random).not.toHaveBeenCalled();
+    expect(base.scale).toBeGreaterThanOrEqual(0.99);
+    expect(base.scale).toBeLessThanOrEqual(1.01);
+    expect(Math.abs(anchor.rotationZ)).toBeLessThanOrEqual(Math.PI / 120);
+    expect(anchor.scale).toBeGreaterThanOrEqual(0.988);
+    expect(anchor.scale).toBeLessThanOrEqual(1.012);
+    expect(nugget.scale).toBeGreaterThanOrEqual(0.98);
+    expect(nugget.scale).toBeLessThanOrEqual(1.02);
+    random.mockRestore();
+  });
+
+  it("freezes decorative motion for reduced motion and inactive anchors", () => {
+    expect(calculateThreeGameObjectIdlePose("salvage", "salvage-1", 9_000, true))
+      .toEqual({ scale: 1, rotationZ: 0 });
+    expect(calculateThreeGameObjectIdlePose("anchor", "anchor-1", 9_000, false, "disrupted"))
+      .toEqual({ scale: 1, rotationZ: 0 });
+    expect(calculateThreeGameObjectIdlePose("anchor", "anchor-1", 9_000, false, "severed"))
+      .toEqual({ scale: 1, rotationZ: 0 });
+  });
+});
 
 describe("getTetherNuggetOrientation", () => {
   it("derives a stable orientation from the deposit ID without runtime randomness", () => {
@@ -56,7 +86,7 @@ describe("ThreeGameObjectRuntime", () => {
     const asset = boxAsset(2, 1, 0.5);
     const assets = objectAssets(asset);
     const state = objectState();
-    const runtime = createThreeGameObjectRuntime(assets, state);
+    const runtime = createThreeGameObjectRuntime(assets, state, true);
 
     const base = runtime.homeBases.get("player");
     const anchor = runtime.anchors.get("anchor-1");
@@ -104,6 +134,86 @@ describe("ThreeGameObjectRuntime", () => {
     updateThreeGameObjectRuntime(runtime, state);
     expect(runtime.salvage.get("salvage-1")?.model.quaternion.toArray()).toEqual(firstQuaternion);
 
+    disposeThreeGameObjectRuntime(runtime);
+  });
+
+  it("gives nuggets a small, visible contact shadow", () => {
+    const asset = boxAsset(2, 1, 0.5);
+    const runtime = createThreeGameObjectRuntime(objectAssets(asset), objectState());
+    const nugget = runtime.salvage.get("salvage-1")!;
+    const shadow = nugget.root.getObjectByName("salvage-salvage-1-shadow") as THREE.Mesh;
+    const geometry = shadow.geometry as THREE.CircleGeometry;
+    const material = shadow.material as THREE.MeshBasicMaterial;
+
+    expect(geometry.parameters.radius).toBeCloseTo(THREE_OBJECT_FOOTPRINTS.salvage * 0.34);
+    expect(shadow.scale.y).toBeCloseTo(0.82);
+    expect(material.opacity).toBeCloseTo(0.24);
+
+    disposeThreeGameObjectRuntime(runtime);
+  });
+
+  it("animates only visual pivots and resets them for reduced motion", () => {
+    const asset = boxAsset(2, 1, 0.5);
+    const initial = objectState();
+    const runtime = createThreeGameObjectRuntime(objectAssets(asset), initial, true);
+    const base = runtime.homeBases.get("player")!;
+    const anchor = runtime.anchors.get("anchor-1")!;
+    const nugget = runtime.salvage.get("salvage-1")!;
+    const nuggetModelQuaternion = nugget.model.quaternion.toArray();
+    const shadow = nugget.root.getObjectByName("salvage-salvage-1-shadow")!;
+    const shadowTransform = {
+      position: shadow.position.toArray(),
+      scale: shadow.scale.toArray(),
+    };
+
+    updateThreeGameObjectRuntime(runtime, { ...initial, elapsedMs: 1_200 });
+
+    expect(base.idlePivot.scale.x).not.toBe(1);
+    expect(anchor.idlePivot.rotation.z).not.toBe(0);
+    expect(nugget.idlePivot.rotation.z).not.toBe(0);
+    expect(nugget.model.quaternion.toArray()).toEqual(nuggetModelQuaternion);
+    expect(nugget.root.position.toArray()).toEqual([7, -9, 0]);
+    expect(shadow.position.toArray()).toEqual(shadowTransform.position);
+    expect(shadow.scale.toArray()).toEqual(shadowTransform.scale);
+
+    updateThreeGameObjectRuntime(runtime, { ...initial, elapsedMs: 2_400 }, true);
+    for (const instance of [base, anchor, nugget]) {
+      expect(instance.idlePivot.rotation.toArray().slice(0, 3)).toEqual([0, 0, 0]);
+      expect(instance.idlePivot.scale.toArray()).toEqual([1, 1, 1]);
+    }
+
+    disposeThreeGameObjectRuntime(runtime);
+  });
+
+  it("keeps powered anchor textures crisp and reserves emissive color for shielding", () => {
+    const asset = boxAsset(2, 1, 0.5);
+    const initial = objectState();
+    const runtime = createThreeGameObjectRuntime(objectAssets(asset), initial);
+    const anchor = runtime.anchors.get("anchor-1")!;
+    const material = anchor.materialRecords[0].material;
+
+    expect(material.emissive.getHex()).toBe(0x000000);
+
+    updateThreeGameObjectRuntime(runtime, {
+      ...initial,
+      anchors: initial.anchors.map((item) => ({
+        ...item,
+        protectedUntilMs: 10_000,
+      })),
+    });
+
+    expect(material.emissive.getHex()).not.toBe(0x000000);
+
+    updateThreeGameObjectRuntime(runtime, {
+      ...initial,
+      anchors: initial.anchors.map((item) => ({
+        ...item,
+        powered: false,
+        disruptedUntilMs: null,
+      })),
+    });
+
+    expect(material.emissiveIntensity).toBe(0);
     disposeThreeGameObjectRuntime(runtime);
   });
 

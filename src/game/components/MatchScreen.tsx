@@ -16,8 +16,10 @@ import type { WorldTimelineEvent } from "../world/timeline";
 import { ArenaRenderer } from "./ArenaRenderer";
 import { Minimap } from "./Minimap";
 import { TetherResources } from "./TetherResources";
+import { GameAudioLayer } from "./GameAudioLayer";
 
 interface MatchScreenProps {
+  audioEnabled: boolean;
   state: GameState;
   localPlayerId: PlayerId;
   playerNames?: Partial<Record<PlayerId, string>>;
@@ -35,7 +37,7 @@ function formatTime(milliseconds: number) {
   return `${Math.floor(totalSeconds / 60)}:${(totalSeconds % 60).toString().padStart(2, "0")}`;
 }
 
-export function MatchScreen({ state, localPlayerId, playerNames = {}, statusText, latencyMs, controlsDisabled = false, interpolatePositions = false, onMovementCommand, onDeploy, onLeave }: MatchScreenProps) {
+export function MatchScreen({ audioEnabled, state, localPlayerId, playerNames = {}, statusText, latencyMs, controlsDisabled = false, interpolatePositions = false, onMovementCommand, onDeploy, onLeave }: MatchScreenProps) {
   const astronaut = state.players[localPlayerId].astronaut;
   const territoryGrid = useMemo(() => sampleTerritoryGrid(state), [
     state.anchors,
@@ -122,6 +124,12 @@ export function MatchScreen({ state, localPlayerId, playerNames = {}, statusText
 
   return (
     <div className={`screen screen--game${hideMatchProgress ? " screen--final-countdown" : ""}`}>
+      <GameAudioLayer
+        state={state}
+        localPlayerId={localPlayerId}
+        enabled={audioEnabled}
+        disabled={controlsDisabled}
+      />
       {!hideMatchProgress && (
         <div className="game-top-bar">
           <button className="icon-button" onClick={onLeave} aria-label="Leave match">×</button>

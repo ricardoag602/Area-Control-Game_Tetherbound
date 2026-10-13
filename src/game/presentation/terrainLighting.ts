@@ -44,3 +44,34 @@ export function collectTerrainLightZones(
 
   return [...bases, ...anchors];
 }
+
+/**
+ * Approximates the feathered Pixi reveal at a world point without adding GPU
+ * lights. The edge of a powered zone is half-lit and fades smoothly to dusk.
+ */
+export function getTerrainIlluminationFactor(
+  zones: readonly TerrainLightZone[],
+  position: Vec2,
+  featherWorldUnits: number,
+) {
+  const feather = Math.max(0.001, featherWorldUnits);
+  let illumination = 0;
+  for (const zone of zones) {
+    const distance = Math.hypot(
+      position.x - zone.position.x,
+      position.y - zone.position.y,
+    );
+    const linear = clamp(
+      (zone.radius + feather - distance) / (feather * 2),
+      0,
+      1,
+    );
+    const smoothed = linear * linear * (3 - 2 * linear);
+    illumination = Math.max(illumination, smoothed);
+  }
+  return illumination;
+}
+
+function clamp(value: number, minimum: number, maximum: number) {
+  return Math.min(maximum, Math.max(minimum, value));
+}

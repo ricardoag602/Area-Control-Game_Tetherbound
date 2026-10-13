@@ -581,7 +581,7 @@ button { -webkit-tap-highlight-color: transparent; }
 .world__safe-zone--powered,
 .world__safe-zone--shielded {
   fill-opacity: .025;
-  stroke-opacity: .22;
+  stroke-opacity: .3;
 }
 
 .world__safe-zone--shielded {
@@ -688,13 +688,16 @@ button { -webkit-tap-highlight-color: transparent; }
   pointer-events: none;
 }
 
-.world__anchor-delivery-ring--active {
-  stroke-width: .4;
-  opacity: .72;
-  filter: drop-shadow(0 0 1px currentColor);
+.world__anchor-delivery-pulse {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: .34;
+  opacity: 0;
+  pointer-events: none;
+  filter: drop-shadow(0 0 .8px currentColor);
   transform-box: fill-box;
   transform-origin: center;
-  animation: delivery-ring-ready 1.25s ease-in-out infinite;
+  animation: anchor-delivery-pulse 1.4s ease-out infinite;
 }
 
 .world__anchor--powered {
@@ -884,9 +887,9 @@ button { -webkit-tap-highlight-color: transparent; }
   to { transform: rotate(360deg); }
 }
 
-@keyframes delivery-ring-ready {
-  0%, 100% { opacity: .45; transform: scale(.94); }
-  50% { opacity: .9; transform: scale(1.04); }
+@keyframes anchor-delivery-pulse {
+  0% { opacity: .82; transform: scale(.82); }
+  72%, 100% { opacity: 0; transform: scale(1.68); }
 }
 
 @keyframes interaction-filament-flow {
@@ -1512,14 +1515,14 @@ button { -webkit-tap-highlight-color: transparent; }
   .world__cable-sprite--disrupted,
   .world__anchor-disruption-pulse,
   .world__anchor-shield-satellite,
-  .world__anchor-delivery-ring--active,
+  .world__anchor-delivery-pulse,
   .world__interaction-filament-core,
   .world__base-collapse-pulse,
   .base-collapse-alert--danger { animation: none !important; }
   .world__safe-zone--disrupted { stroke-opacity: .58; }
   .world__safe-zone--delivery-ready { fill-opacity: .1; stroke-opacity: .78; }
   .world__anchor-disruption-pulse { opacity: .45; }
-  .world__anchor-delivery-ring--active { opacity: .72; transform: none; }
+  .world__anchor-delivery-pulse { opacity: .72; transform: scale(1.35); }
 }
 
 @media (prefers-contrast: more) {

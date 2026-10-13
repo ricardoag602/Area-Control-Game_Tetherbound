@@ -36,6 +36,23 @@ export function TetherNetworkLayer({
   renderPositions,
   localPlayerId,
 }: TetherNetworkLayerProps) {
+  return (
+    <g className="world__tether-layer">
+      <InteractionFilaments state={state} renderPositions={renderPositions} />
+
+      {state.activePlayerIds.map((playerId) => (
+        <NetworkNodes key={playerId} state={state} playerId={playerId}
+          highlightDelivery={localPlayerId === playerId}
+          isLocalBase={localPlayerId === playerId} />
+      ))}
+    </g>
+  );
+}
+
+export function TetherCableLayer({
+  state,
+  localPlayerId,
+}: Pick<TetherNetworkLayerProps, "state" | "localPlayerId">) {
   const instanceId = useId().replaceAll(":", "");
   const hatchId = `tether-contested-hatch-${instanceId}`;
   const networkNodes = state.activePlayerIds.map((playerId) =>
@@ -84,20 +101,6 @@ export function TetherNetworkLayer({
         ))}
       </g>
 
-      <InteractionFilaments state={state} renderPositions={renderPositions} />
-
-      {state.activePlayerIds.map((playerId) => (
-        <NetworkNodes key={playerId} state={state} playerId={playerId}
-          highlightDelivery={localPlayerId === playerId}
-          isLocalBase={localPlayerId === playerId} />
-      ))}
-    </g>
-  );
-}
-
-export function TetherCableLayer({ state }: { state: GameState }) {
-  return (
-    <g className="world__tether-layer">
       {state.activePlayerIds.map((playerId) => (
         <NetworkConnections key={playerId} state={state} playerId={playerId} />
       ))}
@@ -318,10 +321,17 @@ function AnchorMarker({
       {(powerState === "powered" || powerState === "shielded") && (
         <>
           <circle
-            className={`world__anchor-delivery-ring${hasCargo ? " world__anchor-delivery-ring--active" : ""}`}
+            className="world__anchor-delivery-ring"
             r={GAME_RULES.deliveryRadius}
             aria-hidden="true"
           />
+          {hasCargo && (
+            <circle
+              className="world__anchor-delivery-pulse"
+              r="3.2"
+              aria-hidden="true"
+            />
+          )}
           {powerState === "shielded" && (
             <>
               <circle className="world__anchor-shield" r="3.35" />

@@ -4,6 +4,7 @@ import type { ConnectionStatus } from "../RoomClient";
 import type { RoomSnapshot } from "../protocol";
 
 interface NetworkGameViewProps {
+  audioEnabled: boolean;
   state: GameState;
   room: RoomSnapshot;
   localPlayerId: PlayerId;
@@ -14,7 +15,7 @@ interface NetworkGameViewProps {
   onLeave: () => void;
 }
 
-export function NetworkGameView({ state, room, localPlayerId, connection, latencyMs, onMovementCommand, onDeploy, onLeave }: NetworkGameViewProps) {
+export function NetworkGameView({ audioEnabled, state, room, localPlayerId, connection, latencyMs, onMovementCommand, onDeploy, onLeave }: NetworkGameViewProps) {
   const opponents = room.players.filter((player) => player.id !== localPlayerId);
   const disconnectedOpponent = opponents.find((player) => !player.connected);
   const controlsDisabled = connection !== "connected" || Boolean(disconnectedOpponent);
@@ -27,6 +28,7 @@ export function NetworkGameView({ state, room, localPlayerId, connection, latenc
     room.players.map((player) => [player.id, player.name]),
   ) as Partial<Record<PlayerId, string>>;
   return <MatchScreen state={state} localPlayerId={localPlayerId} playerNames={playerNames}
+    audioEnabled={audioEnabled}
     statusText={statusText} latencyMs={latencyMs} controlsDisabled={controlsDisabled}
     interpolatePositions={true}
     onMovementCommand={onMovementCommand} onDeploy={onDeploy} onLeave={onLeave} />;
