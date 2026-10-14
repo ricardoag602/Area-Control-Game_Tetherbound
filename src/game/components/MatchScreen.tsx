@@ -173,7 +173,10 @@ export function MatchScreen({ audioEnabled, state, localPlayerId, playerNames = 
           </div>
         )}
         {!hideMatchProgress && (
-          <div className="biome-status">
+          <div
+            className="biome-status"
+            data-biome={worldSample?.biome ?? "neutral"}
+          >
             <span>Biome</span>
             <strong>{formatBiome(worldSample?.biome ?? "neutral")}</strong>
           </div>
@@ -208,38 +211,43 @@ export function MatchScreen({ audioEnabled, state, localPlayerId, playerNames = 
         )}
         {!hideMatchProgress && (
           <>
-            <div className={safe ? "zone-status zone-status--safe" : "zone-status zone-status--exposed"}>
-              {safe ? "Life support connected" : "Emergency oxygen draining"}
-            </div>
+            {!safe && (
+              <div className="zone-status zone-status--exposed">
+                Emergency oxygen draining
+              </div>
+            )}
             <p className={astronaut.movement.mode === "charging" ? "control-hint control-hint--charging" : "control-hint"}>
               {controlHint ?? (
                 <>
-                  <span className="control-hint__keyboard control-hint__keyboard--active">
-                    Drive: W/S · Turn: A/D · Boost: tap, then hold W or S · T: tether
-                  </span>
-                  <span className="control-hint__pointer">
-                    drag to move · tap, then hold nearby to charge
-                  </span>
+                  <span className="control-hint__line">Boost Charge: Tap, then Hold</span>
+                  <span className="control-hint__line">Walk: W/S</span>
+                  <span className="control-hint__line">Turn: A/D</span>
                 </>
               )}
             </p>
           </>
         )}
       </div>
+      <div
+        className="sr-only"
+        role="progressbar"
+        aria-label="Oxygen"
+        aria-valuemin={0}
+        aria-valuemax={GAME_RULES.oxygenMaximum}
+        aria-valuenow={oxygenRounded}
+      />
       <div className="game-hud game-hud--bottom">
-        <div className="meter-group">
-          <div className="meter-label"><span>Oxygen</span><strong>{oxygenRounded}%</strong></div>
-          <div className="meter"><span className={oxygenRounded <= 30 ? "meter__fill meter__fill--danger" : "meter__fill"}
-            style={{ width: `${oxygenRounded}%` }} /></div>
-        </div>
         <TetherResources
           bankedSalvage={astronaut.bankedSalvage}
           carriedSalvage={astronaut.carriedSalvage}
           tetherKits={astronaut.tetherKits}
+          deployReady={!deployDisabled}
         />
         <button className="deploy-button" disabled={deployDisabled} onClick={onDeploy}
           aria-label="Deploy tether" aria-keyshortcuts="T" title="Deploy tether (T)">
-          Deploy <kbd className="deploy-button__shortcut">T</kbd>
+          <span className="deploy-button__icon" aria-hidden="true" />
+          <span className="deploy-button__label">Deploy</span>
+          <kbd className="deploy-button__shortcut">T</kbd>
         </button>
       </div>
     </div>

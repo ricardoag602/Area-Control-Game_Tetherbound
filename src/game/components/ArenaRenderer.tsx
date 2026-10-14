@@ -7,7 +7,8 @@ import {
   useState,
   type PointerEvent,
 } from "react";
-import { WORLD } from "../constants";
+import { GAME_RULES, WORLD } from "../constants";
+import { normalizeOxygen } from "../presentation/oxygen";
 import {
   buildChargeRadarPath,
   calculateChargeRadar,
@@ -99,6 +100,10 @@ export function ArenaRenderer({
   const [threeAstronautsReady, setThreeAstronautsReady] = useState(false);
   const [threeObjectsReady, setThreeObjectsReady] = useState(false);
   const [chargeIntentActive, setChargeIntentActive] = useState(false);
+  const [oxygenRefillSerial, setOxygenRefillSerial] = useState(0);
+  const oxygenWasDepletedRef = useRef(
+    localAstronaut.oxygen < GAME_RULES.oxygenMaximum,
+  );
   const camera = useFollowCamera(
     arenaRef,
     renderPositions[localPlayerId],
@@ -117,6 +122,17 @@ export function ArenaRenderer({
   const [touchChargePreview, setTouchChargePreview] = useState<TankInput | null>(null);
   commandRef.current = onMovementCommand;
   localAstronautRef.current = localAstronaut;
+
+  useEffect(() => {
+    if (localAstronaut.oxygen < GAME_RULES.oxygenMaximum - 0.001) {
+      oxygenWasDepletedRef.current = true;
+      setOxygenRefillSerial(0);
+      return;
+    }
+    if (!oxygenWasDepletedRef.current) return;
+    oxygenWasDepletedRef.current = false;
+    setOxygenRefillSerial((serial) => serial + 1);
+  }, [localAstronaut.oxygen, localPlayerId]);
 
   const clearChargeTimer = useCallback(() => {
     if (chargeTimerRef.current !== null) window.clearTimeout(chargeTimerRef.current);
@@ -430,6 +446,11 @@ export function ArenaRenderer({
         aria-hidden="true"
       >
         <TetherCableLayer state={state} localPlayerId={localPlayerId} />
+        <OxygenWorldIndicator
+          oxygen={localAstronaut.oxygen}
+          position={renderPositions[localPlayerId]}
+          refillSerial={oxygenRefillSerial}
+        />
       </svg>
       <svg
         ref={arenaRef}
@@ -497,6 +518,57 @@ export function ArenaRenderer({
         />
       </Suspense>
     </div>
+  );
+}
+
+function OxygenWorldIndicator({
+  oxygen,
+  position,
+  refillSerial,
+}: {
+  oxygen: number;
+  position: Vec2;
+  refillSerial: number;
+}) {
+  const normalized = normalizeOxygen(oxygen, GAME_RULES.oxygenMaximum);
+  const depleted = normalized < 0.999;
+  const completing = !depleted && refillSerial > 0;
+  if (!depleted && !completing) return null;
+  const meterWidth = 6.8;
+  const fillWidth = meterWidth * normalized;
+
+  return (
+    <g
+      key={completing ? `oxygen-refill-${refillSerial}` : "oxygen-active"}
+      className={`world__oxygen-meter${completing ? " world__oxygen-meter--refilled" : ""}${normalized <= 0.3 ? " world__oxygen-meter--danger" : ""}`}
+      transform={`translate(${position.x} ${position.y + 6.25})`}
+      aria-hidden="true"
+    >
+      <rect
+        className="world__oxygen-meter-track"
+        x={-meterWidth / 2}
+        y="-.44"
+        width={meterWidth}
+        height=".88"
+        rx=".44"
+      />
+      <rect
+        className="world__oxygen-meter-feather"
+        x={-meterWidth / 2}
+        y="-.46"
+        width={fillWidth}
+        height=".92"
+        rx=".46"
+      />
+      <rect
+        className="world__oxygen-meter-progress"
+        x={-meterWidth / 2}
+        y="-.3"
+        width={fillWidth}
+        height=".6"
+        rx=".3"
+      />
+    </g>
   );
 }
 

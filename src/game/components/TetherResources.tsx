@@ -4,6 +4,7 @@ interface TetherResourcesProps {
   bankedSalvage: number;
   carriedSalvage: number;
   tetherKits: number;
+  deployReady: boolean;
 }
 
 /**
@@ -14,17 +15,19 @@ export function TetherResources({
   bankedSalvage,
   carriedSalvage,
   tetherKits,
+  deployReady,
 }: TetherResourcesProps) {
   const recipeSize = GAME_RULES.salvagePerTether;
   const visibleSlotCount = GAME_RULES.salvageCarryLimit;
   const totalSalvage = bankedSalvage + carriedSalvage;
   const visibleProgress = Math.min(visibleSlotCount, totalSalvage);
   const overflow = Math.max(0, totalSalvage - visibleSlotCount);
+  const fabricationReady = carriedSalvage > 0 && totalSalvage >= recipeSize;
   const description = `${tetherKits} tether ${tetherKits === 1 ? "kit" : "kits"}. ${bankedSalvage} ${bankedSalvage === 1 ? "material is" : "materials are"} banked and ${carriedSalvage} ${carriedSalvage === 1 ? "is" : "are"} carried. You can carry up to ${GAME_RULES.salvageCarryLimit}; ${recipeSize} materials fabricate a tether.`;
 
   return (
     <div
-      className="tether-resources"
+      className={`tether-resources${fabricationReady ? " tether-resources--fabrication-ready" : ""}${deployReady ? " tether-resources--deploy-ready" : ""}`}
       aria-label={description}
       title={description}
     >
