@@ -1,4 +1,3 @@
-import { publicAssetUrl } from "../assetUrl";
 import { GAME_RULES } from "../constants";
 import { MOVEMENT_RULES } from "../movement/movement";
 import {
@@ -39,10 +38,10 @@ export const AUDIO_BIOMES = [
 export type BiomeAudioBlend = Record<BiomeId, number>;
 
 export const FOOTSTEP_ASSET_URLS = {
-  forest: publicAssetUrl("audio/footsteps/walk_forest.mp3"),
-  sand: publicAssetUrl("audio/footsteps/walk_sand.mp3"),
-  snow: publicAssetUrl("audio/footsteps/walk_snow.mp3"),
-  water: publicAssetUrl("audio/footsteps/walk_water.mp3"),
+  forest: "/assets/audio/footsteps/walk_forest.mp3",
+  sand: "/assets/audio/footsteps/walk_sand.mp3",
+  snow: "/assets/audio/footsteps/walk_snow.mp3",
+  water: "/assets/audio/footsteps/walk_water.mp3",
 } as const;
 
 export type FootstepSampleId = keyof typeof FOOTSTEP_ASSET_URLS;

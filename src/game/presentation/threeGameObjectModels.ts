@@ -3,7 +3,6 @@ import {
   GLTFLoader,
   type GLTF,
 } from "three/examples/jsm/loaders/GLTFLoader.js";
-import { publicAssetUrl } from "../assetUrl";
 import {
   getAnchorPowerState,
   type AnchorPowerState,
@@ -12,18 +11,18 @@ import { TERRAIN_TEAM_COLORS } from "./terrainLighting";
 import type { GameState, PlayerId, Vec2 } from "../types";
 
 const MODEL_URLS = {
-  salvage: publicAssetUrl("game-objects/Tether_Nugget.glb"),
+  salvage: "/assets/game-objects/Tether_Nugget.glb",
   homeBase: {
-    player: publicAssetUrl("game-objects/Player_Core_Blue.glb"),
-    rival: publicAssetUrl("game-objects/Player_Core_Red.glb"),
-    player3: publicAssetUrl("game-objects/Player_Core_Green.glb"),
-    player4: publicAssetUrl("game-objects/Player_Core_Yellow.glb"),
+    player: "/assets/game-objects/Player_Core_Blue.glb",
+    rival: "/assets/game-objects/Player_Core_Red.glb",
+    player3: "/assets/game-objects/Player_Core_Green.glb",
+    player4: "/assets/game-objects/Player_Core_Yellow.glb",
   },
   anchor: {
-    player: publicAssetUrl("game-objects/Tether_Anchor_Blue.glb"),
-    rival: publicAssetUrl("game-objects/Tether_Anchor_Red.glb"),
-    player3: publicAssetUrl("game-objects/Tether_Anchor_Green.glb"),
-    player4: publicAssetUrl("game-objects/Tether_Anchor_Yellow.glb"),
+    player: "/assets/game-objects/Tether_Anchor_Blue.glb",
+    rival: "/assets/game-objects/Tether_Anchor_Red.glb",
+    player3: "/assets/game-objects/Tether_Anchor_Green.glb",
+    player4: "/assets/game-objects/Tether_Anchor_Yellow.glb",
   },
 } as const satisfies {
   readonly salvage: string;

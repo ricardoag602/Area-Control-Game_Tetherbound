@@ -1,4 +1,3 @@
-import { publicAssetUrl } from "../assetUrl";
 import type { MovementState, PlayerId } from "../types";
 
 export type AstronautSpriteFrame = "idle" | "walk-left" | "walk-right";
@@ -49,7 +48,7 @@ export function getAstronautSpriteFrame(
 }
 
 function spriteSet(fileStem: string): AstronautSpriteSet {
-  const root = publicAssetUrl("astronauts/runtime");
+  const root = "/assets/astronauts/runtime";
   return {
     idle: `${root}/${fileStem}.png`,
     "walk-left": `${root}/${fileStem}-walk-left.png`,

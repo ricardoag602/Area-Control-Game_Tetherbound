@@ -3,14 +3,13 @@ import {
   GLTFLoader,
   type GLTF,
 } from "three/examples/jsm/loaders/GLTFLoader.js";
-import { publicAssetUrl } from "../assetUrl";
 import type { AstronautState, MovementState, PlayerId, Vec2 } from "../types";
 
 const MODEL_URLS = {
-  player: publicAssetUrl("astronauts/Astronaut_Blue.glb"),
-  rival: publicAssetUrl("astronauts/Astronaut_Red.glb"),
-  player3: publicAssetUrl("astronauts/Astronaut_Green.glb"),
-  player4: publicAssetUrl("astronauts/Astronaut_Yellow.glb"),
+  player: "/assets/astronauts/Astronaut_Blue.glb",
+  rival: "/assets/astronauts/Astronaut_Red.glb",
+  player3: "/assets/astronauts/Astronaut_Green.glb",
+  player4: "/assets/astronauts/Astronaut_Yellow.glb",
 } as const satisfies Readonly<Record<PlayerId, string>>;
 
 const REQUIRED_CLIPS = {
