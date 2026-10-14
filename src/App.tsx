@@ -4,21 +4,21 @@ import { NetworkGameView } from "./network/components/NetworkGameView";
 import type { GameMode } from "./game/types";
 import { getRoomServerUrl, RoomClient } from "./network/RoomClient";
 import {
-  createGameAddress,
-  createInvitationLink,
-  isLoopbackHostname,
-  normalizeRoomCode,
+    createGameAddress,
+    createInvitationLink,
+    isLoopbackHostname,
+    normalizeRoomCode,
 } from "./network/connectionInfo";
 import {
-  CreateRoomView,
-  JoinRoomView,
-  MatchResultView,
-  RoomLobby,
+    CreateRoomView,
+    JoinRoomView,
+    MatchResultView,
+    RoomLobby,
 } from "./network/components/MultiplayerViews";
 import { useRoomClient } from "./network/useRoomClient";
 import {
-  AUDIO_PREFERENCE_KEY,
-  readAudioPreference,
+    AUDIO_PREFERENCE_KEY,
+    readAudioPreference,
 } from "./game/audio/gameAudio";
 
 type View = "menu" | "create-room" | "join-room" | "lobby" | "game" | "result";
@@ -26,281 +26,281 @@ type View = "menu" | "create-room" | "join-room" | "lobby" | "game" | "result";
 const LARGE_CONTROLS_KEY = "tetherbound.largeControls";
 
 export function App() {
-  const [initialRoomCode] = useState(
-    () => normalizeRoomCode(new URLSearchParams(window.location.search).get("room") ?? ""),
-  );
-  const [joinRoomCode, setJoinRoomCode] = useState(initialRoomCode);
-  const [view, setView] = useState<View>(initialRoomCode ? "join-room" : "menu");
-  const [gameMode, setGameMode] = useState<GameMode>("bot");
-  const [roomClient] = useState(() => new RoomClient());
-  const [gameAddress] = useState(() => createGameAddress(window.location.href));
-  const [roomServerAddress] = useState(() => getRoomServerUrl());
-  const roomSession = useRoomClient(roomClient);
-  const resumeAttempted = useRef(false);
-  const [largeControls, setLargeControls] = useState(
-    () => localStorage.getItem(LARGE_CONTROLS_KEY) === "true",
-  );
-  const [audioEnabled, setAudioEnabled] = useState(readAudioPreference);
+    const [initialRoomCode] = useState(
+        () => normalizeRoomCode(new URLSearchParams(window.location.search).get("room") ?? ""),
+    );
+    const [joinRoomCode, setJoinRoomCode] = useState(initialRoomCode);
+    const [view, setView] = useState<View>(initialRoomCode ? "join-room" : "menu");
+    const [gameMode, setGameMode] = useState<GameMode>("bot");
+    const [roomClient] = useState(() => new RoomClient());
+    const [gameAddress] = useState(() => createGameAddress(window.location.href));
+    const [roomServerAddress] = useState(() => getRoomServerUrl());
+    const roomSession = useRoomClient(roomClient);
+    const resumeAttempted = useRef(false);
+    const [largeControls, setLargeControls] = useState(
+        () => localStorage.getItem(LARGE_CONTROLS_KEY) === "true",
+    );
+    const [audioEnabled, setAudioEnabled] = useState(readAudioPreference);
 
-  useEffect(() => {
-    localStorage.setItem(LARGE_CONTROLS_KEY, String(largeControls));
-  }, [largeControls]);
+    useEffect(() => {
+        localStorage.setItem(LARGE_CONTROLS_KEY, String(largeControls));
+    }, [largeControls]);
 
-  useEffect(() => {
-    try {
-      localStorage.setItem(AUDIO_PREFERENCE_KEY, String(audioEnabled));
-    } catch {
-      // Audio still follows the in-memory preference when storage is blocked.
+    useEffect(() => {
+        try {
+            localStorage.setItem(AUDIO_PREFERENCE_KEY, String(audioEnabled));
+        } catch {
+            // Audio still follows the in-memory preference when storage is blocked.
+        }
+    }, [audioEnabled]);
+
+    useEffect(() => {
+        if (resumeAttempted.current || !initialRoomCode) return;
+        resumeAttempted.current = true;
+        roomClient.resumeRoom(initialRoomCode);
+    }, [initialRoomCode, roomClient]);
+
+    useEffect(() => {
+        if (!roomSession.room) return;
+        const url = new URL(window.location.href);
+        url.searchParams.set("room", roomSession.room.code);
+        window.history.replaceState(null, "", url);
+        if (roomSession.room.phase === "playing") {
+            setGameMode("multiplayer");
+            setView("game");
+        } else if (roomSession.room.phase === "finished") {
+            setGameMode("multiplayer");
+            setView("result");
+        } else {
+            setView("lobby");
+        }
+    }, [roomSession.room]);
+
+    useEffect(() => {
+        if (
+            gameMode !== "multiplayer" ||
+            roomSession.connection !== "offline" ||
+            !roomSession.error ||
+            (view !== "lobby" && view !== "game" && view !== "result")
+        ) {
+            return;
+        }
+
+        // A non-recoverable resume failure (for example, returning after the
+        // reserved slot expired) must not strand the player on a frozen match.
+        // Keep the code and server explanation visible so they can retry or leave.
+        if (roomSession.room?.code) setJoinRoomCode(roomSession.room.code);
+        setView("join-room");
+    }, [
+        gameMode,
+        roomSession.connection,
+        roomSession.error,
+        roomSession.room?.code,
+        view,
+    ]);
+
+    function startBotGame() {
+        roomClient.leave();
+        clearRoomFromUrl();
+        setGameMode("bot");
+        setView("game");
     }
-  }, [audioEnabled]);
 
-  useEffect(() => {
-    if (resumeAttempted.current || !initialRoomCode) return;
-    resumeAttempted.current = true;
-    roomClient.resumeRoom(initialRoomCode);
-  }, [initialRoomCode, roomClient]);
-
-  useEffect(() => {
-    if (!roomSession.room) return;
-    const url = new URL(window.location.href);
-    url.searchParams.set("room", roomSession.room.code);
-    window.history.replaceState(null, "", url);
-    if (roomSession.room.phase === "playing") {
-      setGameMode("multiplayer");
-      setView("game");
-    } else if (roomSession.room.phase === "finished") {
-      setGameMode("multiplayer");
-      setView("result");
-    } else {
-      setView("lobby");
-    }
-  }, [roomSession.room]);
-
-  useEffect(() => {
-    if (
-      gameMode !== "multiplayer" ||
-      roomSession.connection !== "offline" ||
-      !roomSession.error ||
-      (view !== "lobby" && view !== "game" && view !== "result")
-    ) {
-      return;
+    function leaveMultiplayer() {
+        roomClient.leave();
+        clearRoomFromUrl();
+        setJoinRoomCode("");
+        setGameMode("bot");
+        setView("menu");
     }
 
-    // A non-recoverable resume failure (for example, returning after the
-    // reserved slot expired) must not strand the player on a frozen match.
-    // Keep the code and server explanation visible so they can retry or leave.
-    if (roomSession.room?.code) setJoinRoomCode(roomSession.room.code);
-    setView("join-room");
-  }, [
-    gameMode,
-    roomSession.connection,
-    roomSession.error,
-    roomSession.room?.code,
-    view,
-  ]);
-
-  function startBotGame() {
-    roomClient.leave();
-    clearRoomFromUrl();
-    setGameMode("bot");
-    setView("game");
-  }
-
-  function leaveMultiplayer() {
-    roomClient.leave();
-    clearRoomFromUrl();
-    setJoinRoomCode("");
-    setGameMode("bot");
-    setView("menu");
-  }
-
-  function clearRoomFromUrl() {
-    const url = new URL(window.location.href);
-    url.searchParams.delete("room");
-    window.history.replaceState(null, "", url);
-  }
-
-  async function copyInvitationLink() {
-    if (!invitationLink) return;
-    try {
-      await navigator.clipboard.writeText(invitationLink);
-    } catch {
-      const field = document.createElement("textarea");
-      field.value = invitationLink;
-      field.style.position = "fixed";
-      field.style.opacity = "0";
-      document.body.append(field);
-      field.select();
-      document.execCommand("copy");
-      field.remove();
+    function clearRoomFromUrl() {
+        const url = new URL(window.location.href);
+        url.searchParams.delete("room");
+        window.history.replaceState(null, "", url);
     }
-  }
 
-  const invitationLink = roomSession.room
-    ? createInvitationLink(window.location.href, roomSession.room.code)
-    : "";
-  const localAddressOnly = isLoopbackHostname(window.location.hostname);
+    async function copyInvitationLink() {
+        if (!invitationLink) return;
+        try {
+            await navigator.clipboard.writeText(invitationLink);
+        } catch {
+            const field = document.createElement("textarea");
+            field.value = invitationLink;
+            field.style.position = "fixed";
+            field.style.opacity = "0";
+            document.body.append(field);
+            field.select();
+            document.execCommand("copy");
+            field.remove();
+        }
+    }
 
-  return (
-    <main className={largeControls ? "app app--large-controls" : "app"}>
-      <div className="space-noise" aria-hidden="true" />
-      <section className="view-stage">
-        {view === "menu" && (
-          <MainMenu
-            audioEnabled={audioEnabled}
-            largeControls={largeControls}
-            onAudioEnabledChange={setAudioEnabled}
-            onLargeControlsChange={setLargeControls}
-            onBotGame={startBotGame}
-            onCreateRoom={() => setView("create-room")}
-            onJoinRoom={() => { setJoinRoomCode(""); setView("join-room"); }}
-            gameAddress={gameAddress}
-            roomServerAddress={roomServerAddress}
-            localAddressOnly={localAddressOnly}
-          />
-        )}
-        {view === "create-room" && (
-          <CreateRoomView connection={roomSession.connection} error={roomSession.error}
-            onBack={() => setView("menu")}
-            onCreate={(name, playerLimit) => { roomClient.createRoom(name, playerLimit); setView("lobby"); }} />
-        )}
-        {view === "join-room" && (
-          <JoinRoomView code={joinRoomCode} connection={roomSession.connection} error={roomSession.error}
-            onBack={leaveMultiplayer}
-            onCodeChange={setJoinRoomCode}
-            onJoin={(name, code) => { setJoinRoomCode(code); roomClient.joinRoom(code, name); }} />
-        )}
-        {view === "lobby" && roomSession.room && roomSession.playerId && (
-          <RoomLobby room={roomSession.room} localPlayerId={roomSession.playerId}
-            connection={roomSession.connection} latencyMs={roomSession.latencyMs}
-            invitationLink={invitationLink} localAddressOnly={localAddressOnly}
-            onCopyLink={copyInvitationLink} onReadyChange={(ready) => roomClient.setReady(ready)}
-            onLeave={leaveMultiplayer} />
-        )}
-        {view === "lobby" && !roomSession.room && (
-          <div className="screen screen--room connection-gate">
-            <p className="eyebrow">Room server</p><h2>Establishing connection…</h2>
-            <p>{roomSession.error ?? "Reserving your place in the mission."}</p>
-            <button className="text-button" onClick={leaveMultiplayer}>Cancel</button>
-          </div>
-        )}
-        {view === "game" && gameMode === "bot" && (
-          <GameView
-            audioEnabled={audioEnabled}
-            onLeave={() => setView("menu")}
-          />
-        )}
-        {view === "game" && gameMode === "multiplayer" && roomSession.room && roomSession.gameState && roomSession.playerId && (
-          <NetworkGameView state={roomSession.gameState} room={roomSession.room}
-            audioEnabled={audioEnabled}
-            localPlayerId={roomSession.playerId} connection={roomSession.connection}
-            latencyMs={roomSession.latencyMs}
-            onMovementCommand={(command) => roomClient.sendMovementCommand(command)}
-            onDeploy={() => roomClient.deployAnchor()} onLeave={leaveMultiplayer} />
-        )}
-        {view === "result" && roomSession.room && roomSession.gameState && roomSession.playerId && (
-          <MatchResultView state={roomSession.gameState} room={roomSession.room}
-            localPlayerId={roomSession.playerId} connection={roomSession.connection}
-            onRequestRematch={() => roomClient.requestRematch()} onLeave={leaveMultiplayer} />
-        )}
-      </section>
-    </main>
-  );
+    const invitationLink = roomSession.room
+        ? createInvitationLink(window.location.href, roomSession.room.code)
+        : "";
+    const localAddressOnly = isLoopbackHostname(window.location.hostname);
+
+    return (
+        <main className={largeControls ? "app app--large-controls" : "app"}>
+            <div className="space-noise" aria-hidden="true" />
+            <section className="view-stage">
+                {view === "menu" && (
+                    <MainMenu
+                        audioEnabled={audioEnabled}
+                        largeControls={largeControls}
+                        onAudioEnabledChange={setAudioEnabled}
+                        onLargeControlsChange={setLargeControls}
+                        onBotGame={startBotGame}
+                        onCreateRoom={() => setView("create-room")}
+                        onJoinRoom={() => { setJoinRoomCode(""); setView("join-room"); }}
+                        gameAddress={gameAddress}
+                        roomServerAddress={roomServerAddress}
+                        localAddressOnly={localAddressOnly}
+                    />
+                )}
+                {view === "create-room" && (
+                    <CreateRoomView connection={roomSession.connection} error={roomSession.error}
+                        onBack={() => setView("menu")}
+                        onCreate={(name, playerLimit) => { roomClient.createRoom(name, playerLimit); setView("lobby"); }} />
+                )}
+                {view === "join-room" && (
+                    <JoinRoomView code={joinRoomCode} connection={roomSession.connection} error={roomSession.error}
+                        onBack={leaveMultiplayer}
+                        onCodeChange={setJoinRoomCode}
+                        onJoin={(name, code) => { setJoinRoomCode(code); roomClient.joinRoom(code, name); }} />
+                )}
+                {view === "lobby" && roomSession.room && roomSession.playerId && (
+                    <RoomLobby room={roomSession.room} localPlayerId={roomSession.playerId}
+                        connection={roomSession.connection} latencyMs={roomSession.latencyMs}
+                        invitationLink={invitationLink} localAddressOnly={localAddressOnly}
+                        onCopyLink={copyInvitationLink} onReadyChange={(ready) => roomClient.setReady(ready)}
+                        onLeave={leaveMultiplayer} />
+                )}
+                {view === "lobby" && !roomSession.room && (
+                    <div className="screen screen--room connection-gate">
+                        <p className="eyebrow">Room server</p><h2>Establishing connection…</h2>
+                        <p>{roomSession.error ?? "Reserving your place in the mission."}</p>
+                        <button className="text-button" onClick={leaveMultiplayer}>Cancel</button>
+                    </div>
+                )}
+                {view === "game" && gameMode === "bot" && (
+                    <GameView
+                        audioEnabled={audioEnabled}
+                        onLeave={() => setView("menu")}
+                    />
+                )}
+                {view === "game" && gameMode === "multiplayer" && roomSession.room && roomSession.gameState && roomSession.playerId && (
+                    <NetworkGameView state={roomSession.gameState} room={roomSession.room}
+                        audioEnabled={audioEnabled}
+                        localPlayerId={roomSession.playerId} connection={roomSession.connection}
+                        latencyMs={roomSession.latencyMs}
+                        onMovementCommand={(command) => roomClient.sendMovementCommand(command)}
+                        onDeploy={() => roomClient.deployAnchor()} onLeave={leaveMultiplayer} />
+                )}
+                {view === "result" && roomSession.room && roomSession.gameState && roomSession.playerId && (
+                    <MatchResultView state={roomSession.gameState} room={roomSession.room}
+                        localPlayerId={roomSession.playerId} connection={roomSession.connection}
+                        onRequestRematch={() => roomClient.requestRematch()} onLeave={leaveMultiplayer} />
+                )}
+            </section>
+        </main>
+    );
 }
 
 interface MainMenuProps {
-  audioEnabled: boolean;
-  largeControls: boolean;
-  onAudioEnabledChange: (enabled: boolean) => void;
-  onLargeControlsChange: (enabled: boolean) => void;
-  onBotGame: () => void;
-  onCreateRoom: () => void;
-  onJoinRoom: () => void;
-  gameAddress: string;
-  roomServerAddress: string;
-  localAddressOnly: boolean;
+    audioEnabled: boolean;
+    largeControls: boolean;
+    onAudioEnabledChange: (enabled: boolean) => void;
+    onLargeControlsChange: (enabled: boolean) => void;
+    onBotGame: () => void;
+    onCreateRoom: () => void;
+    onJoinRoom: () => void;
+    gameAddress: string;
+    roomServerAddress: string;
+    localAddressOnly: boolean;
 }
 
 function MainMenu({
-  audioEnabled,
-  largeControls,
-  onAudioEnabledChange,
-  onLargeControlsChange,
-  onBotGame,
-  onCreateRoom,
-  onJoinRoom,
-  gameAddress,
-  roomServerAddress,
-  localAddressOnly,
+    audioEnabled,
+    largeControls,
+    onAudioEnabledChange,
+    onLargeControlsChange,
+    onBotGame,
+    onCreateRoom,
+    onJoinRoom,
+    gameAddress,
+    roomServerAddress,
+    localAddressOnly,
 }: MainMenuProps) {
-  return (
-    <div className="screen screen--menu">
-      <div className="orbit-mark" aria-hidden="true">
-        <span className="orbit-mark__core" />
-        <span className="orbit-mark__ring orbit-mark__ring--one" />
-        <span className="orbit-mark__ring orbit-mark__ring--two" />
-      </div>
+    return (
+        <div className="screen screen--menu">
+            <div className="orbit-mark" aria-hidden="true">
+                <span className="orbit-mark__core" />
+                <span className="orbit-mark__ring orbit-mark__ring--one" />
+                <span className="orbit-mark__ring orbit-mark__ring--two" />
+            </div>
 
-      <header className="hero">
-        <p className="eyebrow">Signal acquired</p>
-        <h1>Tetherbound</h1>
-        <p className="tagline">How far from safety will you go for power?</p>
-      </header>
+            <header className="hero">
+                <p className="eyebrow">Signal acquired</p>
+                <h1>Tetherbound</h1>
+                <p className="tagline">How far from safety will you go for power?</p>
+            </header>
 
-      <div className="menu-actions">
-        <button className="button button--primary" onClick={onBotGame}>
-          <span>Start Bot Game</span>
-          <small>Test the frontier alone</small>
-        </button>
-        <button className="button button--secondary" onClick={onCreateRoom}>
-          <span>Create Multiplayer Room</span>
-          <small>Invite up to three astronauts</small>
-        </button>
-        <button className="button button--secondary" onClick={onJoinRoom}>
-          <span>Join Multiplayer Room</span>
-          <small>Enter an existing room code</small>
-        </button>
-      </div>
+            <div className="menu-actions">
+                <button className="button button--primary" onClick={onBotGame}>
+                    <span>Start Bot Game</span>
+                    <small>Test the frontier alone</small>
+                </button>
+                <button className="button button--secondary" onClick={onCreateRoom}>
+                    <span>Create Multiplayer Room</span>
+                    <small>Invite up to three astronauts</small>
+                </button>
+                <button className="button button--secondary" onClick={onJoinRoom}>
+                    <span>Join Multiplayer Room</span>
+                    <small>Enter an existing room code</small>
+                </button>
+            </div>
 
-      <details className="connection-details">
-        <summary>Connection details</summary>
-        <dl>
-          <div><dt>Open this game</dt><dd><code>{gameAddress}</code></dd></div>
-          <div><dt>Room server</dt><dd><code>{roomServerAddress}</code></dd></div>
-        </dl>
-        <p>Players open the game address, then enter a room code. The room server address is shown for troubleshooting only.</p>
-        {localAddressOnly && (
-          <p className="connection-warning">This localhost address works only on this computer. For a phone, use the Network address printed by <code>npm run dev</code>.</p>
-        )}
-      </details>
+            <details className="connection-details">
+                <summary>Connection details</summary>
+                <dl>
+                    <div><dt>Open this game</dt><dd><code>{gameAddress}</code></dd></div>
+                    <div><dt>Room server</dt><dd><code>{roomServerAddress}</code></dd></div>
+                </dl>
+                <p>Players open the game address, then enter a room code. The room server address is shown for troubleshooting only.</p>
+                {localAddressOnly && (
+                    <p className="connection-warning">This localhost address works only on this computer. For a phone, use the Network address printed by <code>npm run dev</code>.</p>
+                )}
+            </details>
 
-      <label className="setting-card">
-        <span>
-          <strong>Large controls</strong>
-          <small>Increase buttons and interaction targets</small>
-        </span>
-        <input
-          type="checkbox"
-          checked={largeControls}
-          onChange={(event) => onLargeControlsChange(event.target.checked)}
-        />
-        <span className="switch" aria-hidden="true" />
-      </label>
+            <label className="setting-card">
+                <span>
+                    <strong>Large controls</strong>
+                    <small>Increase buttons and interaction targets</small>
+                </span>
+                <input
+                    type="checkbox"
+                    checked={largeControls}
+                    onChange={(event) => onLargeControlsChange(event.target.checked)}
+                />
+                <span className="switch" aria-hidden="true" />
+            </label>
 
-      <label className="setting-card">
-        <span>
-          <strong>Audio</strong>
-          <small>Music, biome footsteps, movement, and world effects</small>
-        </span>
-        <input
-          type="checkbox"
-          checked={audioEnabled}
-          onChange={(event) => onAudioEnabledChange(event.target.checked)}
-        />
-        <span className="switch" aria-hidden="true" />
-      </label>
+            <label className="setting-card">
+                <span>
+                    <strong>Audio</strong>
+                    <small>Music, biome footsteps, movement, and world effects</small>
+                </span>
+                <input
+                    type="checkbox"
+                    checked={audioEnabled}
+                    onChange={(event) => onAudioEnabledChange(event.target.checked)}
+                />
+                <span className="switch" aria-hidden="true" />
+            </label>
 
-      <footer className="credits">Created by <span>Your name</span></footer>
-    </div>
-  );
+            <footer className="credits">Created by <span>Ricardo Guerrero</span></footer>
+        </div>
+    );
 }
