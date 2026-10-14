@@ -32,14 +32,30 @@ describe("multiplayer connection information", () => {
   });
 
   it("resolves the same default or configured WebSocket address shown by the UI", () => {
-    expect(resolveRoomServerUrl({ protocol: "http:", hostname: "localhost" })).toBe(
-      "ws://localhost:8788",
+    expect(resolveRoomServerUrl({ protocol: "http:", hostname: "localhost", host: "localhost:5173", pathname: "/" })).toBe(
+      "ws://localhost:8788/ws",
     );
-    expect(resolveRoomServerUrl({ protocol: "https:", hostname: "game.example" })).toBe(
-      "wss://game.example:8788",
+    expect(resolveRoomServerUrl({ protocol: "http:", hostname: "::1", host: "[::1]:5173", pathname: "/" })).toBe(
+      "ws://[::1]:8788/ws",
+    );
+    expect(resolveRoomServerUrl({
+      protocol: "https:",
+      hostname: "game.example",
+      host: "game.example",
+      pathname: "/tetherbound/",
+    })).toBe(
+      "wss://game.example/tetherbound/ws",
+    );
+    expect(resolveRoomServerUrl({
+      protocol: "https:",
+      hostname: "game.example",
+      host: "game.example",
+      pathname: "/tetherbound/index.html",
+    })).toBe(
+      "wss://game.example/tetherbound/ws",
     );
     expect(resolveRoomServerUrl(
-      { protocol: "https:", hostname: "game.example" },
+      { protocol: "https:", hostname: "game.example", host: "game.example", pathname: "/game/" },
       "wss://rooms.example/socket",
     )).toBe("wss://rooms.example/socket");
   });

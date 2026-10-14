@@ -7,6 +7,7 @@
     "dev": "node scripts/dev.mjs",
     "dev:web": "vite --config vite.config.ts --host 0.0.0.0",
     "dev:server": "tsx watch server/index.ts",
+    "start:server": "tsx server/index.ts",
     "build": "tsc -b && vite build --config vite.config.ts",
     "preview": "vite preview --config vite.config.ts",
     "test": "vitest run --config vite.config.ts"
@@ -17,6 +18,7 @@
     "react": "latest",
     "react-dom": "latest",
     "three": "^0.186.1",
+    "tsx": "latest",
     "vite": "latest",
     "ws": "latest"
   },
@@ -26,7 +28,6 @@
     "@types/react-dom": "latest",
     "@types/three": "^0.186.0",
     "@types/ws": "latest",
-    "tsx": "latest",
     "typescript": "latest",
     "vitest": "latest"
   }

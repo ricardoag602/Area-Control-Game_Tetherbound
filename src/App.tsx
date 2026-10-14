@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { MenuNetworkBackground } from "./components/MenuNetworkBackground";
 import { GameView } from "./game/components/GameView";
 import { NetworkGameView } from "./network/components/NetworkGameView";
 import type { GameMode } from "./game/types";
@@ -20,6 +21,11 @@ import {
     AUDIO_PREFERENCE_KEY,
     readAudioPreference,
 } from "./game/audio/gameAudio";
+import { scheduleFirstMatchImagePreload } from "./game/presentation/firstMatchAssets";
+import {
+    readTutorialPreference,
+    writeTutorialPreference,
+} from "./game/tutorial/guidedSetup";
 
 type View = "menu" | "create-room" | "join-room" | "lobby" | "game" | "result";
 
@@ -41,6 +47,7 @@ export function App() {
         () => localStorage.getItem(LARGE_CONTROLS_KEY) === "true",
     );
     const [audioEnabled, setAudioEnabled] = useState(readAudioPreference);
+    const [tutorialEnabled, setTutorialEnabled] = useState(readTutorialPreference);
 
     useEffect(() => {
         localStorage.setItem(LARGE_CONTROLS_KEY, String(largeControls));
@@ -55,6 +62,15 @@ export function App() {
     }, [audioEnabled]);
 
     useEffect(() => {
+        writeTutorialPreference(tutorialEnabled);
+    }, [tutorialEnabled]);
+
+    useEffect(() => {
+        if (view !== "menu") return;
+        return scheduleFirstMatchImagePreload();
+    }, [view]);
+
+    useEffect(() => {
         if (resumeAttempted.current || !initialRoomCode) return;
         resumeAttempted.current = true;
         roomClient.resumeRoom(initialRoomCode);
@@ -62,14 +78,13 @@ export function App() {
 
     useEffect(() => {
         if (!roomSession.room) return;
+        setGameMode("multiplayer");
         const url = new URL(window.location.href);
         url.searchParams.set("room", roomSession.room.code);
         window.history.replaceState(null, "", url);
         if (roomSession.room.phase === "playing") {
-            setGameMode("multiplayer");
             setView("game");
         } else if (roomSession.room.phase === "finished") {
-            setGameMode("multiplayer");
             setView("result");
         } else {
             setView("lobby");
@@ -143,14 +158,17 @@ export function App() {
 
     return (
         <main className={largeControls ? "app app--large-controls" : "app"}>
+            {view === "menu" && <MenuNetworkBackground />}
             <div className="space-noise" aria-hidden="true" />
             <section className="view-stage">
                 {view === "menu" && (
                     <MainMenu
                         audioEnabled={audioEnabled}
                         largeControls={largeControls}
+                        tutorialEnabled={tutorialEnabled}
                         onAudioEnabledChange={setAudioEnabled}
                         onLargeControlsChange={setLargeControls}
+                        onTutorialEnabledChange={setTutorialEnabled}
                         onBotGame={startBotGame}
                         onCreateRoom={() => setView("create-room")}
                         onJoinRoom={() => { setJoinRoomCode(""); setView("join-room"); }}
@@ -173,34 +191,47 @@ export function App() {
                 {view === "lobby" && roomSession.room && roomSession.playerId && (
                     <RoomLobby room={roomSession.room} localPlayerId={roomSession.playerId}
                         connection={roomSession.connection} latencyMs={roomSession.latencyMs}
+                        error={roomSession.error}
                         invitationLink={invitationLink} localAddressOnly={localAddressOnly}
                         onCopyLink={copyInvitationLink} onReadyChange={(ready) => roomClient.setReady(ready)}
-                        onLeave={leaveMultiplayer} />
+                        onRetry={() => roomClient.retry()} onLeave={leaveMultiplayer} />
                 )}
                 {view === "lobby" && !roomSession.room && (
                     <div className="screen screen--room connection-gate">
-                        <p className="eyebrow">Room server</p><h2>Establishing connection…</h2>
+                        <p className="eyebrow">Room server</p>
+                        <h2>{roomSession.connection === "offline" ? "Connection unavailable" : "Establishing connection…"}</h2>
                         <p>{roomSession.error ?? "Reserving your place in the mission."}</p>
-                        <button className="text-button" onClick={leaveMultiplayer}>Cancel</button>
+                        <div className="connection-gate__actions">
+                            {roomSession.connection === "offline" && (
+                                <button className="button button--primary" onClick={() => roomClient.retry()}>
+                                    Try Again
+                                </button>
+                            )}
+                            <button className="button button--secondary" onClick={leaveMultiplayer}>Cancel</button>
+                        </div>
                     </div>
                 )}
                 {view === "game" && gameMode === "bot" && (
                     <GameView
                         audioEnabled={audioEnabled}
+                        tutorialEnabled={tutorialEnabled}
                         onLeave={() => setView("menu")}
                     />
                 )}
                 {view === "game" && gameMode === "multiplayer" && roomSession.room && roomSession.gameState && roomSession.playerId && (
                     <NetworkGameView state={roomSession.gameState} room={roomSession.room}
                         audioEnabled={audioEnabled}
+                        tutorialEnabled={tutorialEnabled}
                         localPlayerId={roomSession.playerId} connection={roomSession.connection}
-                        latencyMs={roomSession.latencyMs}
+                        latencyMs={roomSession.latencyMs} error={roomSession.error}
                         onMovementCommand={(command) => roomClient.sendMovementCommand(command)}
-                        onDeploy={() => roomClient.deployAnchor()} onLeave={leaveMultiplayer} />
+                        onDeploy={() => roomClient.deployAnchor()} onRetry={() => roomClient.retry()}
+                        onLeave={leaveMultiplayer} />
                 )}
                 {view === "result" && roomSession.room && roomSession.gameState && roomSession.playerId && (
                     <MatchResultView state={roomSession.gameState} room={roomSession.room}
                         localPlayerId={roomSession.playerId} connection={roomSession.connection}
+                        error={roomSession.error} onRetry={() => roomClient.retry()}
                         onRequestRematch={() => roomClient.requestRematch()} onLeave={leaveMultiplayer} />
                 )}
             </section>
@@ -211,8 +242,10 @@ export function App() {
 interface MainMenuProps {
     audioEnabled: boolean;
     largeControls: boolean;
+    tutorialEnabled: boolean;
     onAudioEnabledChange: (enabled: boolean) => void;
     onLargeControlsChange: (enabled: boolean) => void;
+    onTutorialEnabledChange: (enabled: boolean) => void;
     onBotGame: () => void;
     onCreateRoom: () => void;
     onJoinRoom: () => void;
@@ -224,8 +257,10 @@ interface MainMenuProps {
 function MainMenu({
     audioEnabled,
     largeControls,
+    tutorialEnabled,
     onAudioEnabledChange,
     onLargeControlsChange,
+    onTutorialEnabledChange,
     onBotGame,
     onCreateRoom,
     onJoinRoom,
@@ -246,6 +281,25 @@ function MainMenu({
                 <h1>Tetherbound</h1>
                 <p className="tagline">How far from safety will you go for power?</p>
             </header>
+
+            <label className="setting-card setting-card--tutorial">
+                <span className="setting-card__tutorial-icon" aria-hidden="true">
+                    <i />
+                </span>
+                <span className="setting-card__copy">
+                    <span className="setting-card__title-row">
+                        <strong>Guided setup</strong>
+                        <em>Recommended · first match</em>
+                    </span>
+                    <small>Learn movement, collect 3 materials, build tethers, and disrupt rival networks at your own pace.</small>
+                </span>
+                <input
+                    type="checkbox"
+                    checked={tutorialEnabled}
+                    onChange={(event) => onTutorialEnabledChange(event.target.checked)}
+                />
+                <span className="switch" aria-hidden="true" />
+            </label>
 
             <div className="menu-actions">
                 <button className="button button--primary" onClick={onBotGame}>
@@ -274,31 +328,33 @@ function MainMenu({
                 )}
             </details>
 
-            <label className="setting-card">
-                <span>
-                    <strong>Large controls</strong>
-                    <small>Increase buttons and interaction targets</small>
-                </span>
-                <input
-                    type="checkbox"
-                    checked={largeControls}
-                    onChange={(event) => onLargeControlsChange(event.target.checked)}
-                />
-                <span className="switch" aria-hidden="true" />
-            </label>
+            <div className="menu-settings" aria-label="Game settings">
+                <label className="setting-card">
+                    <span className="setting-card__copy">
+                        <strong>Large controls</strong>
+                        <small>Increase buttons and interaction targets</small>
+                    </span>
+                    <input
+                        type="checkbox"
+                        checked={largeControls}
+                        onChange={(event) => onLargeControlsChange(event.target.checked)}
+                    />
+                    <span className="switch" aria-hidden="true" />
+                </label>
 
-            <label className="setting-card">
-                <span>
-                    <strong>Audio</strong>
-                    <small>Music, biome footsteps, movement, and world effects</small>
-                </span>
-                <input
-                    type="checkbox"
-                    checked={audioEnabled}
-                    onChange={(event) => onAudioEnabledChange(event.target.checked)}
-                />
-                <span className="switch" aria-hidden="true" />
-            </label>
+                <label className="setting-card">
+                    <span className="setting-card__copy">
+                        <strong>Audio</strong>
+                        <small>Music, biome footsteps, movement, and world effects</small>
+                    </span>
+                    <input
+                        type="checkbox"
+                        checked={audioEnabled}
+                        onChange={(event) => onAudioEnabledChange(event.target.checked)}
+                    />
+                    <span className="switch" aria-hidden="true" />
+                </label>
+            </div>
 
             <footer className="credits">Created by <span>Ricardo Guerrero</span></footer>
         </div>

@@ -7,16 +7,18 @@ import { PostMatchScene } from "./PostMatchScene";
 
 interface GameViewProps {
   audioEnabled: boolean;
+  tutorialEnabled: boolean;
   onLeave: () => void;
 }
 
-export function GameView({ audioEnabled, onLeave }: GameViewProps) {
+export function GameView({ audioEnabled, tutorialEnabled, onLeave }: GameViewProps) {
   const [matchNumber, setMatchNumber] = useState(0);
 
   return (
     <LocalMatch
       key={matchNumber}
       audioEnabled={audioEnabled}
+      tutorialEnabled={tutorialEnabled}
       onLeave={onLeave}
       onRestart={() => setMatchNumber((current) => current + 1)}
     />
@@ -25,10 +27,12 @@ export function GameView({ audioEnabled, onLeave }: GameViewProps) {
 
 function LocalMatch({
   audioEnabled,
+  tutorialEnabled,
   onLeave,
   onRestart,
 }: {
   audioEnabled: boolean;
+  tutorialEnabled: boolean;
   onLeave: () => void;
   onRestart: () => void;
 }) {
@@ -48,6 +52,7 @@ function LocalMatch({
 
   return <MatchScreen state={state} localPlayerId="player" playerNames={{ rival: "Bot" }} statusText="Mechanics sandbox"
     audioEnabled={audioEnabled}
+    tutorialEnabled={tutorialEnabled}
     interpolatePositions={true} onMovementCommand={sendMovementCommand} onDeploy={deploy} onLeave={onLeave} />;
 }
 

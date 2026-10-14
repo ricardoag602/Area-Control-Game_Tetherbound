@@ -369,6 +369,8 @@ describe("authoritative match scoring", () => {
       "overtimeScores",
       "overtimeElapsedMs",
       "hasDeployedAnchor",
+      "tetherDisruptions",
+      "anchorTetherFabrications",
       "baseCollapseProgressMs",
       "matchOutcome",
     ]) {
@@ -385,8 +387,27 @@ describe("authoritative match scoring", () => {
       overtimeScores: { player: 0, rival: 0 },
       overtimeElapsedMs: 0,
       hasDeployedAnchor: { player: false, rival: false },
+      tetherDisruptions: { player: 0, rival: 0 },
+      anchorTetherFabrications: { player: 0, rival: 0 },
       baseCollapseProgressMs: { player: 0, rival: 0 },
       matchOutcome: null,
+    });
+  });
+
+  it("sanitizes malformed anchor fabrication counters", () => {
+    const state = createInitialGameState("malformed-anchor-fabrications");
+    state.anchorTetherFabrications = {
+      player: -2,
+      rival: 2.9,
+      player3: Number.NaN,
+      player4: 4,
+    };
+
+    expect(normalizeMatchState(state).anchorTetherFabrications).toEqual({
+      player: 0,
+      rival: 2,
+      player3: 0,
+      player4: 4,
     });
   });
 

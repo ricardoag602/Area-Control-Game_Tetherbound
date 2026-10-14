@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import type { Server as HttpServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
 import { SIMULATION_RULES } from "../src/game/constants";
@@ -74,6 +75,9 @@ interface SocketTraffic {
 export interface RoomServerOptions {
   port?: number;
   host?: string;
+  httpServer?: HttpServer;
+  path?: string;
+  allowedOrigins?: readonly string[];
   tickRate?: number;
   disconnectGraceMs?: number;
 }
@@ -94,11 +98,24 @@ export class RoomServer {
   constructor(options: RoomServerOptions = {}) {
     this.tickRate = options.tickRate ?? SIMULATION_RULES.ticksPerSecond;
     this.disconnectGraceMs = options.disconnectGraceMs ?? 30_000;
-    this.webSocketServer = new WebSocketServer({
-      port: options.port ?? 8788,
-      host: options.host ?? "0.0.0.0",
-      maxPayload: 16 * 1024,
-    });
+    const allowedOrigins = new Set(options.allowedOrigins ?? []);
+    const verifyClient = allowedOrigins.size > 0
+      ? ({ origin }: { origin: string }) => !origin || allowedOrigins.has(origin)
+      : undefined;
+    this.webSocketServer = options.httpServer
+      ? new WebSocketServer({
+          server: options.httpServer,
+          path: options.path,
+          maxPayload: 16 * 1024,
+          verifyClient,
+        })
+      : new WebSocketServer({
+          port: options.port ?? 8788,
+          host: options.host ?? "0.0.0.0",
+          path: options.path,
+          maxPayload: 16 * 1024,
+          verifyClient,
+        });
 
     this.webSocketServer.on("connection", (socket) => this.handleConnection(socket));
     this.loop = setInterval(() => this.tick(), 1000 / this.tickRate);

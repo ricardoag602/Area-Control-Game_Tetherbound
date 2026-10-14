@@ -21,8 +21,29 @@ type SessionIntent =
   | { kind: "join"; requestId: string; name: string; roomCode: string };
 
 const RETRY_DELAYS = [250, 500, 1_000, 2_000, 4_000];
+const SOCKET_OPEN_TIMEOUT_MS = 6_000;
 const HANDSHAKE_TIMEOUT_MS = 5_000;
+const MAX_INITIAL_CONNECTION_ATTEMPTS = 3;
+const MAX_RECONNECT_ATTEMPTS = 5;
 const CLIENT_ERROR_CLOSE_CODE = 4003;
+const SOCKET_OPEN_STATE = 1;
+const SERVER_UNREACHABLE_MESSAGE =
+  "The multiplayer server could not be reached. Check your connection and try again.";
+const SERVER_UNRESPONSIVE_MESSAGE =
+  "The multiplayer server connected but did not respond. Try again.";
+const ROOM_CONNECTION_LOST_MESSAGE =
+  "Connection to the room was lost. Try reconnecting while your slot is still reserved.";
+
+export interface RoomClientOptions {
+  createSocket?: (url: string) => WebSocket;
+  getServerUrl?: () => string;
+  socketOpenTimeoutMs?: number;
+  handshakeTimeoutMs?: number;
+  maxInitialConnectionAttempts?: number;
+  maxReconnectAttempts?: number;
+  retryDelays?: readonly number[];
+  retryJitterMs?: number;
+}
 
 export function getRoomServerUrl() {
   return resolveRoomServerUrl(window.location, import.meta.env.VITE_WS_URL);
@@ -44,7 +65,9 @@ export class RoomClient {
   private intent: SessionIntent | null = null;
   private sessionToken: string | null = null;
   private retryAttempt = 0;
+  private connectionAttempts = 0;
   private retryTimer: number | null = null;
+  private socketOpenTimer: number | null = null;
   private handshakeTimer: number | null = null;
   private pingTimer: number | null = null;
   private movementTimer: number | null = null;
@@ -54,6 +77,9 @@ export class RoomClient {
   private shouldReconnect = false;
   private inputSequence = 0;
   private readonly pendingActions = new Set<string>();
+  private lastConnectionError = SERVER_UNREACHABLE_MESSAGE;
+
+  constructor(private readonly options: RoomClientOptions = {}) {}
 
   subscribe = (listener: Listener) => {
     this.listeners.add(listener);
@@ -90,6 +116,33 @@ export class RoomClient {
       roomCode: code,
       name: saved.name,
     });
+    return true;
+  }
+
+  retry() {
+    if (!this.intent) return false;
+
+    this.shouldReconnect = false;
+    this.clearTimers();
+    const socket = this.socket;
+    this.socket = null;
+    try {
+      socket?.close(1000, "Retrying connection");
+    } catch {
+      // A browser may reject close() while a socket is still being created.
+    }
+
+    this.retryAttempt = 0;
+    this.connectionAttempts = 0;
+    this.lastConnectionError = this.snapshot.room
+      ? ROOM_CONNECTION_LOST_MESSAGE
+      : SERVER_UNREACHABLE_MESSAGE;
+    this.shouldReconnect = true;
+    this.update({
+      connection: this.snapshot.room ? "reconnecting" : "connecting",
+      error: null,
+    });
+    this.connect();
     return true;
   }
 
@@ -150,6 +203,7 @@ export class RoomClient {
     this.intent = null;
     this.sessionToken = null;
     this.retryAttempt = 0;
+    this.connectionAttempts = 0;
     this.inputSequence = 0;
     this.lastMovementType = null;
     this.pendingActions.clear();
@@ -171,6 +225,7 @@ export class RoomClient {
     this.socket?.close(1000, "Starting a new session");
     this.intent = intent;
     this.retryAttempt = 0;
+    this.connectionAttempts = 0;
     this.inputSequence = 0;
     this.lastMovementType = null;
     this.pendingActions.clear();
@@ -184,22 +239,27 @@ export class RoomClient {
       error: null,
       stateVersion: 0,
     });
+    this.lastConnectionError = SERVER_UNREACHABLE_MESSAGE;
     this.connect();
   }
 
   private connect() {
     if (!this.intent || !this.shouldReconnect) return;
+    this.connectionAttempts += 1;
     let socket: WebSocket;
     try {
-      socket = new WebSocket(this.webSocketUrl());
+      socket = this.createSocket(this.webSocketUrl());
     } catch {
-      this.scheduleReconnect();
+      this.lastConnectionError = SERVER_UNREACHABLE_MESSAGE;
+      this.handleConnectionAttemptFailure();
       return;
     }
     this.socket = socket;
+    this.startSocketOpenTimer(socket);
 
     socket.addEventListener("open", () => {
       if (socket !== this.socket || !this.intent) return;
+      this.clearSocketOpenTimer();
       const activeCode = this.snapshot.room?.code;
       if (activeCode && this.sessionToken) {
         this.send({
@@ -248,8 +308,10 @@ export class RoomClient {
     }
 
     if (message.type === "welcome") {
+      this.clearSocketOpenTimer();
       this.clearHandshakeTimer();
       this.retryAttempt = 0;
+      this.connectionAttempts = 0;
       this.sessionToken = message.sessionToken;
       this.storeSession(message.room.code, message.sessionToken, this.currentName());
       this.update({
@@ -293,7 +355,7 @@ export class RoomClient {
     }
     if (message.type === "error") {
       this.update({ error: message.message });
-      if (!message.recoverable) {
+      if (!message.recoverable || !this.snapshot.room) {
         this.shouldReconnect = false;
         this.clearTimers();
         this.socket?.close(CLIENT_ERROR_CLOSE_CODE, message.code);
@@ -306,6 +368,7 @@ export class RoomClient {
     if (socket !== this.socket) return;
     this.socket = null;
     this.stopPings();
+    this.clearSocketOpenTimer();
     this.clearHandshakeTimer();
     this.clearMovementTimer();
     this.lastMovementType = null;
@@ -314,14 +377,40 @@ export class RoomClient {
       return;
     }
 
+    this.lastConnectionError = this.snapshot.room
+      ? ROOM_CONNECTION_LOST_MESSAGE
+      : SERVER_UNREACHABLE_MESSAGE;
+    this.handleConnectionAttemptFailure();
+  }
+
+  private handleConnectionAttemptFailure() {
+    if (!this.shouldReconnect || !this.intent) return;
+    if (this.connectionAttempts >= this.connectionAttemptLimit()) {
+      this.failConnection();
+      return;
+    }
     this.scheduleReconnect();
+  }
+
+  private failConnection() {
+    this.shouldReconnect = false;
+    this.clearTimers();
+    const socket = this.socket;
+    this.socket = null;
+    try {
+      socket?.close(4000, "Connection attempts exhausted");
+    } catch {
+      // The connection is already unusable; the offline state is authoritative.
+    }
+    this.update({ connection: "offline", error: this.lastConnectionError });
   }
 
   private scheduleReconnect() {
     if (!this.shouldReconnect || !this.intent || this.retryTimer !== null) return;
     this.update({ connection: this.snapshot.room ? "reconnecting" : "connecting" });
-    const baseDelay = RETRY_DELAYS[Math.min(this.retryAttempt, RETRY_DELAYS.length - 1)];
-    const jitter = Math.round(Math.random() * 120);
+    const retryDelays = this.options.retryDelays ?? RETRY_DELAYS;
+    const baseDelay = retryDelays[Math.min(this.retryAttempt, retryDelays.length - 1)] ?? 0;
+    const jitter = Math.round(Math.random() * (this.options.retryJitterMs ?? 120));
     this.retryAttempt += 1;
     this.retryTimer = window.setTimeout(() => {
       this.retryTimer = null;
@@ -330,7 +419,7 @@ export class RoomClient {
   }
 
   private send(message: ClientMessage) {
-    if (this.socket?.readyState === WebSocket.OPEN) {
+    if (this.socket?.readyState === SOCKET_OPEN_STATE) {
       this.socket.send(JSON.stringify(message));
     }
   }
@@ -346,9 +435,38 @@ export class RoomClient {
     this.clearHandshakeTimer();
     this.handshakeTimer = window.setTimeout(() => {
       if (socket === this.socket && this.snapshot.connection !== "connected") {
-        socket.close(4000, "Room handshake timed out");
+        this.lastConnectionError = SERVER_UNRESPONSIVE_MESSAGE;
+        this.socket = null;
+        try {
+          socket.close(4000, "Room handshake timed out");
+        } catch {
+          // The retry path below no longer depends on a close event.
+        }
+        this.clearHandshakeTimer();
+        this.handleConnectionAttemptFailure();
       }
-    }, HANDSHAKE_TIMEOUT_MS);
+    }, this.options.handshakeTimeoutMs ?? HANDSHAKE_TIMEOUT_MS);
+  }
+
+  private startSocketOpenTimer(socket: WebSocket) {
+    this.clearSocketOpenTimer();
+    this.socketOpenTimer = window.setTimeout(() => {
+      if (socket !== this.socket || socket.readyState === SOCKET_OPEN_STATE) return;
+      this.lastConnectionError = SERVER_UNREACHABLE_MESSAGE;
+      this.socket = null;
+      try {
+        socket.close(4000, "Room server connection timed out");
+      } catch {
+        // The retry path below no longer depends on a close event.
+      }
+      this.clearSocketOpenTimer();
+      this.handleConnectionAttemptFailure();
+    }, this.options.socketOpenTimeoutMs ?? SOCKET_OPEN_TIMEOUT_MS);
+  }
+
+  private clearSocketOpenTimer() {
+    if (this.socketOpenTimer !== null) window.clearTimeout(this.socketOpenTimer);
+    this.socketOpenTimer = null;
   }
 
   private clearHandshakeTimer() {
@@ -369,6 +487,7 @@ export class RoomClient {
 
   private clearTimers() {
     this.stopPings();
+    this.clearSocketOpenTimer();
     this.clearHandshakeTimer();
     this.clearMovementTimer();
     if (this.retryTimer !== null) window.clearTimeout(this.retryTimer);
@@ -391,7 +510,17 @@ export class RoomClient {
   }
 
   private webSocketUrl() {
-    return getRoomServerUrl();
+    return this.options.getServerUrl?.() ?? getRoomServerUrl();
+  }
+
+  private createSocket(url: string) {
+    return this.options.createSocket?.(url) ?? new WebSocket(url);
+  }
+
+  private connectionAttemptLimit() {
+    return this.snapshot.room
+      ? this.options.maxReconnectAttempts ?? MAX_RECONNECT_ATTEMPTS
+      : this.options.maxInitialConnectionAttempts ?? MAX_INITIAL_CONNECTION_ATTEMPTS;
   }
 
   private sessionKey(code: string) {

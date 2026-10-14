@@ -45,6 +45,7 @@ export function advanceTetherConflict(
       : null,
   ])) as Record<PlayerId, PlayerConflictTarget | null>;
   const activePlayers = new Set(activePlayerIds);
+  const creditedDisruptors = new Set<PlayerId>();
 
   anchors = anchors.map((anchor) => {
     const presence = getAnchorPresence(
@@ -117,6 +118,12 @@ export function advanceTetherConflict(
     }
 
     if (overloadProgress >= 1) {
+      for (const attackerId of activePlayerIds) {
+        const target = targets[attackerId];
+        if (target?.kind === "overload" && target.anchorId === anchor.id) {
+          creditedDisruptors.add(attackerId);
+        }
+      }
       return {
         ...anchor,
         powered: false,
@@ -137,6 +144,13 @@ export function advanceTetherConflict(
   return {
     ...state,
     anchors: resolveAnchorPower(anchors, state.elapsedMs),
+    tetherDisruptions: Object.fromEntries(
+      PLAYER_IDS.map((playerId) => [
+        playerId,
+        Math.max(0, Math.floor(state.tetherDisruptions?.[playerId] ?? 0)) +
+          Number(creditedDisruptors.has(playerId)),
+      ]),
+    ) as Record<PlayerId, number>,
   };
 }
 

@@ -27,6 +27,7 @@ describe("competitive tether conflict", () => {
     state = step(state, GAME_RULES.anchorOverloadSeconds / 2);
     expect(state.anchors[0].powered).toBe(true);
     expect(state.anchors[0].overloadProgress).toBeCloseTo(0.5, 8);
+    expect(state.tetherDisruptions.rival).toBe(0);
 
     state = step(state, GAME_RULES.anchorOverloadSeconds / 2);
     expect(state.anchors[0].powered).toBe(false);
@@ -36,6 +37,28 @@ describe("competitive tether conflict", () => {
     expect(getAnchorPowerState(state.anchors[0], state.elapsedMs)).toBe(
       "disrupted",
     );
+    expect(state.tetherDisruptions).toMatchObject({ player: 0, rival: 1 });
+  });
+
+  it("authoritatively credits every attacker helping finish a disruption", () => {
+    let state = createInitialGameState("shared-disruption", 3);
+    state.anchors = [anchor("root", "player", { x: 100, y: 100 })];
+    state.players.player.astronaut.position = { x: 20, y: 330 };
+    state.players.rival.astronaut.position = { x: 100, y: 100 };
+    state.players.player3.astronaut.position = { x: 101, y: 100 };
+
+    state = step(
+      state,
+      GAME_RULES.anchorOverloadSeconds,
+      ["player", "rival", "player3"],
+    );
+
+    expect(state.anchors[0].powered).toBe(false);
+    expect(state.tetherDisruptions).toMatchObject({
+      player: 0,
+      rival: 1,
+      player3: 1,
+    });
   });
 
   it("lets a nearby defender visibly scrub partial overload progress", () => {

@@ -5,22 +5,27 @@ import type { RoomSnapshot } from "../protocol";
 
 interface NetworkGameViewProps {
   audioEnabled: boolean;
+  tutorialEnabled: boolean;
   state: GameState;
   room: RoomSnapshot;
   localPlayerId: PlayerId;
   connection: ConnectionStatus;
+  error: string | null;
   latencyMs: number | null;
   onMovementCommand: (command: MovementCommand) => void;
   onDeploy: () => void;
+  onRetry: () => void;
   onLeave: () => void;
 }
 
-export function NetworkGameView({ audioEnabled, state, room, localPlayerId, connection, latencyMs, onMovementCommand, onDeploy, onLeave }: NetworkGameViewProps) {
+export function NetworkGameView({ audioEnabled, tutorialEnabled, state, room, localPlayerId, connection, error, latencyMs, onMovementCommand, onDeploy, onRetry, onLeave }: NetworkGameViewProps) {
   const opponents = room.players.filter((player) => player.id !== localPlayerId);
   const disconnectedOpponent = opponents.find((player) => !player.connected);
   const controlsDisabled = connection !== "connected" || Boolean(disconnectedOpponent);
-  const statusText = connection !== "connected"
-    ? "Reconnecting · Match paused"
+  const statusText = connection === "offline"
+    ? "Connection lost · Match paused"
+    : connection !== "connected"
+      ? "Reconnecting · Match paused"
     : disconnectedOpponent
       ? `${disconnectedOpponent.name} reconnecting · Match paused`
       : "Room synchronized";
@@ -29,7 +34,11 @@ export function NetworkGameView({ audioEnabled, state, room, localPlayerId, conn
   ) as Partial<Record<PlayerId, string>>;
   return <MatchScreen state={state} localPlayerId={localPlayerId} playerNames={playerNames}
     audioEnabled={audioEnabled}
+    tutorialEnabled={tutorialEnabled}
     statusText={statusText} latencyMs={latencyMs} controlsDisabled={controlsDisabled}
+    reconnectPrompt={connection === "offline"
+      ? { message: error ?? "Connection to the room was lost.", onRetry }
+      : undefined}
     interpolatePositions={true}
     onMovementCommand={onMovementCommand} onDeploy={onDeploy} onLeave={onLeave} />;
 }

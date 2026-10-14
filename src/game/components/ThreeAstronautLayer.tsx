@@ -180,7 +180,7 @@ export default function ThreeAstronautLayer({
     }
 
     const requestedPlayerIds = [...latestRef.current.state.activePlayerIds];
-    void Promise.allSettled(
+    const astronautLoad = Promise.allSettled(
       requestedPlayerIds.map(async (playerId) => ({
         playerId,
         asset: await loadThreeAstronautAsset(playerId),
@@ -221,27 +221,32 @@ export default function ThreeAstronautLayer({
       astronautAssetsReady = true;
     });
 
-    void loadThreeGameObjectAssets(requestedPlayerIds).then((assets) => {
-      if (cancelled) {
-        disposeThreeGameObjectAssets(assets);
-        return;
-      }
-      try {
-        objectRuntime = createThreeGameObjectRuntime(
-          assets,
-          latestRef.current.state,
-          reduceMotion,
-        );
-        scene.add(objectRuntime.root);
-        reconciledObjectState = latestRef.current.state;
-        reconciledObjectElapsedMs = latestRef.current.state.elapsedMs;
-        objectAssetsReady = true;
-      } catch (error) {
-        disposeThreeGameObjectAssets(assets);
-        console.error("Unable to create 3D game objects", error);
-      }
-    }).catch((error) => {
-      if (!cancelled) console.error("Unable to load 3D game objects", error);
+    void astronautLoad.then(() => {
+      if (cancelled) return;
+      // Keep the essential terrain and astronaut requests ahead of decorative
+      // object models. SVG bases, anchors, and salvage remain visible meanwhile.
+      void loadThreeGameObjectAssets(requestedPlayerIds).then((assets) => {
+        if (cancelled) {
+          disposeThreeGameObjectAssets(assets);
+          return;
+        }
+        try {
+          objectRuntime = createThreeGameObjectRuntime(
+            assets,
+            latestRef.current.state,
+            reduceMotion,
+          );
+          scene.add(objectRuntime.root);
+          reconciledObjectState = latestRef.current.state;
+          reconciledObjectElapsedMs = latestRef.current.state.elapsedMs;
+          objectAssetsReady = true;
+        } catch (error) {
+          disposeThreeGameObjectAssets(assets);
+          console.error("Unable to create 3D game objects", error);
+        }
+      }).catch((error) => {
+        if (!cancelled) console.error("Unable to load 3D game objects", error);
+      });
     });
 
     const draw = (timeMs: number) => {

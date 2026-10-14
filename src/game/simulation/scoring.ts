@@ -95,6 +95,12 @@ export function normalizeMatchState(state: GameState): GameState {
   const hasDeployedAnchor = mapPlayerRecord((playerId) =>
     state.hasDeployedAnchor?.[playerId] === true ||
     state.anchors.some((anchor) => anchor.owner === playerId));
+  const tetherDisruptions = mapPlayerRecord((playerId) => Math.floor(
+    finiteNonNegative(state.tetherDisruptions?.[playerId], 0),
+  ));
+  const anchorTetherFabrications = mapPlayerRecord((playerId) => Math.floor(
+    finiteNonNegative(state.anchorTetherFabrications?.[playerId], 0),
+  ));
   const baseCollapseProgressMs = mapPlayerRecord((playerId) => clamp(
     finiteNonNegative(state.baseCollapseProgressMs?.[playerId], 0),
     0,
@@ -166,6 +172,8 @@ export function normalizeMatchState(state: GameState): GameState {
     overtimeScores,
     overtimeElapsedMs,
     hasDeployedAnchor,
+    tetherDisruptions,
+    anchorTetherFabrications,
     baseCollapseProgressMs,
     baseCollapseAttacker,
     matchOutcome,

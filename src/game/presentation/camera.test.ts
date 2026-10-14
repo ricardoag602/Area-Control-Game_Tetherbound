@@ -19,12 +19,30 @@ describe("camera framing", () => {
     expect(view).toEqual({ x: 26, y: 32, width: 48, height: 96 });
   });
 
-  it("keeps the player center-locked by allowing overscan at world edges", () => {
+  it.each([
+    ["top-left", { x: 0, y: 0 }, { x: 0, y: 0 }],
+    [
+      "bottom-right",
+      { x: WORLD.width, y: WORLD.height },
+      { x: WORLD.width - 48, y: WORLD.height - 96 },
+    ],
+  ])("locks the follow camera to the %s world edge", (_, center, origin) => {
+    const view = calculateCameraViewBox(center, 0.5, 1);
+
+    expect(view).toEqual({ ...origin, width: 48, height: 96 });
+    expect(view.x).toBeGreaterThanOrEqual(0);
+    expect(view.y).toBeGreaterThanOrEqual(0);
+    expect(view.x + view.width).toBeLessThanOrEqual(WORLD.width);
+    expect(view.y + view.height).toBeLessThanOrEqual(WORLD.height);
+  });
+
+  it("stops following near an edge so the player can move across the screen", () => {
     const center = { x: WORLD.width / 2, y: WORLD.height - 15 };
     const view = calculateCameraViewBox(center, 0.5, 1);
 
-    expect(view.y).toBe(center.y - 48);
-    expect(view.y + view.height).toBe(WORLD.height + 33);
+    expect(view.y).toBe(WORLD.height - view.height);
+    expect(view.y + view.height).toBe(WORLD.height);
+    expect(center.y).toBeGreaterThan(view.y + view.height / 2);
   });
 
   it("keeps the expanded arena zoomed for very wide viewports", () => {
@@ -35,6 +53,34 @@ describe("camera framing", () => {
     );
 
     expect(view).toEqual({ x: 31, y: 127, width: 288, height: 96 });
+  });
+
+  it("fits an ultrawide zoomed-out view inside the world", () => {
+    const view = calculateCameraViewBox(
+      { x: WORLD.width / 2, y: WORLD.height / 2 },
+      4,
+      CAMERA_RULES.minimumSpringZoom,
+    );
+
+    expect(view.width).toBeCloseTo(WORLD.width, 10);
+    expect(view.height).toBeCloseTo(WORLD.width / 4, 10);
+    expect(view.width / view.height).toBeCloseTo(4, 10);
+    expect(view.x).toBeCloseTo(0, 10);
+    expect(view.y).toBeGreaterThanOrEqual(0);
+    expect(view.y + view.height).toBeLessThanOrEqual(WORLD.height);
+  });
+
+  it("keeps a phone portrait view within every world edge while zoomed out", () => {
+    const view = calculateCameraViewBox(
+      { x: WORLD.width, y: 0 },
+      390 / 844,
+      CAMERA_RULES.minimumSpringZoom,
+    );
+
+    expect(view.x + view.width).toBeCloseTo(WORLD.width, 10);
+    expect(view.y).toBe(0);
+    expect(view.x).toBeGreaterThanOrEqual(0);
+    expect(view.y + view.height).toBeLessThanOrEqual(WORLD.height);
   });
 
   it("falls back safely for invalid aspect, center, and zoom values", () => {

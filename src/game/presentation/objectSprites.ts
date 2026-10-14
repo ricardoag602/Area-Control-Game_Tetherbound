@@ -9,7 +9,7 @@ interface TeamObjectSpriteSet {
 
 const ROOT = publicAssetUrl("game-objects/runtime");
 
-export const DROPPED_MATERIAL_SPRITE = `${ROOT}/dropped-material.png`;
+export const DROPPED_MATERIAL_SPRITE = `${ROOT}/dropped-material.webp`;
 
 export const OBJECT_SPRITES = {
   player: spriteSet("blue"),
@@ -20,8 +20,8 @@ export const OBJECT_SPRITES = {
 
 function spriteSet(team: string): TeamObjectSpriteSet {
   return {
-    homeBase: `${ROOT}/home-base-${team}.png`,
-    tether: `${ROOT}/tether-${team}.png`,
-    breakPoint: `${ROOT}/break-point-${team}.png`,
+    homeBase: `${ROOT}/home-base-${team}.webp`,
+    tether: `${ROOT}/tether-${team}.webp`,
+    breakPoint: `${ROOT}/break-point-${team}.webp`,
   };
 }

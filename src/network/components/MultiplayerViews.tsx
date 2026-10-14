@@ -113,15 +113,17 @@ interface RoomLobbyProps {
   room: RoomSnapshot;
   localPlayerId: PlayerId;
   connection: ConnectionStatus;
+  error: string | null;
   latencyMs: number | null;
   invitationLink: string;
   localAddressOnly: boolean;
   onCopyLink: () => Promise<void>;
   onReadyChange: (ready: boolean) => void;
+  onRetry: () => void;
   onLeave: () => void;
 }
 
-export function RoomLobby({ room, localPlayerId, connection, latencyMs, invitationLink, localAddressOnly, onCopyLink, onReadyChange, onLeave }: RoomLobbyProps) {
+export function RoomLobby({ room, localPlayerId, connection, error, latencyMs, invitationLink, localAddressOnly, onCopyLink, onReadyChange, onRetry, onLeave }: RoomLobbyProps) {
   const localPlayer = room.players.find((player) => player.id === localPlayerId);
   const connectedCount = room.players.filter((player) => player.connected).length;
   const [copied, setCopied] = useState(false);
@@ -141,9 +143,15 @@ export function RoomLobby({ room, localPlayerId, connection, latencyMs, invitati
         <p>{connectedCount} of {room.playerLimit} astronauts connected</p>
       </header>
       <div className="connection-strip" data-status={connection}>
-        <span>{connection === "reconnecting" ? "Reconnecting…" : "Room server connected"}</span>
+        <span>{getConnectionLabel(connection)}</span>
         <strong>{latencyMs === null ? "Measuring latency" : `${latencyMs} ms RTT`}</strong>
       </div>
+      {connection === "offline" && (
+        <div className="connection-retry" role="alert">
+          <p>{error ?? "The room connection was lost."}</p>
+          <button className="button button--primary button--compact" onClick={onRetry}>Reconnect</button>
+        </div>
+      )}
       <div className="room-card invite-card">
         <div className="room-code-block">
           <span>Room code</span>
@@ -188,6 +196,8 @@ interface MatchResultViewProps {
   room: RoomSnapshot;
   localPlayerId: PlayerId;
   connection: ConnectionStatus;
+  error: string | null;
+  onRetry: () => void;
   onRequestRematch: () => void;
   onLeave: () => void;
 }
@@ -197,6 +207,8 @@ export function MatchResultView({
   room,
   localPlayerId,
   connection,
+  error,
+  onRetry,
   onRequestRematch,
   onLeave,
 }: MatchResultViewProps) {
@@ -266,6 +278,12 @@ export function MatchResultView({
         <span>{connectionLabel}</span>
         <strong>Room {room.code}</strong>
       </div>
+      {connection === "offline" && (
+        <div className="connection-retry" role="alert">
+          <p>{error ?? "The room connection was lost."}</p>
+          <button className="button button--primary button--compact" onClick={onRetry}>Reconnect</button>
+        </div>
+      )}
 
       <div className="room-card lobby-card">
         {state.activePlayerIds.map((playerId) => {
@@ -310,6 +328,7 @@ function getConnectionLabel(connection: ConnectionStatus) {
     case "connected": return "Room server connected";
     case "reconnecting": return "Reconnecting…";
     case "connecting": return "Connecting…";
+    case "offline": return "Room server unavailable";
     default: return "Connection lost";
   }
 }

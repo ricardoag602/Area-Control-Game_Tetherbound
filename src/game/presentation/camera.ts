@@ -70,10 +70,10 @@ export function calculateViewportBufferZoom(
 }
 
 /**
- * Frames the camera around the supplied point without clamping it to the map.
- * The resulting overscan keeps the controlled astronaut screen-locked even at
- * an edge. Very wide viewports are fitted to the world's width first so they do
- * not unintentionally reveal more than the entire horizontal playfield.
+ * Frames the camera around the supplied point while keeping the complete view
+ * inside the map. At an arena edge the camera stops and the controlled
+ * astronaut moves toward the corresponding screen edge instead of revealing
+ * empty space beyond the terrain.
  */
 export function calculateCameraViewBox(
   center: Vec2,
@@ -98,11 +98,18 @@ export function calculateCameraViewBox(
     baseHeight = baseWidth / safeAspect;
   }
 
-  const width = baseWidth / safeZoom;
-  const height = baseHeight / safeZoom;
+  const rawWidth = baseWidth / safeZoom;
+  const rawHeight = baseHeight / safeZoom;
+  const worldFit = Math.min(
+    1,
+    WORLD.width / rawWidth,
+    WORLD.height / rawHeight,
+  );
+  const width = rawWidth * worldFit;
+  const height = rawHeight * worldFit;
   return {
-    x: safeCenter.x - width / 2,
-    y: safeCenter.y - height / 2,
+    x: clamp(safeCenter.x - width / 2, 0, WORLD.width - width),
+    y: clamp(safeCenter.y - height / 2, 0, WORLD.height - height),
     width,
     height,
   };

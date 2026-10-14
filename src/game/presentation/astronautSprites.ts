@@ -51,8 +51,8 @@ export function getAstronautSpriteFrame(
 function spriteSet(fileStem: string): AstronautSpriteSet {
   const root = publicAssetUrl("astronauts/runtime");
   return {
-    idle: `${root}/${fileStem}.png`,
-    "walk-left": `${root}/${fileStem}-walk-left.png`,
-    "walk-right": `${root}/${fileStem}-walk-right.png`,
+    idle: `${root}/${fileStem}.webp`,
+    "walk-left": `${root}/${fileStem}-walk-left.webp`,
+    "walk-right": `${root}/${fileStem}-walk-right.webp`,
   };
 }

@@ -16,6 +16,15 @@ import { sampleWorld } from "../world/map";
 import { createWorldTimeline } from "../world/timeline";
 
 describe("Tetherbound simulation", () => {
+  it("starts every player with zero anchor tether fabrications", () => {
+    expect(createInitialGameState().anchorTetherFabrications).toEqual({
+      player: 0,
+      rival: 0,
+      player3: 0,
+      player4: 0,
+    });
+  });
+
   it("recognizes the home base as a safe zone", () => {
     const state = createInitialGameState();
     const base = state.players.player.basePosition;
@@ -543,6 +552,101 @@ describe("Tetherbound simulation", () => {
       bankedSalvage: 0,
       tetherKits: 1,
     });
+    expect(next.anchorTetherFabrications.player).toBe(0);
+  });
+
+  it("credits tether fabrication only at a powered owned remote anchor", () => {
+    const state = createInitialGameState();
+    const anchorPosition = { x: 105, y: 306 };
+    state.anchors = [{
+      id: "player-anchor-fabrication-test",
+      owner: "player",
+      position: anchorPosition,
+      parentId: "player-base",
+      powered: true,
+      disruptedUntilMs: null,
+      protectedUntilMs: null,
+      overloadProgress: 0,
+      repairProgress: 0,
+    }];
+    state.players.player.astronaut.position = { ...anchorPosition };
+    state.players.player.astronaut.carriedSalvage = 3;
+
+    const fabricated = advanceMatch(state, {}, 0);
+
+    expect(fabricated.players.player.astronaut).toMatchObject({
+      carriedSalvage: 0,
+      bankedSalvage: 0,
+      tetherKits: 3,
+    });
+    expect(fabricated.anchorTetherFabrications).toMatchObject({
+      player: 1,
+      rival: 0,
+    });
+    expect(advanceMatch(fabricated, {}, 0).anchorTetherFabrications.player)
+      .toBe(1);
+  });
+
+  it("counts each tether in a multi-recipe anchor fabrication", () => {
+    const state = createInitialGameState();
+    const anchorPosition = { x: 105, y: 306 };
+    state.anchors = [{
+      id: "player-anchor-double-fabrication",
+      owner: "player",
+      position: anchorPosition,
+      parentId: "player-base",
+      powered: true,
+      disruptedUntilMs: null,
+      protectedUntilMs: null,
+      overloadProgress: 0,
+      repairProgress: 0,
+    }];
+    state.players.player.astronaut.position = { ...anchorPosition };
+    state.players.player.astronaut.carriedSalvage = 6;
+
+    const fabricated = advanceMatch(state, {}, 0);
+
+    expect(fabricated.players.player.astronaut.tetherKits).toBe(4);
+    expect(fabricated.anchorTetherFabrications.player).toBe(2);
+  });
+
+  it("does not credit an enemy or offline anchor during a home-zone fabrication", () => {
+    const state = createInitialGameState();
+    const position = {
+      x: state.players.player.basePosition.x + 10,
+      y: state.players.player.basePosition.y,
+    };
+    state.anchors = [
+      {
+        id: "offline-own-fabricator",
+        owner: "player",
+        position,
+        parentId: "player-base",
+        powered: false,
+        disruptedUntilMs: state.elapsedMs + 20_000,
+        protectedUntilMs: null,
+        overloadProgress: 0,
+        repairProgress: 0,
+      },
+      {
+        id: "enemy-fabricator",
+        owner: "rival",
+        position,
+        parentId: "rival-base",
+        powered: true,
+        disruptedUntilMs: null,
+        protectedUntilMs: null,
+        overloadProgress: 0,
+        repairProgress: 0,
+      },
+    ];
+    state.players.player.astronaut.position = position;
+    state.players.player.astronaut.carriedSalvage = 3;
+
+    const fabricatedAtHome = advanceMatch(state, {}, 0);
+
+    expect(fabricatedAtHome.players.player.astronaut.tetherKits).toBe(3);
+    expect(fabricatedAtHome.anchorTetherFabrications.player).toBe(0);
   });
 
   it("keeps remote anchor delivery inside its smaller hand-in radius", () => {

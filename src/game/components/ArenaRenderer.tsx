@@ -18,6 +18,7 @@ import {
   ASTRONAUT_SPRITES,
   getAstronautSpriteFrame,
 } from "../presentation/astronautSprites";
+import type { CameraViewBox } from "../presentation/camera";
 import { DROPPED_MATERIAL_SPRITE } from "../presentation/objectSprites";
 import { MOVEMENT_RULES } from "../movement/movement";
 import { getEnvironmentModifiers } from "../simulation/environment";
@@ -43,12 +44,15 @@ import type {
   TankInput,
   Vec2,
 } from "../types";
+import type { TutorialStepId } from "../tutorial/guidedSetup";
 import { useFollowCamera } from "../hooks/useFollowCamera";
 import { useSmoothedPositions } from "../hooks/useSmoothedPositions";
 import { PixiTerrainLayer } from "./PixiTerrainLayer";
 import { TetherCableLayer, TetherNetworkLayer } from "./TetherNetworkLayer";
 
 const ThreeAstronautLayer = lazy(() => import("./ThreeAstronautLayer"));
+const THREE_LAYER_FALLBACK_DELAY_MS = 4_000;
+const THREE_LAYER_IDLE_TIMEOUT_MS = 800;
 
 interface ArenaRendererProps {
   state: GameState;
@@ -59,6 +63,8 @@ interface ArenaRendererProps {
   oxygenZoomMultiplier?: number;
   cameraMode?: "follow" | "overview";
   onOverviewSettled?: () => void;
+  tutorialStep?: TutorialStepId | null;
+  tutorialTarget?: Vec2 | null;
 }
 
 type GestureMode =
@@ -89,6 +95,8 @@ export function ArenaRenderer({
   oxygenZoomMultiplier = 1,
   cameraMode = "follow",
   onOverviewSettled,
+  tutorialStep = null,
+  tutorialTarget = null,
 }: ArenaRendererProps) {
   const renderPositions = useSmoothedPositions(state, interpolatePositions);
   const localAstronaut = state.players[localPlayerId].astronaut;
@@ -97,6 +105,8 @@ export function ArenaRenderer({
     localAstronaut.position,
   );
   const arenaRef = useRef<SVGSVGElement>(null);
+  const [terrainReady, setTerrainReady] = useState(false);
+  const [threeLayerEnabled, setThreeLayerEnabled] = useState(false);
   const [threeAstronautsReady, setThreeAstronautsReady] = useState(false);
   const [threeObjectsReady, setThreeObjectsReady] = useState(false);
   const [chargeIntentActive, setChargeIntentActive] = useState(false);
@@ -122,6 +132,33 @@ export function ArenaRenderer({
   const [touchChargePreview, setTouchChargePreview] = useState<TankInput | null>(null);
   commandRef.current = onMovementCommand;
   localAstronautRef.current = localAstronaut;
+
+  useEffect(() => {
+    if (threeLayerEnabled) return;
+
+    const enableThreeLayer = () => setThreeLayerEnabled(true);
+    const fallbackTimer = window.setTimeout(
+      enableThreeLayer,
+      THREE_LAYER_FALLBACK_DELAY_MS,
+    );
+    if (!terrainReady) return () => window.clearTimeout(fallbackTimer);
+
+    let idleCallback: number | null = null;
+    let idleFallbackTimer: number | null = null;
+    if (typeof window.requestIdleCallback === "function") {
+      idleCallback = window.requestIdleCallback(enableThreeLayer, {
+        timeout: THREE_LAYER_IDLE_TIMEOUT_MS,
+      });
+    } else {
+      idleFallbackTimer = window.setTimeout(enableThreeLayer, 120);
+    }
+
+    return () => {
+      window.clearTimeout(fallbackTimer);
+      if (idleCallback !== null) window.cancelIdleCallback(idleCallback);
+      if (idleFallbackTimer !== null) window.clearTimeout(idleFallbackTimer);
+    };
+  }, [terrainReady, threeLayerEnabled]);
 
   useEffect(() => {
     if (localAstronaut.oxygen < GAME_RULES.oxygenMaximum - 0.001) {
@@ -439,7 +476,11 @@ export function ArenaRenderer({
 
   return (
     <div className={`world-stage${threeAstronautsReady ? " world-stage--three-astronauts" : ""}${threeObjectsReady ? " world-stage--three-objects" : ""}`}>
-      <PixiTerrainLayer state={state} camera={camera} />
+      <PixiTerrainLayer
+        state={state}
+        camera={camera}
+        onInitialRender={() => setTerrainReady(true)}
+      />
       <svg
         className="world world--tether-sprites"
         viewBox={`${camera.x} ${camera.y} ${camera.width} ${camera.height}`}
@@ -491,6 +532,16 @@ export function ArenaRenderer({
           />
         ))}
 
+        {tutorialStep && (
+          <TutorialWorldCue
+            step={tutorialStep}
+            astronautPosition={renderPositions[localPlayerId]}
+            facing={localAstronaut.movement.facing}
+            target={tutorialTarget}
+            camera={camera}
+          />
+        )}
+
         <ChargeFeedback
           astronaut={localAstronaut}
           position={renderPositions[localPlayerId]}
@@ -508,17 +559,102 @@ export function ArenaRenderer({
           />
         ))}
       </svg>
-      <Suspense fallback={null}>
-        <ThreeAstronautLayer
-          state={state}
-          renderPositions={renderPositions}
-          camera={camera}
-          onReadyChange={setThreeAstronautsReady}
-          onObjectReadyChange={setThreeObjectsReady}
-        />
-      </Suspense>
+      {threeLayerEnabled && (
+        <Suspense fallback={null}>
+          <ThreeAstronautLayer
+            state={state}
+            renderPositions={renderPositions}
+            camera={camera}
+            onReadyChange={setThreeAstronautsReady}
+            onObjectReadyChange={setThreeObjectsReady}
+          />
+        </Suspense>
+      )}
     </div>
   );
+}
+
+function TutorialWorldCue({
+  step,
+  astronautPosition,
+  facing,
+  target,
+  camera,
+}: {
+  step: TutorialStepId;
+  astronautPosition: Vec2;
+  facing: Vec2;
+  target: Vec2 | null;
+  camera: CameraViewBox;
+}) {
+  const followsTarget = step === "salvage" || step === "bank" || step === "break";
+  if (followsTarget && !target) return null;
+
+  const targetCue = target ? clampTutorialTargetToCamera(target, camera) : null;
+  const position = targetCue?.position ?? astronautPosition;
+  const offscreen = targetCue?.offscreen ?? false;
+  const heading = Math.atan2(facing.y, facing.x) * 180 / Math.PI;
+  const targetHeading = target
+    ? Math.atan2(target.y - position.y, target.x - position.x) * 180 / Math.PI
+    : 0;
+
+  return (
+    <g
+      className={`world__tutorial-cue world__tutorial-cue--${step}${offscreen ? " world__tutorial-cue--offscreen" : ""}`}
+      transform={`translate(${position.x} ${position.y})`}
+      aria-hidden="true"
+    >
+      <circle className="world__tutorial-cue-halo" r="8.5" />
+      <circle className="world__tutorial-cue-ring" r="6.7" />
+      {offscreen && (
+        <path
+          className="world__tutorial-cue-symbol world__tutorial-cue-symbol--filled"
+          d="M-5-4 5 0-5 4-2 0Z"
+          transform={`rotate(${targetHeading})`}
+        />
+      )}
+      {!offscreen && step === "move" && (
+        <path className="world__tutorial-cue-symbol" d="M0-12V-7M0 12V7M-12 0H-7M12 0H7M0-12l-2 2M0-12l2 2M0 12l-2-2M0 12l2-2M-12 0l2-2M-12 0l2 2M12 0l-2-2M12 0l-2 2" />
+      )}
+      {!offscreen && step === "boost" && (
+        <g transform={`rotate(${heading})`}>
+          <path className="world__tutorial-cue-symbol" d="M-2.5 0H12M7-4l5 4-5 4" />
+          <path className="world__tutorial-cue-trail" d="M-5-3H-11M-5 0H-14M-5 3H-11" />
+        </g>
+      )}
+      {!offscreen && step === "deploy" && (
+        <path className="world__tutorial-cue-symbol" d="M0-4V4M-4 0H4M-3.7-3.7 3.7 3.7M3.7-3.7-3.7 3.7" />
+      )}
+      {!offscreen && step === "salvage" && (
+        <path className="world__tutorial-cue-symbol world__tutorial-cue-symbol--filled" d="m0-4.8 4.3 4.3L0 5.2-4.3-.5 0-4.8Z" />
+      )}
+      {!offscreen && step === "bank" && (
+        <path className="world__tutorial-cue-symbol" d="M-10 0H4M0-4l4 4-4 4M7-5v10" />
+      )}
+      {!offscreen && step === "break" && (
+        <path className="world__tutorial-cue-symbol" d="M-9-4h4l4 4-4 4h-4M9-4H5L1 0l4 4h4M-2-6 0-10M2 6 0 10" />
+      )}
+    </g>
+  );
+}
+
+function clampTutorialTargetToCamera(
+  target: Vec2,
+  camera: CameraViewBox,
+): { position: Vec2; offscreen: boolean } {
+  const margin = Math.min(10, camera.width / 4, camera.height / 4);
+  const minimumX = camera.x + margin;
+  const maximumX = camera.x + camera.width - margin;
+  const minimumY = camera.y + margin;
+  const maximumY = camera.y + camera.height - margin;
+  const position = {
+    x: Math.min(maximumX, Math.max(minimumX, target.x)),
+    y: Math.min(maximumY, Math.max(minimumY, target.y)),
+  };
+  return {
+    position,
+    offscreen: position.x !== target.x || position.y !== target.y,
+  };
 }
 
 function OxygenWorldIndicator({

@@ -6,7 +6,11 @@ import {
   getAmbientDrift,
   getEnvironmentModifiers,
 } from "./environment";
-import { isAtDeliveryNode, isInsideSafeZone } from "./tetherNetwork";
+import {
+  isAtAnchorDeliveryNode,
+  isAtDeliveryNode,
+  isInsideSafeZone,
+} from "./tetherNetwork";
 import { advanceTetherConflict } from "./tetherConflict";
 import { advanceMatchRules, normalizeMatchState } from "./scoring";
 import { advanceWorldSystems, normalizeWorldSystems } from "./worldSystems";
@@ -279,6 +283,7 @@ function collectSalvage(
 
 function deliverSalvage(state: GameState, activePlayers: PlayerId[]): GameState {
   let players = state.players;
+  let anchorTetherFabrications = state.anchorTetherFabrications;
 
   for (const playerId of activePlayers) {
     const player = players[playerId];
@@ -291,6 +296,18 @@ function deliverSalvage(state: GameState, activePlayers: PlayerId[]): GameState 
     }
 
     const salvageTotal = astronaut.bankedSalvage + astronaut.carriedSalvage;
+    const fabricatedTethers = Math.floor(
+      salvageTotal / GAME_RULES.salvagePerTether,
+    );
+    if (
+      fabricatedTethers > 0 &&
+      isAtAnchorDeliveryNode(state, playerId, astronaut.position)
+    ) {
+      anchorTetherFabrications = {
+        ...anchorTetherFabrications,
+        [playerId]: anchorTetherFabrications[playerId] + fabricatedTethers,
+      };
+    }
     players = {
       ...players,
       [playerId]: {
@@ -299,12 +316,11 @@ function deliverSalvage(state: GameState, activePlayers: PlayerId[]): GameState 
           ...astronaut,
           carriedSalvage: 0,
           bankedSalvage: salvageTotal % GAME_RULES.salvagePerTether,
-          tetherKits:
-            astronaut.tetherKits + Math.floor(salvageTotal / GAME_RULES.salvagePerTether),
+          tetherKits: astronaut.tetherKits + fabricatedTethers,
         },
       },
     };
   }
 
-  return { ...state, players };
+  return { ...state, players, anchorTetherFabrications };
 }

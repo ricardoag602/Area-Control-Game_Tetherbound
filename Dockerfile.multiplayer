@@ -1,0 +1,19 @@
+FROM node:24-alpine
+
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
+
+COPY server ./server
+COPY src ./src
+COPY tsconfig.json tsconfig.server.json ./
+
+ENV NODE_ENV=production
+ENV PORT=8788
+ENV TETHERBOUND_WS_PATH=/ws
+ENV TETHERBOUND_HEALTH_PATH=/healthz
+
+EXPOSE 8788
+
+CMD ["npm", "run", "start:server"]

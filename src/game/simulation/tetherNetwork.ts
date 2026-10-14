@@ -47,6 +47,14 @@ export function isAtDeliveryNode(
 
   // Remote anchors keep a smaller hand-in radius so returning resources still
   // asks the player to reach the actual tether instead of grazing its zone.
+  return isAtAnchorDeliveryNode(state, playerId, position);
+}
+
+export function isAtAnchorDeliveryNode(
+  state: GameState,
+  playerId: PlayerId,
+  position: Vec2,
+) {
   return state.anchors.some(
     (anchor) =>
       anchor.owner === playerId &&

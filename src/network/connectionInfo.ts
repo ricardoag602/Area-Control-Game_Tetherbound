@@ -28,14 +28,32 @@ export function createInvitationLink(currentUrl: string, roomCode: string) {
 }
 
 export function resolveRoomServerUrl(
-  location: Pick<Location, "protocol" | "hostname">,
+  location: Pick<Location, "protocol" | "hostname"> &
+    Partial<Pick<Location, "host" | "pathname">>,
   configuredUrl?: string,
 ) {
   if (configuredUrl) return configuredUrl;
   const protocol = location.protocol === "https:" ? "wss:" : "ws:";
-  return `${protocol}//${location.hostname}:8788`;
+  if (isLoopbackHostname(location.hostname)) {
+    const hostname = location.hostname === "::1" ? "[::1]" : location.hostname;
+    return `${protocol}//${hostname}:8788/ws`;
+  }
+
+  const host = location.host ?? location.hostname;
+  return `${protocol}//${host}${roomServerPath(location.pathname ?? "/")}`;
 }
 
 export function isLoopbackHostname(hostname: string) {
   return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]";
+}
+
+function roomServerPath(pathname: string) {
+  if (pathname.endsWith("/")) return `${pathname}ws`;
+
+  const lastSlash = pathname.lastIndexOf("/");
+  const finalSegment = pathname.slice(lastSlash + 1);
+  if (finalSegment.includes(".")) {
+    return `${pathname.slice(0, lastSlash + 1)}ws`;
+  }
+  return `${pathname}/ws`;
 }

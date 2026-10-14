@@ -49,6 +49,8 @@ export function createInitialGameState(
     overtimeScores: createNumberRecord(0),
     overtimeElapsedMs: 0,
     hasDeployedAnchor: createBooleanRecord(false),
+    tetherDisruptions: createNumberRecord(0),
+    anchorTetherFabrications: createNumberRecord(0),
     baseCollapseProgressMs: createNumberRecord(0),
     baseCollapseAttacker: createNullablePlayerRecord(),
     matchOutcome: null,

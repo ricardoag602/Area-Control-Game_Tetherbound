@@ -26,6 +26,7 @@ interface PixiTerrainLayerProps {
   state: GameState;
   camera: CameraViewBox;
   theme?: TerrainVisualTheme;
+  onInitialRender?: () => void;
 }
 
 interface TerrainScene {
@@ -50,11 +51,14 @@ export function PixiTerrainLayer({
   state,
   camera,
   theme = ACTIVE_TERRAIN_THEME,
+  onInitialRender,
 }: PixiTerrainLayerProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<TerrainScene | null>(null);
+  const initialRenderCallbackRef = useRef(onInitialRender);
   const latestStateRef = useRef(state);
   const latestCameraRef = useRef(camera);
+  initialRenderCallbackRef.current = onInitialRender;
   latestStateRef.current = state;
   latestCameraRef.current = camera;
   const terrainLightingKey = [
@@ -161,6 +165,7 @@ export function PixiTerrainLayer({
       sceneRef.current = scene;
       updateTerrainLighting(scene, latestStateRef.current, theme);
       resizeAndPosition(scene, host, latestCameraRef.current);
+      initialRenderCallbackRef.current?.();
 
       resizeObserver = new ResizeObserver(() => {
         const current = sceneRef.current;
@@ -172,6 +177,9 @@ export function PixiTerrainLayer({
     void initialize().catch((error: unknown) => {
       // Keep the SVG gameplay layer usable if WebGL or texture loading fails.
       console.error("Unable to initialize Pixi terrain", error);
+      // The SVG arena is still playable. Do not permanently block the deferred
+      // 3D enhancement when this optional terrain layer cannot initialize.
+      if (!cancelled) initialRenderCallbackRef.current?.();
     });
 
     return () => {

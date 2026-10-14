@@ -118,4 +118,10 @@ The test suite includes deterministic rules coverage for setup, cumulative scori
 ## Configuration
 
 - `TETHERBOUND_WS_PORT` changes the room-server port.
-- `VITE_WS_URL` overrides the WebSocket address used by the client, which is required when the public web client and room server use different hosts.
+- `PORT` is the production room-server port supplied by most managed hosts; it takes precedence over `TETHERBOUND_WS_PORT`.
+- `TETHERBOUND_WS_PATH` changes the WebSocket route from `/ws`.
+- `TETHERBOUND_HEALTH_PATH` changes the health-check route from `/healthz`.
+- `TETHERBOUND_ALLOWED_ORIGINS` is a comma-separated browser-origin allowlist.
+- `VITE_WS_URL` overrides the WebSocket address compiled into the client, which is required when the public web client and room server use different hosts.
+
+See [`docs/PUBLIC_MULTIPLAYER.md`](docs/PUBLIC_MULTIPLAYER.md) for the production deployment and verification checklist.

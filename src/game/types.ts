@@ -124,6 +124,10 @@ export interface GameState {
   overtimeElapsedMs: number;
   /** Historical deployment flag; a player with no prior anchor is collapse-immune. */
   hasDeployedAnchor: Record<PlayerId, boolean>;
+  /** Enemy tether disruptions each player authoritatively helped complete. */
+  tetherDisruptions: Record<PlayerId, number>;
+  /** Tethers each player fabricated while standing at a powered remote anchor. */
+  anchorTetherFabrications: Record<PlayerId, number>;
   /** Hold progress indexed by the defender whose base is being collapsed. */
   baseCollapseProgressMs: Record<PlayerId, number>;
   /** Sole attacker currently credited with each defender's collapse progress. */
