@@ -1,3 +1,4 @@
+import { publicAssetUrl } from "../assetUrl";
 import type { PlayerId } from "../types";
 
 interface TeamObjectSpriteSet {
@@ -6,7 +7,7 @@ interface TeamObjectSpriteSet {
   readonly breakPoint: string;
 }
 
-const ROOT = "/assets/game-objects/runtime";
+const ROOT = publicAssetUrl("game-objects/runtime");
 
 export const DROPPED_MATERIAL_SPRITE = `${ROOT}/dropped-material.png`;
 
