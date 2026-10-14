@@ -1,3 +1,5 @@
+import { publicAssetUrl } from "../assetUrl";
+
 /**
  * Map art and lighting live together so a new daylight map can opt into the
  * same dusk-and-tether treatment without changing renderer code.
@@ -43,7 +45,7 @@ export interface TerrainVisualTheme {
  */
 export const ACTIVE_TERRAIN_THEME: TerrainVisualTheme = {
   id: "exoplanet-four-biomes",
-  textureUrl: "/assets/tetherbound-exoplanet-terrain-v2.png",
+  textureUrl: publicAssetUrl("tetherbound-exoplanet-terrain-v2.png"),
   backgroundColor: 0x050a10,
   dusk: {
     // Keep unpowered ground distinctly overcast so the daylight reveals read

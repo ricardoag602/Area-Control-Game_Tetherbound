@@ -117,18 +117,21 @@ describe("footstep trigger cadence", () => {
 
 describe("footstep assets", () => {
   it("maps every reference recording to its lowercase public URL", () => {
+    const assetRoot = `${import.meta.env.BASE_URL}assets/audio/footsteps`;
+
     expect(FOOTSTEP_ASSET_URLS).toEqual({
-      forest: "/assets/audio/footsteps/walk_forest.mp3",
-      sand: "/assets/audio/footsteps/walk_sand.mp3",
-      snow: "/assets/audio/footsteps/walk_snow.mp3",
-      water: "/assets/audio/footsteps/walk_water.mp3",
+      forest: `${assetRoot}/walk_forest.mp3`,
+      sand: `${assetRoot}/walk_sand.mp3`,
+      snow: `${assetRoot}/walk_snow.mp3`,
+      water: `${assetRoot}/walk_water.mp3`,
     });
   });
 
   it.each(Object.entries(FOOTSTEP_ASSET_URLS))(
     "uses the requested walk_<biome>.mp3 naming for %s",
     (_sample, assetUrl) => {
-      expect(assetUrl).toMatch(/^\/assets\/audio\/footsteps\/walk_[a-z]+\.mp3$/);
+      expect(assetUrl.startsWith(import.meta.env.BASE_URL)).toBe(true);
+      expect(assetUrl).toMatch(/assets\/audio\/footsteps\/walk_[a-z]+\.mp3$/);
     },
   );
 });

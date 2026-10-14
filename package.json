@@ -5,11 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "node scripts/dev.mjs",
-    "dev:web": "vite --host 0.0.0.0",
+    "dev:web": "vite --config vite.config.ts --host 0.0.0.0",
     "dev:server": "tsx watch server/index.ts",
-    "build": "tsc -b && vite build",
-    "preview": "vite preview",
-    "test": "vitest run"
+    "build": "tsc -b && vite build --config vite.config.ts",
+    "preview": "vite preview --config vite.config.ts",
+    "test": "vitest run --config vite.config.ts"
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",
