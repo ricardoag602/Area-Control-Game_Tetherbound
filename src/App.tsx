@@ -144,7 +144,7 @@ export function App() {
             field.value = invitationLink;
             field.style.position = "fixed";
             field.style.opacity = "0";
-            document.body.append(field);
+            document.body.appendChild(field);
             field.select();
             document.execCommand("copy");
             field.remove();
@@ -198,7 +198,7 @@ export function App() {
                 )}
                 {view === "lobby" && !roomSession.room && (
                     <div className="screen screen--room connection-gate">
-                        <p className="eyebrow">Room server</p>
+                        <p className="eyebrow">Room service</p>
                         <h2>{roomSession.connection === "offline" ? "Connection unavailable" : "Establishing connection…"}</h2>
                         <p>{roomSession.error ?? "Reserving your place in the mission."}</p>
                         <div className="connection-gate__actions">
@@ -320,9 +320,9 @@ function MainMenu({
                 <summary>Connection details</summary>
                 <dl>
                     <div><dt>Open this game</dt><dd><code>{gameAddress}</code></dd></div>
-                    <div><dt>Room server</dt><dd><code>{roomServerAddress}</code></dd></div>
+                    <div><dt>Room service</dt><dd><code>{roomServerAddress}</code></dd></div>
                 </dl>
-                <p>Players open the game address, then enter a room code. The room server address is shown for troubleshooting only.</p>
+                <p>Players open the game address, then enter a room code. The room service address is shown for troubleshooting only.</p>
                 {localAddressOnly && (
                     <p className="connection-warning">This localhost address works only on this computer. For a phone, use the Network address printed by <code>npm run dev</code>.</p>
                 )}

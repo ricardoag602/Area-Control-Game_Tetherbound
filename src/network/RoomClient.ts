@@ -1,6 +1,6 @@
 import type { GameState, MovementCommand, PlayerId, PlayerLimit } from "../game/types";
 import { createClientId } from "./clientId";
-import { resolveRoomServerUrl } from "./connectionInfo";
+import { resolveRoomApiUrl } from "./connectionInfo";
 import type { ClientMessage, RoomSnapshot, ServerMessage } from "./protocol";
 
 export type ConnectionStatus = "idle" | "connecting" | "connected" | "reconnecting" | "offline";
@@ -19,35 +19,56 @@ type Listener = () => void;
 type SessionIntent =
   | { kind: "create"; requestId: string; name: string; playerLimit: PlayerLimit }
   | { kind: "join"; requestId: string; name: string; roomCode: string };
+type SyncCommand = Extract<
+  ClientMessage,
+  { type: "set_ready" | "movement_input" | "deploy_anchor" | "request_rematch" }
+>;
+
+interface RoomApiEnvelope {
+  messages: ServerMessage[];
+  serverTime: number;
+}
 
 const RETRY_DELAYS = [250, 500, 1_000, 2_000, 4_000];
-const SOCKET_OPEN_TIMEOUT_MS = 6_000;
-const HANDSHAKE_TIMEOUT_MS = 5_000;
+const REQUEST_TIMEOUT_MS = 8_000;
+const PLAYING_POLL_INTERVAL_MS = 125;
+const IDLE_POLL_INTERVAL_MS = 500;
+const MAX_SYNC_COMMANDS = 64;
 const MAX_INITIAL_CONNECTION_ATTEMPTS = 3;
 const MAX_RECONNECT_ATTEMPTS = 5;
-const CLIENT_ERROR_CLOSE_CODE = 4003;
-const SOCKET_OPEN_STATE = 1;
 const SERVER_UNREACHABLE_MESSAGE =
-  "The multiplayer server could not be reached. Check your connection and try again.";
+  "The multiplayer room service could not be reached. Check your connection and try again.";
 const SERVER_UNRESPONSIVE_MESSAGE =
-  "The multiplayer server connected but did not respond. Try again.";
+  "The multiplayer room service did not return a valid response. Try again.";
 const ROOM_CONNECTION_LOST_MESSAGE =
   "Connection to the room was lost. Try reconnecting while your slot is still reserved.";
 
 export interface RoomClientOptions {
-  createSocket?: (url: string) => WebSocket;
+  fetch?: typeof fetch;
+  getApiUrl?: () => string;
+  /** Retained for callers that previously supplied the WebSocket server URL. */
   getServerUrl?: () => string;
+  /** @deprecated HTTP transport no longer constructs browser WebSockets. */
+  createSocket?: (url: string) => WebSocket;
+  requestTimeoutMs?: number;
+  /** @deprecated Use requestTimeoutMs. */
   socketOpenTimeoutMs?: number;
+  /** @deprecated Use requestTimeoutMs. */
   handshakeTimeoutMs?: number;
   maxInitialConnectionAttempts?: number;
   maxReconnectAttempts?: number;
   retryDelays?: readonly number[];
   retryJitterMs?: number;
+  playingPollIntervalMs?: number;
+  idlePollIntervalMs?: number;
 }
 
-export function getRoomServerUrl() {
-  return resolveRoomServerUrl(window.location, import.meta.env.VITE_WS_URL);
+export function getRoomApiUrl() {
+  return resolveRoomApiUrl(window.location, import.meta.env.VITE_ROOM_API_URL);
 }
+
+/** Backwards-compatible name used by the connection-details UI. */
+export const getRoomServerUrl = getRoomApiUrl;
 
 export class RoomClient {
   private snapshot: RoomClientSnapshot = {
@@ -61,20 +82,22 @@ export class RoomClient {
   };
 
   private readonly listeners = new Set<Listener>();
-  private socket: WebSocket | null = null;
   private intent: SessionIntent | null = null;
   private sessionToken: string | null = null;
+  private pendingCommands: SyncCommand[] = [];
+  private inFlightCommands: SyncCommand[] = [];
   private retryAttempt = 0;
   private connectionAttempts = 0;
   private retryTimer: number | null = null;
-  private socketOpenTimer: number | null = null;
-  private handshakeTimer: number | null = null;
-  private pingTimer: number | null = null;
+  private pollTimer: number | null = null;
   private movementTimer: number | null = null;
   private pendingMovementCommand: MovementCommand | null = null;
   private lastMovementSentAt = 0;
   private lastMovementType: MovementCommand["type"] | null = null;
-  private shouldReconnect = false;
+  private shouldRun = false;
+  private requestInFlight = false;
+  private activeRequest: AbortController | null = null;
+  private lifecycle = 0;
   private inputSequence = 0;
   private readonly pendingActions = new Set<string>();
   private lastConnectionError = SERVER_UNREACHABLE_MESSAGE;
@@ -89,65 +112,64 @@ export class RoomClient {
   getSnapshot = () => this.snapshot;
 
   createRoom(name: string, playerLimit: PlayerLimit = 2) {
-    this.sessionToken = null;
-    this.begin({ kind: "create", requestId: createClientId(), name: name.trim(), playerLimit });
+    this.begin(
+      { kind: "create", requestId: createClientId(), name: name.trim(), playerLimit },
+      null,
+    );
   }
 
   joinRoom(roomCode: string, name: string) {
     const code = roomCode.trim().toUpperCase();
     const saved = this.readSession(code);
-    this.sessionToken = saved?.token ?? null;
-    this.begin({
-      kind: "join",
-      requestId: createClientId(),
-      roomCode: code,
-      name: (saved?.name ?? name).trim(),
-    });
+    this.begin(
+      {
+        kind: "join",
+        requestId: createClientId(),
+        roomCode: code,
+        name: (saved?.name ?? name).trim(),
+      },
+      saved?.token ?? null,
+    );
   }
 
   resumeRoom(roomCode: string) {
     const code = roomCode.trim().toUpperCase();
     const saved = this.readSession(code);
     if (!saved) return false;
-    this.sessionToken = saved.token;
-    this.begin({
-      kind: "join",
-      requestId: createClientId(),
-      roomCode: code,
-      name: saved.name,
-    });
+    this.begin(
+      {
+        kind: "join",
+        requestId: createClientId(),
+        roomCode: code,
+        name: saved.name,
+      },
+      saved.token,
+    );
     return true;
   }
 
   retry() {
     if (!this.intent) return false;
 
-    this.shouldReconnect = false;
-    this.clearTimers();
-    const socket = this.socket;
-    this.socket = null;
-    try {
-      socket?.close(1000, "Retrying connection");
-    } catch {
-      // A browser may reject close() while a socket is still being created.
-    }
-
+    this.startNewLifecycle();
+    this.restoreInFlightCommands();
+    this.requeuePendingActions();
     this.retryAttempt = 0;
     this.connectionAttempts = 0;
     this.lastConnectionError = this.snapshot.room
       ? ROOM_CONNECTION_LOST_MESSAGE
       : SERVER_UNREACHABLE_MESSAGE;
-    this.shouldReconnect = true;
+    this.shouldRun = true;
     this.update({
       connection: this.snapshot.room ? "reconnecting" : "connecting",
       error: null,
     });
-    this.connect();
+    this.startRequestForCurrentSession();
     return true;
   }
 
   setReady(ready: boolean) {
-    this.send({ type: "set_ready", ready });
+    this.enqueue({ type: "set_ready", ready });
   }
 
   sendMovementCommand(command: MovementCommand) {
@@ -176,32 +198,27 @@ export class RoomClient {
     }
   }
 
-  private sendMovementCommandNow(command: MovementCommand) {
-    this.inputSequence += 1;
-    this.lastMovementSentAt = performance.now();
-    this.lastMovementType = command.type;
-    this.send({ type: "movement_input", seq: this.inputSequence, command });
-  }
-
   deployAnchor() {
     const actionId = createClientId();
     this.pendingActions.add(actionId);
-    this.send({ type: "deploy_anchor", actionId });
+    this.enqueue({ type: "deploy_anchor", actionId });
   }
 
   requestRematch() {
-    this.send({ type: "request_rematch" });
+    this.enqueue({ type: "request_rematch" });
   }
 
   leave() {
     const roomCode = this.snapshot.room?.code;
-    this.shouldReconnect = false;
-    this.clearTimers();
-    this.send({ type: "leave_room" });
-    this.socket?.close(1000, "Player left room");
-    this.socket = null;
+    const sessionToken = this.sessionToken;
+    const apiUrl = this.apiUrl();
+
+    this.shouldRun = false;
+    this.startNewLifecycle();
     this.intent = null;
     this.sessionToken = null;
+    this.pendingCommands = [];
+    this.inFlightCommands = [];
     this.retryAttempt = 0;
     this.connectionAttempts = 0;
     this.inputSequence = 0;
@@ -217,19 +234,37 @@ export class RoomClient {
       error: null,
       stateVersion: 0,
     });
+
+    if (roomCode && sessionToken) {
+      const fetcher = this.fetcher();
+      void fetcher(`${apiUrl}/${encodeURIComponent(roomCode)}/leave`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${sessionToken}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ type: "leave_room" }),
+        keepalive: true,
+      }).catch(() => {
+        // Leaving is immediate locally; the hosted room expires the slot if this best-effort request fails.
+      });
+    }
   }
 
-  private begin(intent: SessionIntent) {
-    this.shouldReconnect = false;
-    this.clearTimers();
-    this.socket?.close(1000, "Starting a new session");
+  private begin(intent: SessionIntent, sessionToken: string | null) {
+    this.shouldRun = false;
+    this.startNewLifecycle();
     this.intent = intent;
+    this.sessionToken = sessionToken;
+    this.pendingCommands = [];
+    this.inFlightCommands = [];
     this.retryAttempt = 0;
     this.connectionAttempts = 0;
     this.inputSequence = 0;
     this.lastMovementType = null;
     this.pendingActions.clear();
-    this.shouldReconnect = true;
+    this.shouldRun = true;
+    this.lastConnectionError = SERVER_UNREACHABLE_MESSAGE;
     this.update({
       connection: "connecting",
       room: null,
@@ -239,79 +274,147 @@ export class RoomClient {
       error: null,
       stateVersion: 0,
     });
-    this.lastConnectionError = SERVER_UNREACHABLE_MESSAGE;
-    this.connect();
+    this.performInitialRequest(this.lifecycle);
   }
 
-  private connect() {
-    if (!this.intent || !this.shouldReconnect) return;
+  private startRequestForCurrentSession() {
+    if (this.snapshot.room && this.sessionToken) {
+      this.performSync(this.lifecycle);
+    } else {
+      this.performInitialRequest(this.lifecycle);
+    }
+  }
+
+  private async performInitialRequest(lifecycle: number) {
+    if (!this.shouldRun || !this.intent || this.requestInFlight || lifecycle !== this.lifecycle) {
+      return;
+    }
+
+    this.requestInFlight = true;
     this.connectionAttempts += 1;
-    let socket: WebSocket;
+    const startedAt = performance.now();
+    let connected = false;
     try {
-      socket = this.createSocket(this.webSocketUrl());
-    } catch {
-      this.lastConnectionError = SERVER_UNREACHABLE_MESSAGE;
-      this.handleConnectionAttemptFailure();
-      return;
-    }
-    this.socket = socket;
-    this.startSocketOpenTimer(socket);
+      const intent = this.intent;
+      const endpoint = intent.kind === "create"
+        ? `${this.apiUrl()}/create`
+        : `${this.apiUrl()}/${encodeURIComponent(intent.roomCode)}/join`;
+      const body: ClientMessage = intent.kind === "create"
+        ? {
+            type: "create_room",
+            requestId: intent.requestId,
+            name: intent.name,
+            playerLimit: intent.playerLimit,
+          }
+        : {
+            type: "join_room",
+            requestId: intent.requestId,
+            code: intent.roomCode,
+            name: intent.name,
+            sessionToken: this.sessionToken ?? undefined,
+          };
+      const result = await this.post(endpoint, body, null, lifecycle);
+      if (lifecycle !== this.lifecycle || !this.shouldRun) return;
 
-    socket.addEventListener("open", () => {
-      if (socket !== this.socket || !this.intent) return;
-      this.clearSocketOpenTimer();
-      const activeCode = this.snapshot.room?.code;
-      if (activeCode && this.sessionToken) {
-        this.send({
-          type: "join_room",
-          requestId: this.intent.requestId,
-          code: activeCode,
-          name: this.currentName(),
-          sessionToken: this.sessionToken,
-        });
-      } else if (this.intent.kind === "create") {
-        this.send({
-          type: "create_room",
-          requestId: this.intent.requestId,
-          name: this.intent.name,
-          playerLimit: this.intent.playerLimit,
-        });
-      } else {
-        this.send({
-          type: "join_room",
-          requestId: this.intent.requestId,
-          code: this.intent.roomCode,
-          name: this.intent.name,
-          sessionToken: this.sessionToken ?? undefined,
-        });
+      const outcome = this.processMessages(result.envelope.messages);
+      if (!this.shouldRun || this.snapshot.connection === "offline") return;
+      if (!result.ok) {
+        throw new Error("Room request was rejected");
       }
-      this.startHandshakeTimer(socket);
-    });
+      if (!outcome.welcomed || !this.snapshot.room || !this.sessionToken) {
+        this.lastConnectionError = SERVER_UNRESPONSIVE_MESSAGE;
+        throw new Error("Room request did not include a welcome message");
+      }
 
-    socket.addEventListener("message", (event) => this.handleMessage(socket, String(event.data)));
-    socket.addEventListener("close", () => this.handleClose(socket));
-    socket.addEventListener("error", () => {
-      // A close event follows and owns retry behavior.
-    });
-  }
-
-  private handleMessage(socket: WebSocket, raw: string) {
-    // A replaced socket can still have a message queued when its close event runs.
-    // Never let that stale room mutate the active session.
-    if (socket !== this.socket) return;
-
-    let message: ServerMessage;
-    try {
-      message = JSON.parse(raw) as ServerMessage;
-    } catch {
-      return;
-    }
-
-    if (message.type === "welcome") {
-      this.clearSocketOpenTimer();
-      this.clearHandshakeTimer();
+      if (this.snapshot.latencyMs === null) {
+        this.updateLatency(performance.now() - startedAt);
+      }
       this.retryAttempt = 0;
       this.connectionAttempts = 0;
+      this.update({ connection: "connected", error: outcome.hadError ? this.snapshot.error : null });
+      connected = true;
+    } catch {
+      if (lifecycle === this.lifecycle && this.shouldRun) this.handleRequestFailure();
+    } finally {
+      if (lifecycle === this.lifecycle) this.requestInFlight = false;
+      if (connected && lifecycle === this.lifecycle && this.shouldRun) {
+        this.scheduleSync(this.pollInterval());
+      }
+    }
+  }
+
+  private async performSync(lifecycle: number) {
+    const room = this.snapshot.room;
+    const sessionToken = this.sessionToken;
+    if (
+      !this.shouldRun ||
+      !room ||
+      !sessionToken ||
+      this.requestInFlight ||
+      lifecycle !== this.lifecycle
+    ) {
+      return;
+    }
+
+    this.requestInFlight = true;
+    this.connectionAttempts += 1;
+    this.inFlightCommands = this.pendingCommands.splice(0, MAX_SYNC_COMMANDS);
+    const sentAt = performance.now();
+    let synchronized = false;
+    try {
+      const result = await this.post(
+        `${this.apiUrl()}/${encodeURIComponent(room.code)}/sync`,
+        {
+          knownRoomRevision: room.revision,
+          knownStateVersion: this.snapshot.stateVersion,
+          commands: this.inFlightCommands,
+          sentAt,
+        },
+        sessionToken,
+        lifecycle,
+      );
+      if (lifecycle !== this.lifecycle || !this.shouldRun) return;
+
+      const outcome = this.processMessages(result.envelope.messages);
+      if (!this.shouldRun || this.snapshot.connection === "offline") {
+        this.inFlightCommands = [];
+        return;
+      }
+      if (!result.ok) {
+        throw new Error("Room synchronization was rejected");
+      }
+
+      this.inFlightCommands = [];
+      this.retryAttempt = 0;
+      this.connectionAttempts = 0;
+      this.update({ connection: "connected", error: outcome.hadError ? this.snapshot.error : null });
+      synchronized = true;
+    } catch {
+      if (lifecycle === this.lifecycle && this.shouldRun) {
+        this.restoreInFlightCommands();
+        this.handleRequestFailure();
+      }
+    } finally {
+      if (lifecycle === this.lifecycle) this.requestInFlight = false;
+      if (synchronized && lifecycle === this.lifecycle && this.shouldRun) {
+        this.scheduleSync(this.pollInterval());
+      }
+    }
+  }
+
+  private processMessages(messages: readonly ServerMessage[]) {
+    let welcomed = false;
+    let hadError = false;
+    for (const message of messages) {
+      if (message.type === "welcome") welcomed = true;
+      if (message.type === "error") hadError = true;
+      this.handleMessage(message);
+    }
+    return { welcomed, hadError };
+  }
+
+  private handleMessage(message: ServerMessage) {
+    if (message.type === "welcome") {
       this.sessionToken = message.sessionToken;
       this.storeSession(message.room.code, message.sessionToken, this.currentName());
       this.update({
@@ -320,8 +423,6 @@ export class RoomClient {
         playerId: message.playerId,
         error: null,
       });
-      this.startPings();
-      this.flushPendingActions();
       return;
     }
     if (message.type === "room_state") {
@@ -348,156 +449,162 @@ export class RoomClient {
       return;
     }
     if (message.type === "pong") {
-      const roundTrip = Math.max(0, performance.now() - message.sentAt);
-      const latency = this.snapshot.latencyMs;
-      this.update({ latencyMs: Math.round(latency === null ? roundTrip : latency * 0.7 + roundTrip * 0.3) });
+      this.updateLatency(performance.now() - message.sentAt);
       return;
     }
     if (message.type === "error") {
       this.update({ error: message.message });
-      if (!message.recoverable || !this.snapshot.room) {
-        this.shouldReconnect = false;
-        this.clearTimers();
-        this.socket?.close(CLIENT_ERROR_CLOSE_CODE, message.code);
+      if (!message.recoverable) {
+        const roomCode = this.snapshot.room?.code ??
+          (this.intent?.kind === "join" ? this.intent.roomCode : null);
+        if (roomCode) this.removeSession(roomCode);
+        this.sessionToken = null;
+        this.shouldRun = false;
+        this.clearNetworkTimers();
         this.update({ connection: "offline" });
       }
     }
   }
 
-  private handleClose(socket: WebSocket) {
-    if (socket !== this.socket) return;
-    this.socket = null;
-    this.stopPings();
-    this.clearSocketOpenTimer();
-    this.clearHandshakeTimer();
-    this.clearMovementTimer();
-    this.lastMovementType = null;
-    if (!this.shouldReconnect || !this.intent) {
-      this.update({ connection: "offline" });
-      return;
-    }
-
-    this.lastConnectionError = this.snapshot.room
-      ? ROOM_CONNECTION_LOST_MESSAGE
-      : SERVER_UNREACHABLE_MESSAGE;
-    this.handleConnectionAttemptFailure();
+  private enqueue(command: SyncCommand) {
+    if (!this.intent || !this.snapshot.room) return;
+    this.pendingCommands.push(command);
   }
 
-  private handleConnectionAttemptFailure() {
-    if (!this.shouldReconnect || !this.intent) return;
+  private sendMovementCommandNow(command: MovementCommand) {
+    this.inputSequence += 1;
+    this.lastMovementSentAt = performance.now();
+    this.lastMovementType = command.type;
+    this.enqueue({ type: "movement_input", seq: this.inputSequence, command });
+  }
+
+  private scheduleSync(delay: number) {
+    if (!this.shouldRun || !this.snapshot.room || !this.sessionToken || this.pollTimer !== null) {
+      return;
+    }
+    this.pollTimer = window.setTimeout(() => {
+      this.pollTimer = null;
+      this.performSync(this.lifecycle);
+    }, delay);
+  }
+
+  private handleRequestFailure() {
+    if (!this.shouldRun || !this.intent) return;
+    this.lastConnectionError = this.snapshot.error ?? (this.snapshot.room
+      ? ROOM_CONNECTION_LOST_MESSAGE
+      : this.lastConnectionError);
     if (this.connectionAttempts >= this.connectionAttemptLimit()) {
       this.failConnection();
       return;
     }
-    this.scheduleReconnect();
-  }
 
-  private failConnection() {
-    this.shouldReconnect = false;
-    this.clearTimers();
-    const socket = this.socket;
-    this.socket = null;
-    try {
-      socket?.close(4000, "Connection attempts exhausted");
-    } catch {
-      // The connection is already unusable; the offline state is authoritative.
-    }
-    this.update({ connection: "offline", error: this.lastConnectionError });
-  }
-
-  private scheduleReconnect() {
-    if (!this.shouldReconnect || !this.intent || this.retryTimer !== null) return;
-    this.update({ connection: this.snapshot.room ? "reconnecting" : "connecting" });
+    this.update({
+      connection: this.snapshot.room ? "reconnecting" : "connecting",
+    });
     const retryDelays = this.options.retryDelays ?? RETRY_DELAYS;
     const baseDelay = retryDelays[Math.min(this.retryAttempt, retryDelays.length - 1)] ?? 0;
     const jitter = Math.round(Math.random() * (this.options.retryJitterMs ?? 120));
     this.retryAttempt += 1;
     this.retryTimer = window.setTimeout(() => {
       this.retryTimer = null;
-      this.connect();
+      this.startRequestForCurrentSession();
     }, baseDelay + jitter);
   }
 
-  private send(message: ClientMessage) {
-    if (this.socket?.readyState === SOCKET_OPEN_STATE) {
-      this.socket.send(JSON.stringify(message));
+  private failConnection() {
+    this.shouldRun = false;
+    this.clearNetworkTimers();
+    this.activeRequest?.abort();
+    this.activeRequest = null;
+    this.update({ connection: "offline", error: this.lastConnectionError });
+  }
+
+  private async post(
+    endpoint: string,
+    body: unknown,
+    sessionToken: string | null,
+    lifecycle: number,
+  ) {
+    const controller = new AbortController();
+    this.activeRequest = controller;
+    let timeoutTimer: number | null = null;
+    const timeout = new Promise<never>((_, reject) => {
+      timeoutTimer = window.setTimeout(() => {
+        controller.abort();
+        reject(new Error("Room request timed out"));
+      }, this.options.requestTimeoutMs ??
+        this.options.handshakeTimeoutMs ??
+        this.options.socketOpenTimeoutMs ??
+        REQUEST_TIMEOUT_MS);
+    });
+    const request = (async () => {
+      const response = await this.fetcher()(endpoint, {
+        method: "POST",
+        headers: {
+          ...(sessionToken ? { authorization: `Bearer ${sessionToken}` } : {}),
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+      const value: unknown = await response.json();
+      if (!isRoomApiEnvelope(value)) throw new Error("Invalid room service response");
+      return { ok: response.ok, envelope: value };
+    })();
+
+    try {
+      return await Promise.race([request, timeout]);
+    } finally {
+      if (timeoutTimer !== null) window.clearTimeout(timeoutTimer);
+      if (lifecycle === this.lifecycle && this.activeRequest === controller) {
+        this.activeRequest = null;
+      }
     }
   }
 
-  private startPings() {
-    this.stopPings();
-    this.pingTimer = window.setInterval(() => {
-      this.send({ type: "ping", sentAt: performance.now() });
-    }, 2_000);
+  private restoreInFlightCommands() {
+    if (this.inFlightCommands.length === 0) return;
+    this.pendingCommands = [...this.inFlightCommands, ...this.pendingCommands];
+    this.inFlightCommands = [];
   }
 
-  private startHandshakeTimer(socket: WebSocket) {
-    this.clearHandshakeTimer();
-    this.handshakeTimer = window.setTimeout(() => {
-      if (socket === this.socket && this.snapshot.connection !== "connected") {
-        this.lastConnectionError = SERVER_UNRESPONSIVE_MESSAGE;
-        this.socket = null;
-        try {
-          socket.close(4000, "Room handshake timed out");
-        } catch {
-          // The retry path below no longer depends on a close event.
-        }
-        this.clearHandshakeTimer();
-        this.handleConnectionAttemptFailure();
-      }
-    }, this.options.handshakeTimeoutMs ?? HANDSHAKE_TIMEOUT_MS);
-  }
-
-  private startSocketOpenTimer(socket: WebSocket) {
-    this.clearSocketOpenTimer();
-    this.socketOpenTimer = window.setTimeout(() => {
-      if (socket !== this.socket || socket.readyState === SOCKET_OPEN_STATE) return;
-      this.lastConnectionError = SERVER_UNREACHABLE_MESSAGE;
-      this.socket = null;
-      try {
-        socket.close(4000, "Room server connection timed out");
-      } catch {
-        // The retry path below no longer depends on a close event.
-      }
-      this.clearSocketOpenTimer();
-      this.handleConnectionAttemptFailure();
-    }, this.options.socketOpenTimeoutMs ?? SOCKET_OPEN_TIMEOUT_MS);
-  }
-
-  private clearSocketOpenTimer() {
-    if (this.socketOpenTimer !== null) window.clearTimeout(this.socketOpenTimer);
-    this.socketOpenTimer = null;
-  }
-
-  private clearHandshakeTimer() {
-    if (this.handshakeTimer !== null) window.clearTimeout(this.handshakeTimer);
-    this.handshakeTimer = null;
-  }
-
-  private flushPendingActions() {
+  private requeuePendingActions() {
     for (const actionId of this.pendingActions) {
-      this.send({ type: "deploy_anchor", actionId });
+      const alreadyQueued = [...this.inFlightCommands, ...this.pendingCommands].some(
+        (command) => command.type === "deploy_anchor" && command.actionId === actionId,
+      );
+      if (!alreadyQueued) this.pendingCommands.push({ type: "deploy_anchor", actionId });
     }
   }
 
-  private stopPings() {
-    if (this.pingTimer !== null) window.clearInterval(this.pingTimer);
-    this.pingTimer = null;
+  private startNewLifecycle() {
+    this.lifecycle += 1;
+    this.activeRequest?.abort();
+    this.activeRequest = null;
+    this.requestInFlight = false;
+    this.clearNetworkTimers();
+    this.clearMovementTimer();
   }
 
-  private clearTimers() {
-    this.stopPings();
-    this.clearSocketOpenTimer();
-    this.clearHandshakeTimer();
-    this.clearMovementTimer();
+  private clearNetworkTimers() {
     if (this.retryTimer !== null) window.clearTimeout(this.retryTimer);
+    if (this.pollTimer !== null) window.clearTimeout(this.pollTimer);
     this.retryTimer = null;
+    this.pollTimer = null;
   }
 
   private clearMovementTimer() {
     if (this.movementTimer !== null) window.clearTimeout(this.movementTimer);
     this.movementTimer = null;
     this.pendingMovementCommand = null;
+  }
+
+  private updateLatency(roundTrip: number) {
+    const measured = Math.max(0, roundTrip);
+    const latency = this.snapshot.latencyMs;
+    this.update({
+      latencyMs: Math.round(latency === null ? measured : latency * 0.7 + measured * 0.3),
+    });
   }
 
   private currentName() {
@@ -509,12 +616,20 @@ export class RoomClient {
     for (const listener of this.listeners) listener();
   }
 
-  private webSocketUrl() {
-    return this.options.getServerUrl?.() ?? getRoomServerUrl();
+  private apiUrl() {
+    return normalizeApiUrl(
+      this.options.getApiUrl?.() ?? this.options.getServerUrl?.() ?? getRoomApiUrl(),
+    );
   }
 
-  private createSocket(url: string) {
-    return this.options.createSocket?.(url) ?? new WebSocket(url);
+  private fetcher() {
+    return this.options.fetch ?? globalThis.fetch.bind(globalThis);
+  }
+
+  private pollInterval() {
+    return this.snapshot.room?.phase === "playing"
+      ? this.options.playingPollIntervalMs ?? PLAYING_POLL_INTERVAL_MS
+      : this.options.idlePollIntervalMs ?? IDLE_POLL_INTERVAL_MS;
   }
 
   private connectionAttemptLimit() {
@@ -531,7 +646,7 @@ export class RoomClient {
     try {
       sessionStorage.setItem(this.sessionKey(code), JSON.stringify({ token, name }));
     } catch {
-      // Private browsing may deny storage; the live socket still works.
+      // The live HTTP session still works when tab-scoped browser storage is unavailable.
     }
   }
 
@@ -544,7 +659,7 @@ export class RoomClient {
         return { token: value.token, name: value.name };
       }
     } catch {
-      // Ignore unavailable or malformed storage.
+      // Ignore unavailable or malformed browser storage.
     }
     return null;
   }
@@ -553,7 +668,19 @@ export class RoomClient {
     try {
       sessionStorage.removeItem(this.sessionKey(code));
     } catch {
-      // The room still closes even when browser storage is unavailable.
+      // The room still closes when browser storage is unavailable.
     }
   }
+}
+
+function isRoomApiEnvelope(value: unknown): value is RoomApiEnvelope {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const candidate = value as Partial<RoomApiEnvelope>;
+  return Array.isArray(candidate.messages) &&
+    typeof candidate.serverTime === "number" &&
+    Number.isFinite(candidate.serverTime);
+}
+
+function normalizeApiUrl(value: string) {
+  return value.replace(/\/+$/, "");
 }

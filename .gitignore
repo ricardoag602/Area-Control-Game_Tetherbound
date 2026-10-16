@@ -4,6 +4,12 @@ node_modules/
 # Production builds
 dist/
 dist-ssr/
+/public/game/
+/.next/
+/.vinext/
+/out/
+/.wrangler/
+/.sites-runtime/
 
 # Test output
 coverage/

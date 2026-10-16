@@ -5,6 +5,7 @@ import {
   isLoopbackHostname,
   isValidRoomCode,
   normalizeRoomCode,
+  resolveRoomApiUrl,
   resolveRoomServerUrl,
 } from "./connectionInfo";
 
@@ -31,33 +32,26 @@ describe("multiplayer connection information", () => {
     );
   });
 
-  it("resolves the same default or configured WebSocket address shown by the UI", () => {
-    expect(resolveRoomServerUrl({ protocol: "http:", hostname: "localhost", host: "localhost:5173", pathname: "/" })).toBe(
-      "ws://localhost:8788/ws",
-    );
-    expect(resolveRoomServerUrl({ protocol: "http:", hostname: "::1", host: "[::1]:5173", pathname: "/" })).toBe(
-      "ws://[::1]:8788/ws",
-    );
-    expect(resolveRoomServerUrl({
+  it("uses the same-origin Sites room API by default", () => {
+    expect(resolveRoomApiUrl({
       protocol: "https:",
       hostname: "game.example",
       host: "game.example",
       pathname: "/tetherbound/",
-    })).toBe(
-      "wss://game.example/tetherbound/ws",
-    );
+    })).toBe("/api/rooms");
     expect(resolveRoomServerUrl({
-      protocol: "https:",
-      hostname: "game.example",
-      host: "game.example",
-      pathname: "/tetherbound/index.html",
-    })).toBe(
-      "wss://game.example/tetherbound/ws",
-    );
-    expect(resolveRoomServerUrl(
+      protocol: "http:",
+      hostname: "localhost",
+      host: "localhost:5173",
+      pathname: "/",
+    })).toBe("/api/rooms");
+  });
+
+  it("honors and normalizes a configured room API URL", () => {
+    expect(resolveRoomApiUrl(
       { protocol: "https:", hostname: "game.example", host: "game.example", pathname: "/game/" },
-      "wss://rooms.example/socket",
-    )).toBe("wss://rooms.example/socket");
+      "https://rooms.example/api/rooms/",
+    )).toBe("https://rooms.example/api/rooms");
   });
 
   it("identifies addresses that cannot be opened from another device", () => {

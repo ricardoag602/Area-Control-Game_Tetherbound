@@ -12,15 +12,12 @@ Where opposing life-support zones overlap, the ground becomes contested and stop
 
 ```sh
 npm install
+npm run build
+node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file drizzle/0000_flowery_shinobi_shaw.sql
 npm run dev
 ```
 
-The single development command starts:
-
-- The Vite web client on port `5173`
-- The authoritative WebSocket room server on port `8788`
-
-The terminal prints both a local URL and a network URL.
+The one-time D1 command creates the local room database. The development command then starts the full Sites-compatible app: the game at `/game/` and the same-origin multiplayer API at `/api/rooms`.
 
 ## Controls
 
@@ -67,14 +64,15 @@ The terminal prints both a local URL and a network URL.
 
 ### Computer and phone
 
-Open the printed **Network** URL on the computer before creating the room. The resulting invitation link will then contain the computer's LAN address instead of `127.0.0.1`, allowing a phone on the same network to connect.
+For a production test, open the published Sites address on both devices. For local device testing, use a forwarded or LAN-accessible preview address so both the game and its same-origin room API are reachable.
 
 ## Reliability model
 
 - The server owns movement, oxygen, salvage, tether conflict, regulation and overtime clocks, cumulative scoring, base collapse, and match outcomes.
 - Biome effects and match events use the authoritative elapsed match clock; no gameplay system relies on client timers or `Math.random`.
 - Every match event stream is seeded and serializable, allowing identical replay and reconnect behavior.
-- The server simulates rooms and sends full state snapshots at 20 Hz.
+- Sites stores every room as a versioned D1 document and advances the authoritative simulation whenever a client synchronizes.
+- Clients synchronize at 8 Hz while playing and 2 Hz in lobbies/results; compare-and-swap updates prevent concurrent requests from advancing a room independently.
 - Bot and multiplayer matches share a fixed 20 Hz rules step with bounded catch-up, so charge timing stays consistent across frame-rate dips.
 - Movement inputs carry increasing sequence numbers.
 - Movement edges are queued in order, so a quick charge and release cannot disappear between server ticks.
@@ -84,7 +82,7 @@ Open the printed **Network** URL on the computer before creating the room. The r
 - Refreshes resume through an opaque session token stored only in the joining browser session.
 - Initial room requests are idempotent, so retrying a lost handshake cannot create duplicate rooms or players.
 - Disconnected slots are reserved for 30 seconds, and the match pauses during that recovery window.
-- Transport heartbeats remove dead sockets.
+- Short presence leases detect inactive clients without relying on a long-running server process.
 - Application ping/pong messages report smoothed round-trip latency in the lobby and match HUD.
 - Reconnect attempts use capped exponential backoff with jitter.
 - Runtime validation, message-rate limits, bounded action history, and snapshot backpressure protect the server from malformed or slow clients.
@@ -93,8 +91,10 @@ Open the printed **Network** URL on the computer before creating the room. The r
 ## Main modules
 
 - `src/game/README.md` — game-folder boundaries and dependency rules
-- `server/RoomServer.ts` — room lifecycle, authoritative simulation, heartbeat, and reconnect handling
-- `src/network/RoomClient.ts` — socket lifecycle, session resume, backoff, and latency tracking
+- `sites-server/roomService.ts` — Sites/D1 room lifecycle, authoritative simulation, leases, idempotency, and compare-and-swap updates
+- `app/api/rooms/` — same-origin Sites API routes for create, join, synchronize, and leave
+- `src/network/RoomClient.ts` — HTTP synchronization, command batching, session resume, backoff, and latency tracking
+- `server/RoomServer.ts` — retained legacy Node/WebSocket room server and compatibility tests
 - `src/network/protocol.ts` — shared network message contracts
 - `src/game/movement/movement.ts` — walking, charge, burst, and movement feel rules
 - `src/game/simulation/` — fixed-step match, tether, environment, event, cumulative scoring, overtime, and base-collapse systems
@@ -113,15 +113,13 @@ npm run build
 npm audit
 ```
 
-The test suite includes deterministic rules coverage for setup, cumulative scoring, Signal Surge, overtime, multiplayer base collapse, fair two-/three-/four-player placement, and result resolution, plus real multi-client WebSocket coverage for room creation, joining, ready/start, synchronized movement, malformed traffic, idempotent requests and deployment, action acknowledgement, latency echo, disconnect pausing, session resume, and rematches.
+The test suite includes deterministic rules coverage for setup, cumulative scoring, Signal Surge, overtime, multiplayer base collapse, fair two-/three-/four-player placement, and result resolution. It also covers the Sites HTTP client, D1-backed room journeys, request/action idempotency, ready/start, synchronization, disconnect handling, session resume, and the retained local WebSocket server.
 
-## Configuration
+## Sites configuration
 
-- `TETHERBOUND_WS_PORT` changes the room-server port.
-- `PORT` is the production room-server port supplied by most managed hosts; it takes precedence over `TETHERBOUND_WS_PORT`.
-- `TETHERBOUND_WS_PATH` changes the WebSocket route from `/ws`.
-- `TETHERBOUND_HEALTH_PATH` changes the health-check route from `/healthz`.
-- `TETHERBOUND_ALLOWED_ORIGINS` is a comma-separated browser-origin allowlist.
-- `VITE_WS_URL` overrides the WebSocket address compiled into the client, which is required when the public web client and room server use different hosts.
+- `.openai/hosting.json` selects the existing Sites project and declares the `DB` D1 binding.
+- `VITE_ROOM_API_URL` optionally overrides the default same-origin `/api/rooms` path.
+- The generated files under `drizzle/` are deployed with the Worker so Sites can apply the room schema.
+- The older `TETHERBOUND_WS_*` variables are only used by the retained standalone Node server.
 
-See [`docs/PUBLIC_MULTIPLAYER.md`](docs/PUBLIC_MULTIPLAYER.md) for the production deployment and verification checklist.
+See [`docs/PUBLIC_MULTIPLAYER.md`](docs/PUBLIC_MULTIPLAYER.md) for the Sites deployment and verification checklist.
