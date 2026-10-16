@@ -23,9 +23,13 @@ export const GAME_AUDIO_RULES = {
   biomeTransitionSeconds: 0.42,
   maximumFootstepsPerUpdate: 2,
   maximumContinuousSnapshotGapMs: 320,
-  audibleWorldDistance: 145,
+  audibleWorldDistance: 92,
+  fullVolumeWorldDistance: 10,
   masterGain: 0.72,
   jumpBoostWhiteNoiseGainScale: 0.84,
+  remoteBitDepth: 6,
+  remoteLowpassFrequency: 2_700,
+  remoteEffectsGain: 0.68,
 } as const;
 
 export const AUDIO_BIOMES = [
@@ -77,18 +81,57 @@ interface NetworkHum {
   readonly gain: GainNode;
 }
 
+interface RemoteEffectsBus {
+  readonly input: GainNode;
+  readonly bitcrusher: WaveShaperNode;
+  readonly lowpass: BiquadFilterNode;
+  readonly gain: GainNode;
+}
+
+interface RemoteMotionVoice {
+  readonly source: AudioBufferSourceNode;
+  readonly filter: BiquadFilterNode;
+  readonly gain: GainNode;
+  readonly panner: StereoPannerNode;
+}
+
+export interface PlayerAudioSnapshot {
+  readonly mode: MovementMode;
+  readonly gaitDistance: number;
+  readonly chargeSeconds: number;
+  readonly respawns: number;
+  readonly position: Vec2;
+}
+
+export interface RemoteMovementCues {
+  readonly reset: boolean;
+  readonly footstepIndices: readonly number[];
+  readonly chargeStarted: boolean;
+  readonly boostLaunched: boolean;
+  readonly boostLanded: boolean;
+  readonly boostChargeSeconds: number;
+}
+
+export interface ProximityAudioMix {
+  readonly gain: number;
+  readonly pan: number;
+}
+
 export interface GameAudioRuntime {
   readonly context: AudioContext;
   readonly masterGain: GainNode;
   readonly footstepBus: GainNode;
   readonly movementBus: GainNode;
   readonly effectsBus: GainNode;
+  readonly remoteEffectsBus: RemoteEffectsBus;
   readonly ambienceBus: GainNode;
   readonly music: GameMusicRuntime;
   readonly noiseBuffer: AudioBuffer;
   readonly footstepBuffers: Partial<Record<FootstepSampleId, AudioBuffer>>;
   readonly motionBed: MotionBed;
   readonly networkHum: NetworkHum;
+  readonly remoteMotionVoices: Map<PlayerId, RemoteMotionVoice>;
+  readonly remotePlayerSnapshots: Map<PlayerId, PlayerAudioSnapshot>;
   readonly activeSources: Set<AudioScheduledSourceNode>;
   readonly localPlayerId: PlayerId;
   interactionSnapshot: ThreeInteractionSnapshot;
@@ -132,6 +175,12 @@ interface ToneBurstOptions {
   readonly type?: OscillatorType;
   readonly pan?: number;
   readonly bus?: AudioNode;
+}
+
+interface SoundRouting {
+  readonly bus: AudioNode;
+  readonly gainScale: number;
+  readonly pan: number;
 }
 
 const BIOME_SAMPLE_POINTS = [
@@ -266,6 +315,111 @@ export function getFootstepTriggerIndices(
   return Array.from({ length: count }, (_, index) => retainedFirst + index);
 }
 
+export function calculateProximityAudioMix(
+  source: Vec2,
+  listener: Vec2,
+): ProximityAudioMix {
+  const separation = distance(source, listener);
+  if (
+    !Number.isFinite(separation)
+    || separation >= GAME_AUDIO_RULES.audibleWorldDistance
+  ) {
+    return { gain: 0, pan: 0 };
+  }
+
+  const fadeProgress = clamp(
+    (separation - GAME_AUDIO_RULES.fullVolumeWorldDistance) /
+      (GAME_AUDIO_RULES.audibleWorldDistance -
+        GAME_AUDIO_RULES.fullVolumeWorldDistance),
+    0,
+    1,
+  );
+  const smoothFade = 1 - smoothstep(fadeProgress);
+  return {
+    gain: smoothFade * smoothFade,
+    pan: clamp(
+      (source.x - listener.x) /
+        (GAME_AUDIO_RULES.audibleWorldDistance * 0.52),
+      -0.86,
+      0.86,
+    ),
+  };
+}
+
+export function createBitcrusherCurve(
+  bitDepth = GAME_AUDIO_RULES.remoteBitDepth,
+  sampleCount = 4_096,
+) {
+  const safeBitDepth = Math.round(clamp(bitDepth, 2, 12));
+  const safeSampleCount = Math.max(32, Math.round(sampleCount));
+  const maximumLevel = 2 ** safeBitDepth - 1;
+  const curve = new Float32Array(safeSampleCount);
+  for (let index = 0; index < safeSampleCount; index += 1) {
+    const input = index / (safeSampleCount - 1);
+    const quantized = Math.round(input * maximumLevel) / maximumLevel;
+    curve[index] = quantized * 2 - 1;
+  }
+  return curve;
+}
+
+export function collectRemoteMovementCues(
+  previous: PlayerAudioSnapshot | null,
+  current: PlayerAudioSnapshot,
+  elapsedDeltaMs: number,
+): RemoteMovementCues {
+  const reset = !previous
+    || !Number.isFinite(elapsedDeltaMs)
+    || elapsedDeltaMs < 0
+    || elapsedDeltaMs > GAME_AUDIO_RULES.maximumContinuousSnapshotGapMs
+    || current.respawns > previous.respawns
+    || current.gaitDistance < previous.gaitDistance;
+  if (reset || !previous || elapsedDeltaMs === 0) {
+    return {
+      reset,
+      footstepIndices: [],
+      chargeStarted: false,
+      boostLaunched: false,
+      boostLanded: false,
+      boostChargeSeconds: current.chargeSeconds,
+    };
+  }
+
+  const gaitDelta = current.gaitDistance - previous.gaitDistance;
+  const speed = gaitDelta / (elapsedDeltaMs / 1_000);
+  const groundedMovement = isGroundedMode(previous.mode)
+    || isGroundedMode(current.mode);
+  const contactMode: MovementMode = groundedMovement
+    ? (current.mode === "charging" ? "charging" : "walking")
+    : current.mode;
+  const footstepIndices = getFootstepTriggerIndices(
+    previous.gaitDistance,
+    current.gaitDistance,
+    contactMode,
+    speed,
+  );
+  const enteredBurst = previous.mode !== "burst" && current.mode === "burst";
+  const leftBurst = previous.mode === "burst" && current.mode !== "burst";
+  const seconds = elapsedDeltaMs / 1_000;
+  const maximumWalkingDisplacement =
+    MOVEMENT_RULES.walkMaximumSpeed * seconds * 1.25 + 0.75;
+  const skippedBurst = previous.mode === "charging"
+    && current.mode !== "charging"
+    && current.mode !== "burst"
+    && previous.chargeSeconds >= MOVEMENT_RULES.minimumBurstChargeSeconds
+    && distance(previous.position, current.position) > maximumWalkingDisplacement;
+
+  return {
+    reset: false,
+    footstepIndices,
+    chargeStarted: previous.mode !== "charging" && current.mode === "charging",
+    boostLaunched: enteredBurst || skippedBurst,
+    boostLanded: leftBurst || skippedBurst,
+    boostChargeSeconds: current.mode === "burst"
+      ? current.chargeSeconds
+      : previous.chargeSeconds,
+  };
+}
+
 export function createGameAudioRuntime(
   state: GameState,
   localPlayerId: PlayerId,
@@ -291,6 +445,7 @@ export function createGameAudioRuntime(
     footstepBus.connect(masterInput);
     const movementBus = createDistortedBus(context, masterInput, 2.15);
     const effectsBus = createDistortedBus(context, masterInput, 1.72);
+    const remoteEffectsBus = createRemoteEffectsBus(context, masterInput);
     const ambienceBus = context.createGain();
     ambienceBus.gain.value = 0.78;
     ambienceBus.connect(masterInput);
@@ -304,6 +459,25 @@ export function createGameAudioRuntime(
     );
     const networkHum = createNetworkHum(context, ambienceBus, activeSources);
     const astronaut = state.players[localPlayerId].astronaut;
+    const remotePlayerSnapshots = new Map<PlayerId, PlayerAudioSnapshot>();
+    const remoteMotionVoices = new Map<PlayerId, RemoteMotionVoice>();
+    for (const playerId of state.activePlayerIds) {
+      if (playerId === localPlayerId) continue;
+      remotePlayerSnapshots.set(
+        playerId,
+        createPlayerAudioSnapshot(state, playerId),
+      );
+      remoteMotionVoices.set(
+        playerId,
+        createRemoteMotionVoice(
+          context,
+          noiseBuffer,
+          remoteEffectsBus.input,
+          activeSources,
+          playerId,
+        ),
+      );
+    }
 
     const runtime: GameAudioRuntime = {
       context,
@@ -311,12 +485,15 @@ export function createGameAudioRuntime(
       footstepBus,
       movementBus,
       effectsBus,
+      remoteEffectsBus,
       ambienceBus,
       music,
       noiseBuffer,
       footstepBuffers: {},
       motionBed,
       networkHum,
+      remoteMotionVoices,
+      remotePlayerSnapshots,
       activeSources,
       localPlayerId,
       interactionSnapshot: createThreeInteractionSnapshot(state),
@@ -357,6 +534,14 @@ export function updateGameAudio(runtime: GameAudioRuntime, state: GameState) {
   updateMotionBed(runtime, movement.mode, movement.chargeSeconds, blend, now);
   updateNetworkHum(runtime, state, position, now);
   updateGameMusic(runtime.music, runtime.context, state);
+  updateRemotePlayerAudio(
+    runtime,
+    state,
+    position,
+    elapsedDeltaMs,
+    resetOneShots,
+    now,
+  );
 
   const previousInteractionSnapshot = runtime.interactionSnapshot;
   const interaction = collectThreeInteractionEvents(
@@ -467,6 +652,17 @@ export function resetGameAudioBaseline(
   runtime.previousGaitDistance = astronaut.movement.gaitDistance;
   runtime.previousRespawns = astronaut.respawns;
   runtime.previousPosition = { ...astronaut.position };
+  reconcileRemotePlayerAudio(runtime, state);
+  for (const playerId of state.activePlayerIds) {
+    if (playerId === runtime.localPlayerId) continue;
+    runtime.remotePlayerSnapshots.set(
+      playerId,
+      createPlayerAudioSnapshot(state, playerId),
+    );
+  }
+  for (const voice of runtime.remoteMotionVoices.values()) {
+    silenceRemoteMotionVoice(voice, runtime.context.currentTime);
+  }
   runtime.nextJungleActivityAt = runtime.context.currentTime + 0.35;
   const now = runtime.context.currentTime;
   setParam(runtime.motionBed.chargeGain.gain, 0, now, 0.025);
@@ -498,6 +694,15 @@ export function disposeGameAudio(runtime: GameAudioRuntime | null) {
     }
   }
   runtime.activeSources.clear();
+  for (const voice of runtime.remoteMotionVoices.values()) {
+    disconnectRemoteMotionVoice(voice);
+  }
+  runtime.remoteMotionVoices.clear();
+  runtime.remotePlayerSnapshots.clear();
+  runtime.remoteEffectsBus.input.disconnect();
+  runtime.remoteEffectsBus.bitcrusher.disconnect();
+  runtime.remoteEffectsBus.lowpass.disconnect();
+  runtime.remoteEffectsBus.gain.disconnect();
   runtime.masterGain.disconnect();
   void runtime.context.close().catch(() => undefined);
 }
@@ -597,16 +802,178 @@ function updateNetworkHum(
   );
 }
 
+function updateRemotePlayerAudio(
+  runtime: GameAudioRuntime,
+  state: GameState,
+  listenerPosition: Vec2,
+  elapsedDeltaMs: number,
+  resetOneShots: boolean,
+  now: number,
+) {
+  reconcileRemotePlayerAudio(runtime, state);
+
+  for (const playerId of state.activePlayerIds) {
+    if (playerId === runtime.localPlayerId) continue;
+    const previous = runtime.remotePlayerSnapshots.get(playerId) ?? null;
+    const current = createPlayerAudioSnapshot(state, playerId);
+    const cues = collectRemoteMovementCues(
+      previous,
+      current,
+      elapsedDeltaMs,
+    );
+    const spatial = calculateProximityAudioMix(
+      current.position,
+      listenerPosition,
+    );
+    const voice = runtime.remoteMotionVoices.get(playerId);
+    if (voice) {
+      const sourceBlend = calculateBiomeAudioBlend(current.position);
+      setParam(
+        voice.filter.frequency,
+        weightedBiomeValue(sourceBlend, FLIGHT_FILTER_FREQUENCIES),
+        now,
+        GAME_AUDIO_RULES.biomeTransitionSeconds,
+      );
+      setParam(voice.panner.pan, spatial.pan, now, 0.045);
+      setGainWithExactSilence(
+        voice.gain.gain,
+        current.mode === "burst"
+          ? jumpBoostWhiteNoiseGain(0.12) * spatial.gain
+          : 0,
+        now,
+        current.mode === "burst" ? 0.02 : 0.035,
+      );
+    }
+
+    const canPlayOneShots = !resetOneShots
+      && !cues.reset
+      && runtime.context.state === "running";
+    if (canPlayOneShots && previous) {
+      const gaitDelta = current.gaitDistance - previous.gaitDistance;
+      const speed = elapsedDeltaMs > 0
+        ? gaitDelta / (elapsedDeltaMs / 1_000)
+        : 0;
+      for (let index = 0; index < cues.footstepIndices.length; index += 1) {
+        const threshold = cues.footstepIndices[index]
+          * MOVEMENT_RULES.stepCycleDistance / 2;
+        const travelProgress = gaitDelta > 0
+          ? clamp(
+            (threshold - previous.gaitDistance) / gaitDelta,
+            0,
+            1,
+          )
+          : 1;
+        const contactPosition = interpolatePosition(
+          previous.position,
+          current.position,
+          travelProgress,
+        );
+        const contactSpatial = calculateProximityAudioMix(
+          contactPosition,
+          listenerPosition,
+        );
+        if (contactSpatial.gain <= 0) continue;
+        playFootstep(
+          runtime,
+          calculateBiomeAudioBlend(contactPosition),
+          clamp(speed / MOVEMENT_RULES.walkMaximumSpeed, 0.3, 1),
+          index * 0.026,
+          remoteRouting(runtime, contactSpatial),
+        );
+      }
+
+      if (cues.chargeStarted && spatial.gain > 0) {
+        playChargeEngage(
+          runtime,
+          calculateBiomeAudioBlend(current.position),
+          remoteRouting(runtime, spatial),
+        );
+      }
+      if (cues.boostLaunched && spatial.gain > 0) {
+        playBoostLaunch(
+          runtime,
+          calculateBiomeAudioBlend(current.position),
+          cues.boostChargeSeconds,
+          remoteRouting(runtime, spatial),
+        );
+      }
+      if (cues.boostLanded && spatial.gain > 0) {
+        playBoostLanding(
+          runtime,
+          calculateBiomeAudioBlend(current.position),
+          remoteRouting(runtime, spatial),
+        );
+      }
+    }
+
+    runtime.remotePlayerSnapshots.set(playerId, current);
+  }
+}
+
+function reconcileRemotePlayerAudio(runtime: GameAudioRuntime, state: GameState) {
+  const expected = new Set(
+    state.activePlayerIds.filter((playerId) => playerId !== runtime.localPlayerId),
+  );
+  for (const [playerId, voice] of runtime.remoteMotionVoices) {
+    if (expected.has(playerId)) continue;
+    disposeRemoteMotionVoice(voice);
+    runtime.remoteMotionVoices.delete(playerId);
+    runtime.remotePlayerSnapshots.delete(playerId);
+  }
+  for (const playerId of expected) {
+    if (runtime.remoteMotionVoices.has(playerId)) continue;
+    runtime.remoteMotionVoices.set(
+      playerId,
+      createRemoteMotionVoice(
+        runtime.context,
+        runtime.noiseBuffer,
+        runtime.remoteEffectsBus.input,
+        runtime.activeSources,
+        playerId,
+      ),
+    );
+  }
+}
+
+function createPlayerAudioSnapshot(
+  state: GameState,
+  playerId: PlayerId,
+): PlayerAudioSnapshot {
+  const astronaut = state.players[playerId].astronaut;
+  return {
+    mode: astronaut.movement.mode,
+    gaitDistance: finiteOr(astronaut.movement.gaitDistance, 0),
+    chargeSeconds: finiteOr(astronaut.movement.chargeSeconds, 0),
+    respawns: finiteOr(astronaut.respawns, 0),
+    position: {
+      x: finiteOr(astronaut.position.x, 0),
+      y: finiteOr(astronaut.position.y, 0),
+    },
+  };
+}
+
+function remoteRouting(
+  runtime: GameAudioRuntime,
+  spatial: ProximityAudioMix,
+): SoundRouting {
+  return {
+    bus: runtime.remoteEffectsBus.input,
+    gainScale: spatial.gain,
+    pan: spatial.pan,
+  };
+}
+
 function playFootstep(
   runtime: GameAudioRuntime,
   blend: BiomeAudioBlend,
   intensity: number,
   delaySeconds: number,
+  routing?: SoundRouting,
 ) {
   const serial = runtime.stepSerial;
   runtime.stepSerial += 1;
   const time = runtime.context.currentTime + 0.006 + delaySeconds;
-  const footPan = serial % 2 === 0 ? -0.075 : 0.075;
+  const footPan = routing?.pan ?? (serial % 2 === 0 ? -0.075 : 0.075);
   const layers = footstepLayers(blend);
   for (const layer of layers) {
     playFootstepSample(
@@ -617,6 +984,7 @@ function playFootstep(
       serial,
       time,
       footPan,
+      routing,
     );
   }
 }
@@ -671,6 +1039,7 @@ function playFootstepSample(
   serial: number,
   time: number,
   pan: number,
+  routing?: SoundRouting,
 ) {
   const profile = FOOTSTEP_SAMPLE_PROFILES[surface];
   const buffer = runtime.footstepBuffers[profile.sample];
@@ -701,7 +1070,8 @@ function playFootstepSample(
   const outputDuration = bufferDuration / playbackRate;
   const peakGain = profile.gain
     * clamp(intensity, 0.3, 1.15)
-    * Math.sqrt(clamp(weight, 0, 1));
+    * Math.sqrt(clamp(weight, 0, 1))
+    * clamp(routing?.gainScale ?? 1, 0, 1);
   const source = runtime.context.createBufferSource();
   source.buffer = buffer;
   source.playbackRate.value = playbackRate;
@@ -728,30 +1098,37 @@ function playFootstepSample(
     .connect(lowpass)
     .connect(envelope)
     .connect(panner)
-    .connect(runtime.footstepBus);
+    .connect(routing?.bus ?? runtime.footstepBus);
   trackSource(runtime.activeSources, source);
   source.start(time, offset, bufferDuration);
   source.stop(time + outputDuration + 0.02);
 }
 
-function playChargeEngage(runtime: GameAudioRuntime, blend: BiomeAudioBlend) {
+function playChargeEngage(
+  runtime: GameAudioRuntime,
+  blend: BiomeAudioBlend,
+  routing?: SoundRouting,
+) {
   const color = weightedBiomeValue(blend, CHARGE_FILTER_FREQUENCIES);
+  const gainScale = routing?.gainScale ?? 1;
   toneBurst(runtime, {
     startFrequency: 88,
     endFrequency: 142,
     duration: 0.13,
-    gain: 0.06,
+    gain: 0.06 * gainScale,
     type: "triangle",
-    bus: runtime.movementBus,
+    pan: routing?.pan,
+    bus: routing?.bus ?? runtime.movementBus,
   });
   noiseBurst(runtime, {
     duration: 0.11,
     frequency: color,
     q: 1.1,
-    gain: jumpBoostWhiteNoiseGain(0.04),
+    gain: jumpBoostWhiteNoiseGain(0.04) * gainScale,
     seed: `charge-engage:${runtime.effectSerial++}`,
     filterType: "bandpass",
-    bus: runtime.movementBus,
+    pan: routing?.pan,
+    bus: routing?.bus ?? runtime.movementBus,
   });
 }
 
@@ -759,6 +1136,7 @@ function playBoostLaunch(
   runtime: GameAudioRuntime,
   blend: BiomeAudioBlend,
   chargeSeconds: number,
+  routing?: SoundRouting,
 ) {
   const strength = 0.72 + clamp(
     chargeSeconds / MOVEMENT_RULES.fullChargeSeconds,
@@ -766,38 +1144,47 @@ function playBoostLaunch(
     1,
   ) * 0.28;
   const serial = runtime.effectSerial++;
+  const gainScale = routing?.gainScale ?? 1;
   noiseBurst(runtime, {
     duration: 0.31,
     frequency: 220,
     q: 0.58,
-    gain: jumpBoostWhiteNoiseGain(0.28) * strength,
+    gain: jumpBoostWhiteNoiseGain(0.28) * strength * gainScale,
     seed: `boost-launch-body:${serial}`,
     filterType: "lowpass",
-    bus: runtime.effectsBus,
+    pan: routing?.pan,
+    bus: routing?.bus ?? runtime.effectsBus,
   });
   noiseBurst(runtime, {
     duration: 0.22,
     frequency: weightedBiomeValue(blend, FLIGHT_FILTER_FREQUENCIES),
     q: 0.72,
-    gain: jumpBoostWhiteNoiseGain(0.16) * strength,
+    gain: jumpBoostWhiteNoiseGain(0.16) * strength * gainScale,
     seed: `boost-launch-air:${serial}`,
     filterType: "bandpass",
-    bus: runtime.effectsBus,
+    pan: routing?.pan,
+    bus: routing?.bus ?? runtime.effectsBus,
   });
 }
 
-function playBoostLanding(runtime: GameAudioRuntime, blend: BiomeAudioBlend) {
+function playBoostLanding(
+  runtime: GameAudioRuntime,
+  blend: BiomeAudioBlend,
+  routing?: SoundRouting,
+) {
   const serial = runtime.effectSerial++;
+  const gainScale = routing?.gainScale ?? 1;
   noiseBurst(runtime, {
     duration: 0.18,
     frequency: 480,
     q: 0.7,
-    gain: jumpBoostWhiteNoiseGain(0.17),
+    gain: jumpBoostWhiteNoiseGain(0.17) * gainScale,
     seed: `boost-land:${serial}`,
     filterType: "lowpass",
-    bus: runtime.effectsBus,
+    pan: routing?.pan,
+    bus: routing?.bus ?? runtime.effectsBus,
   });
-  playFootstep(runtime, blend, 1.15, 0.015);
+  playFootstep(runtime, blend, 1.15, 0.015, routing);
 }
 
 function playInteractionEvent(
@@ -805,8 +1192,15 @@ function playInteractionEvent(
   event: ThreeInteractionEvent,
   listenerPosition: Vec2,
 ) {
-  const spatial = spatialMix(event.position, listenerPosition);
-  if (spatial.gain <= 0.01) return;
+  const spatial = calculateProximityAudioMix(event.position, listenerPosition);
+  if (spatial.gain <= 0) return;
+  const knownActor = event.kind === "anchor_deployed"
+    || event.kind === "salvage_deposited"
+    ? event.playerId
+    : null;
+  const actionBus = knownActor && knownActor !== runtime.localPlayerId
+    ? runtime.remoteEffectsBus.input
+    : runtime.effectsBus;
   const serial = runtime.effectSerial++;
   if (event.kind === "anchor_deployed") {
     toneBurst(runtime, {
@@ -816,7 +1210,7 @@ function playInteractionEvent(
       gain: 0.14 * spatial.gain,
       type: "square",
       pan: spatial.pan,
-      bus: runtime.effectsBus,
+      bus: actionBus,
     });
     noiseBurst(runtime, {
       duration: 0.16,
@@ -825,7 +1219,7 @@ function playInteractionEvent(
       seed: `anchor-deploy:${serial}`,
       filterType: "highpass",
       pan: spatial.pan,
-      bus: runtime.effectsBus,
+      bus: actionBus,
     });
     for (let index = 0; index < 3; index += 1) {
       toneBurst(runtime, {
@@ -836,7 +1230,7 @@ function playInteractionEvent(
         gain: 0.035 * spatial.gain,
         type: "sine",
         pan: spatial.pan,
-        bus: runtime.effectsBus,
+        bus: actionBus,
       });
     }
     if (event.playerId === runtime.localPlayerId) pulseHaptic(12);
@@ -851,7 +1245,7 @@ function playInteractionEvent(
       seed: `anchor-break-body:${serial}`,
       filterType: "lowpass",
       pan: spatial.pan,
-      bus: runtime.effectsBus,
+      bus: actionBus,
     });
     noiseBurst(runtime, {
       duration: 0.25,
@@ -860,7 +1254,7 @@ function playInteractionEvent(
       seed: `anchor-break-static:${serial}`,
       filterType: "highpass",
       pan: spatial.pan,
-      bus: runtime.effectsBus,
+      bus: actionBus,
     });
     toneBurst(runtime, {
       startFrequency: 145,
@@ -869,9 +1263,8 @@ function playInteractionEvent(
       gain: 0.17 * spatial.gain,
       type: "sawtooth",
       pan: spatial.pan,
-      bus: runtime.effectsBus,
+      bus: actionBus,
     });
-    if (event.playerId === runtime.localPlayerId) pulseHaptic([25, 24, 34]);
     return;
   }
   if (event.kind === "salvage_picked_up") {
@@ -882,7 +1275,7 @@ function playInteractionEvent(
       gain: 0.08 * spatial.gain,
       type: "triangle",
       pan: spatial.pan,
-      bus: runtime.effectsBus,
+      bus: actionBus,
     });
     noiseBurst(runtime, {
       duration: 0.075,
@@ -892,7 +1285,7 @@ function playInteractionEvent(
       seed: `salvage-pickup:${serial}`,
       filterType: "bandpass",
       pan: spatial.pan,
-      bus: runtime.effectsBus,
+      bus: actionBus,
     });
     return;
   }
@@ -908,7 +1301,7 @@ function playInteractionEvent(
       gain: 0.075 * spatial.gain,
       type: "triangle",
       pan: spatial.pan,
-      bus: runtime.effectsBus,
+      bus: actionBus,
     });
   }
   noiseBurst(runtime, {
@@ -919,7 +1312,7 @@ function playInteractionEvent(
     seed: `salvage-deposit:${serial}`,
     filterType: "lowpass",
     pan: spatial.pan,
-    bus: runtime.effectsBus,
+    bus: actionBus,
   });
   if (event.fabricatedKits > 0) {
     const fabricationStrength = clamp(event.fabricatedKits, 1, 3);
@@ -931,7 +1324,7 @@ function playInteractionEvent(
       gain: 0.11 * spatial.gain,
       type: "sawtooth",
       pan: spatial.pan,
-      bus: runtime.effectsBus,
+      bus: actionBus,
     });
     noiseBurst(runtime, {
       time: runtime.context.currentTime + 0.095,
@@ -942,7 +1335,7 @@ function playInteractionEvent(
       seed: `tether-fabricated:${serial}`,
       filterType: "bandpass",
       pan: spatial.pan,
-      bus: runtime.effectsBus,
+      bus: actionBus,
     });
   }
   if (localDeposit) pulseHaptic([12, 24, 20]);
@@ -961,8 +1354,8 @@ function playRecoveredAnchorCues(
       || anchor.directlyDisrupted
       || !anchor.powered
     ) continue;
-    const spatial = spatialMix(anchor.position, listenerPosition);
-    if (spatial.gain <= 0.01) continue;
+    const spatial = calculateProximityAudioMix(anchor.position, listenerPosition);
+    if (spatial.gain <= 0) continue;
     toneBurst(runtime, {
       startFrequency: 260,
       endFrequency: 620,
@@ -1297,6 +1690,78 @@ function createDistortedBus(
   return input;
 }
 
+function createRemoteEffectsBus(
+  context: AudioContext,
+  destination: AudioNode,
+): RemoteEffectsBus {
+  const input = context.createGain();
+  const bitcrusher = context.createWaveShaper();
+  bitcrusher.curve = createBitcrusherCurve();
+  bitcrusher.oversample = "none";
+  const lowpass = context.createBiquadFilter();
+  lowpass.type = "lowpass";
+  lowpass.frequency.value = GAME_AUDIO_RULES.remoteLowpassFrequency;
+  lowpass.Q.value = 0.72;
+  const gain = context.createGain();
+  gain.gain.value = GAME_AUDIO_RULES.remoteEffectsGain;
+  input.connect(bitcrusher).connect(lowpass).connect(gain).connect(destination);
+  return { input, bitcrusher, lowpass, gain };
+}
+
+function createRemoteMotionVoice(
+  context: AudioContext,
+  noiseBuffer: AudioBuffer,
+  destination: AudioNode,
+  sources: Set<AudioScheduledSourceNode>,
+  playerId: PlayerId,
+): RemoteMotionVoice {
+  const source = context.createBufferSource();
+  source.buffer = noiseBuffer;
+  source.loop = true;
+  source.playbackRate.value = sampledRange(
+    `remote-flight-rate:${playerId}`,
+    0,
+    1.24,
+    1.38,
+  );
+  const filter = context.createBiquadFilter();
+  filter.type = "bandpass";
+  filter.frequency.value = 1_100;
+  filter.Q.value = 0.62;
+  const gain = context.createGain();
+  gain.gain.value = 0;
+  const panner = context.createStereoPanner();
+  panner.pan.value = 0;
+  source.connect(filter).connect(gain).connect(panner).connect(destination);
+  trackSource(sources, source);
+  source.start(
+    0,
+    stableUnitInterval(`remote-flight-offset:${playerId}`) * noiseBuffer.duration,
+  );
+  return { source, filter, gain, panner };
+}
+
+function silenceRemoteMotionVoice(voice: RemoteMotionVoice, now: number) {
+  voice.gain.gain.cancelScheduledValues(now);
+  voice.gain.gain.setValueAtTime(0, now);
+}
+
+function disposeRemoteMotionVoice(voice: RemoteMotionVoice) {
+  try {
+    voice.source.stop();
+  } catch {
+    // A stopped voice is already silent and can still be disconnected safely.
+  }
+  disconnectRemoteMotionVoice(voice);
+}
+
+function disconnectRemoteMotionVoice(voice: RemoteMotionVoice) {
+  voice.source.disconnect();
+  voice.filter.disconnect();
+  voice.gain.disconnect();
+  voice.panner.disconnect();
+}
+
 function createDistortionCurve(amount: number) {
   const samples = 1_024;
   const curve = new Float32Array(samples);
@@ -1335,6 +1800,20 @@ function setParam(
   parameter.setTargetAtTime(value, now, Math.max(0.001, timeConstant));
 }
 
+function setGainWithExactSilence(
+  parameter: AudioParam,
+  value: number,
+  now: number,
+  timeConstant: number,
+) {
+  parameter.cancelScheduledValues(now);
+  if (value <= 0) {
+    parameter.setValueAtTime(0, now);
+    return;
+  }
+  parameter.setTargetAtTime(value, now, Math.max(0.001, timeConstant));
+}
+
 function jumpBoostWhiteNoiseGain(baseGain: number) {
   return baseGain * GAME_AUDIO_RULES.jumpBoostWhiteNoiseGainScale;
 }
@@ -1365,18 +1844,6 @@ function emptyBiomeBlend(): BiomeAudioBlend {
     jungle: 0,
     desert: 0,
     taiga: 0,
-  };
-}
-
-function spatialMix(source: Vec2, listener: Vec2) {
-  const separation = distance(source, listener);
-  if (separation >= GAME_AUDIO_RULES.audibleWorldDistance) {
-    return { gain: 0, pan: 0 };
-  }
-  const normalized = separation / 44;
-  return {
-    gain: 1 / (1 + normalized * normalized),
-    pan: clamp((source.x - listener.x) / 54, -0.82, 0.82),
   };
 }
 
@@ -1437,6 +1904,17 @@ function sampledRange(
   return minimum + (maximum - minimum) * stableUnitInterval(`${seed}:${serial}`);
 }
 
+function finiteOr(value: number | undefined, fallback: number) {
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : fallback;
+}
+
 function clamp(value: number, minimum: number, maximum: number) {
   return Math.min(maximum, Math.max(minimum, value));
+}
+
+function smoothstep(value: number) {
+  const normalized = clamp(value, 0, 1);
+  return normalized * normalized * (3 - 2 * normalized);
 }

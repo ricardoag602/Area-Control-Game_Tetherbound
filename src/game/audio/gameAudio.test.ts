@@ -7,8 +7,12 @@ import {
   FOOTSTEP_ASSET_URLS,
   GAME_AUDIO_RULES,
   calculateBiomeAudioBlend,
+  calculateProximityAudioMix,
+  collectRemoteMovementCues,
+  createBitcrusherCurve,
   getFootstepTriggerIndices,
   readAudioPreference,
+  type PlayerAudioSnapshot,
 } from "./gameAudio";
 
 describe("biome audio blending", () => {
@@ -158,6 +162,167 @@ describe("jump-boost mix", () => {
   });
 });
 
+describe("proximity audio", () => {
+  const listener = { x: 100, y: 100 };
+
+  it("holds full volume nearby, fades smoothly, and is exactly silent at range", () => {
+    const nearby = calculateProximityAudioMix({ x: 110, y: 100 }, listener);
+    const middle = calculateProximityAudioMix({ x: 146, y: 100 }, listener);
+    const edge = calculateProximityAudioMix({ x: 180, y: 100 }, listener);
+    const cutoff = calculateProximityAudioMix(
+      { x: 100 + GAME_AUDIO_RULES.audibleWorldDistance, y: 100 },
+      listener,
+    );
+    const beyond = calculateProximityAudioMix({ x: 240, y: 100 }, listener);
+
+    expect(nearby.gain).toBe(1);
+    expect(middle.gain).toBeGreaterThan(edge.gain);
+    expect(edge.gain).toBeGreaterThan(0);
+    expect(cutoff).toEqual({ gain: 0, pan: 0 });
+    expect(beyond).toEqual({ gain: 0, pan: 0 });
+  });
+
+  it("pans symmetrically toward the sound without exceeding the stereo field", () => {
+    const left = calculateProximityAudioMix({ x: 60, y: 100 }, listener);
+    const right = calculateProximityAudioMix({ x: 140, y: 100 }, listener);
+
+    expect(left.pan).toBeLessThan(0);
+    expect(right.pan).toBeGreaterThan(0);
+    expect(left.pan).toBeCloseTo(-right.pan, 10);
+    expect(Math.abs(left.pan)).toBeLessThanOrEqual(0.86);
+  });
+});
+
+describe("remote-player lo-fi processing", () => {
+  it("builds a bounded, symmetric six-bit quantizer curve", () => {
+    const curve = createBitcrusherCurve();
+    const levels = new Set(Array.from(curve, (value) => value.toFixed(6)));
+
+    expect(curve).toHaveLength(4_096);
+    expect(curve[0]).toBe(-1);
+    expect(curve.at(-1)).toBe(1);
+    expect(levels.size).toBe(2 ** GAME_AUDIO_RULES.remoteBitDepth);
+    expect(curve[Math.floor(curve.length / 2)]).toBeCloseTo(
+      -curve[Math.floor(curve.length / 2) - 1],
+      6,
+    );
+  });
+});
+
+describe("remote movement cues", () => {
+  it("starts from a silent baseline and does not replay state after a long gap", () => {
+    const current = audioSnapshot({
+      mode: "burst",
+      gaitDistance: 20,
+      chargeSeconds: MOVEMENT_RULES.fullChargeSeconds,
+      position: { x: 20, y: 0 },
+    });
+
+    expect(collectRemoteMovementCues(null, current, 50)).toMatchObject({
+      reset: true,
+      footstepIndices: [],
+      chargeStarted: false,
+      boostLaunched: false,
+      boostLanded: false,
+    });
+    expect(collectRemoteMovementCues(
+      audioSnapshot(),
+      current,
+      GAME_AUDIO_RULES.maximumContinuousSnapshotGapMs + 1,
+    )).toMatchObject({
+      reset: true,
+      footstepIndices: [],
+      chargeStarted: false,
+      boostLaunched: false,
+      boostLanded: false,
+    });
+  });
+
+  it("derives remote footsteps from authoritative gait distance", () => {
+    const halfCycle = MOVEMENT_RULES.stepCycleDistance / 2;
+    const previous = audioSnapshot({
+      mode: "walking",
+      gaitDistance: halfCycle - 0.1,
+    });
+    const current = audioSnapshot({
+      mode: "walking",
+      gaitDistance: halfCycle,
+      position: { x: 0.3, y: 0 },
+    });
+
+    expect(collectRemoteMovementCues(previous, current, 50).footstepIndices)
+      .toEqual([1]);
+  });
+
+  it("reports charge, launch, and landing transitions", () => {
+    const walking = audioSnapshot({ mode: "walking" });
+    const charging = audioSnapshot({
+      mode: "charging",
+      chargeSeconds: MOVEMENT_RULES.fullChargeSeconds,
+    });
+    const burst = audioSnapshot({
+      mode: "burst",
+      chargeSeconds: MOVEMENT_RULES.fullChargeSeconds,
+      position: { x: 4, y: 0 },
+    });
+    const landed = audioSnapshot({
+      mode: "walking",
+      position: { x: 9, y: 0 },
+    });
+
+    expect(collectRemoteMovementCues(walking, charging, 100).chargeStarted)
+      .toBe(true);
+    expect(collectRemoteMovementCues(charging, burst, 100)).toMatchObject({
+      boostLaunched: true,
+      boostLanded: false,
+      boostChargeSeconds: MOVEMENT_RULES.fullChargeSeconds,
+    });
+    expect(collectRemoteMovementCues(burst, landed, 100)).toMatchObject({
+      boostLaunched: false,
+      boostLanded: true,
+    });
+  });
+
+  it("recognizes a short burst that begins and ends between network snapshots", () => {
+    const charging = audioSnapshot({
+      mode: "charging",
+      chargeSeconds: MOVEMENT_RULES.fullChargeSeconds,
+    });
+    const afterBurst = audioSnapshot({
+      mode: "walking",
+      position: { x: 12, y: 0 },
+    });
+
+    expect(collectRemoteMovementCues(charging, afterBurst, 125)).toMatchObject({
+      reset: false,
+      boostLaunched: true,
+      boostLanded: true,
+    });
+  });
+
+  it("resets on respawn or backwards gait movement", () => {
+    const previous = audioSnapshot({ gaitDistance: 10 });
+    const respawned = audioSnapshot({ gaitDistance: 0, respawns: 1 });
+    const rewound = audioSnapshot({ gaitDistance: 5 });
+
+    expect(collectRemoteMovementCues(previous, respawned, 50).reset).toBe(true);
+    expect(collectRemoteMovementCues(previous, rewound, 50).reset).toBe(true);
+  });
+});
+
 function sumBlend(blend: Readonly<Record<BiomeId, number>>) {
   return AUDIO_BIOMES.reduce((total, biome) => total + blend[biome], 0);
+}
+
+function audioSnapshot(
+  overrides: Partial<PlayerAudioSnapshot> = {},
+): PlayerAudioSnapshot {
+  return {
+    mode: "idle",
+    gaitDistance: 0,
+    chargeSeconds: 0,
+    respawns: 0,
+    position: { x: 0, y: 0 },
+    ...overrides,
+  };
 }

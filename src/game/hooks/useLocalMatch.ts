@@ -1,12 +1,23 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { getBotCommand } from "../ai/bot";
+import {
+  advanceBotController,
+  createBotControllerState,
+  type BotControllerState,
+} from "../ai/bot";
 import { SIMULATION_RULES } from "../constants";
 import { applyPlayerCommands, type PlayerCommand } from "../simulation/playerController";
 import { createInitialGameState } from "../state";
 import type { MovementCommand } from "../types";
 
 export function useLocalMatch({ paused = false }: { paused?: boolean } = {}) {
-  const [state, setState] = useState(createInitialGameState);
+  const [match, setMatch] = useState<{
+    game: ReturnType<typeof createInitialGameState>;
+    bot: BotControllerState;
+  }>(() => ({
+    game: createInitialGameState(),
+    bot: createBotControllerState(),
+  }));
+  const state = match.game;
   const movementCommands = useRef<MovementCommand[]>([]);
   const deployRequested = useRef(false);
 
@@ -43,21 +54,25 @@ export function useLocalMatch({ paused = false }: { paused?: boolean } = {}) {
       };
       movementCommands.current = [];
       deployRequested.current = false;
-      setState((current) => {
-        let next = current;
+      setMatch((current) => {
+        let next = current.game;
+        let bot = current.bot;
         for (let step = 0; step < stepCount; step += 1) {
+          const botStep = advanceBotController(next, "rival", bot);
+          bot = botStep.controller;
           next = applyPlayerCommands(
             next,
             {
               player: step === 0
                 ? playerCommand
                 : { movementCommands: [], deployAnchor: false },
-              rival: getBotCommand(next, "rival"),
+              rival: botStep.command,
             },
             fixedStepSeconds,
           );
         }
-        return next;
+        if (next === current.game && bot === current.bot) return current;
+        return { game: next, bot };
       });
       frameId = requestAnimationFrame(frame);
     };
