@@ -151,6 +151,13 @@ describe("audio preference", () => {
   });
 });
 
+describe("jump-boost mix", () => {
+  it("keeps the procedural white-noise layers below their original gain", () => {
+    expect(GAME_AUDIO_RULES.jumpBoostWhiteNoiseGainScale).toBe(0.84);
+    expect(GAME_AUDIO_RULES.jumpBoostWhiteNoiseGainScale).toBeLessThan(1);
+  });
+});
+
 function sumBlend(blend: Readonly<Record<BiomeId, number>>) {
   return AUDIO_BIOMES.reduce((total, biome) => total + blend[biome], 0);
 }

@@ -26,6 +26,8 @@ describe("ArenaRenderer player layering", () => {
     )?.[0];
 
     expect(underlay).toContain("world__oxygen-meter");
+    expect(underlay).toContain("world__oxygen-meter-label");
+    expect(underlay).toContain("O²");
     expect(underlay).toContain("world__tutorial-cue");
     expect(underlay).toContain("world__charge-feedback");
     expect(underlay).not.toContain("world__astronaut");

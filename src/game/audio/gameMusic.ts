@@ -6,7 +6,7 @@ export const GAME_MUSIC_RULES = {
   stepsPerBeat: 2,
   loopSteps: 64,
   scheduleAheadSeconds: 0.65,
-  outputGain: 0.47,
+  outputGain: 0.5,
 } as const;
 
 const STEP_SECONDS = 60 / GAME_MUSIC_RULES.bpm / GAME_MUSIC_RULES.stepsPerBeat;

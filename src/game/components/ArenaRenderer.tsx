@@ -670,6 +670,7 @@ function OxygenWorldIndicator({
   if (!depleted && !completing) return null;
   const meterWidth = 6.8;
   const fillWidth = meterWidth * normalized;
+  const labelRight = -meterWidth / 2 - 0.42;
 
   return (
     <g
@@ -678,6 +679,13 @@ function OxygenWorldIndicator({
       transform={`translate(${position.x} ${position.y + 6.25})`}
       aria-hidden="true"
     >
+      <text
+        className="world__oxygen-meter-label"
+        x={labelRight}
+        y=".04"
+      >
+        O²
+      </text>
       <rect
         className="world__oxygen-meter-track"
         x={-meterWidth / 2}

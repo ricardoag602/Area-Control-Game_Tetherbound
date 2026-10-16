@@ -1207,6 +1207,19 @@ button { -webkit-tap-highlight-color: transparent; }
   transform-origin: center;
 }
 
+.world__oxygen-meter-label {
+  fill: currentColor;
+  stroke: rgba(3, 10, 14, .92);
+  stroke-width: .2;
+  paint-order: stroke fill;
+  font-family: inherit;
+  font-size: 1.22px;
+  font-weight: 800;
+  letter-spacing: -.035px;
+  text-anchor: end;
+  dominant-baseline: middle;
+}
+
 .world__oxygen-meter-track {
   fill: rgba(3, 10, 14, .68);
   stroke: rgba(235, 251, 255, .28);

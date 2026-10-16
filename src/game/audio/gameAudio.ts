@@ -25,6 +25,7 @@ export const GAME_AUDIO_RULES = {
   maximumContinuousSnapshotGapMs: 320,
   audibleWorldDistance: 145,
   masterGain: 0.72,
+  jumpBoostWhiteNoiseGainScale: 0.84,
 } as const;
 
 export const AUDIO_BIOMES = [
@@ -541,7 +542,7 @@ function updateMotionBed(
   );
   setParam(
     runtime.motionBed.flightGain.gain,
-    bursting ? 0.16 : 0,
+    bursting ? jumpBoostWhiteNoiseGain(0.16) : 0,
     now,
     bursting ? 0.025 : 0.055,
   );
@@ -747,7 +748,7 @@ function playChargeEngage(runtime: GameAudioRuntime, blend: BiomeAudioBlend) {
     duration: 0.11,
     frequency: color,
     q: 1.1,
-    gain: 0.04,
+    gain: jumpBoostWhiteNoiseGain(0.04),
     seed: `charge-engage:${runtime.effectSerial++}`,
     filterType: "bandpass",
     bus: runtime.movementBus,
@@ -769,7 +770,7 @@ function playBoostLaunch(
     duration: 0.31,
     frequency: 220,
     q: 0.58,
-    gain: 0.28 * strength,
+    gain: jumpBoostWhiteNoiseGain(0.28) * strength,
     seed: `boost-launch-body:${serial}`,
     filterType: "lowpass",
     bus: runtime.effectsBus,
@@ -778,7 +779,7 @@ function playBoostLaunch(
     duration: 0.22,
     frequency: weightedBiomeValue(blend, FLIGHT_FILTER_FREQUENCIES),
     q: 0.72,
-    gain: 0.16 * strength,
+    gain: jumpBoostWhiteNoiseGain(0.16) * strength,
     seed: `boost-launch-air:${serial}`,
     filterType: "bandpass",
     bus: runtime.effectsBus,
@@ -791,7 +792,7 @@ function playBoostLanding(runtime: GameAudioRuntime, blend: BiomeAudioBlend) {
     duration: 0.18,
     frequency: 480,
     q: 0.7,
-    gain: 0.17,
+    gain: jumpBoostWhiteNoiseGain(0.17),
     seed: `boost-land:${serial}`,
     filterType: "lowpass",
     bus: runtime.effectsBus,
@@ -1136,7 +1137,7 @@ function createMotionBed(
   chargeNoise.loop = true;
   chargeNoise.playbackRate.value = 0.7;
   const chargeNoiseGain = context.createGain();
-  chargeNoiseGain.gain.value = 0.28;
+  chargeNoiseGain.gain.value = jumpBoostWhiteNoiseGain(0.28);
   chargeNoise.connect(chargeNoiseGain).connect(chargeFilter);
 
   const flightGain = context.createGain();
@@ -1332,6 +1333,10 @@ function setParam(
 ) {
   parameter.cancelScheduledValues(now);
   parameter.setTargetAtTime(value, now, Math.max(0.001, timeConstant));
+}
+
+function jumpBoostWhiteNoiseGain(baseGain: number) {
+  return baseGain * GAME_AUDIO_RULES.jumpBoostWhiteNoiseGainScale;
 }
 
 function trackSource(

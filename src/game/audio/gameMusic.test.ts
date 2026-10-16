@@ -3,6 +3,11 @@ import { GAME_RULES } from "../constants";
 import { GAME_MUSIC_RULES, getMusicIntensity, getMusicNotesForStep } from "./gameMusic";
 
 describe("background music composition", () => {
+  it("uses the gently raised music output without reaching unity gain", () => {
+    expect(GAME_MUSIC_RULES.outputGain).toBe(0.5);
+    expect(GAME_MUSIC_RULES.outputGain).toBeLessThan(1);
+  });
+
   it("forms a seamless eight-bar loop", () => {
     for (let step = 0; step < GAME_MUSIC_RULES.loopSteps; step += 1) {
       expect(getMusicNotesForStep(step + GAME_MUSIC_RULES.loopSteps)).toEqual(
