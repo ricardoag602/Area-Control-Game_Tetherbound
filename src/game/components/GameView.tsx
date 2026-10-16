@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { useLocalMatch } from "../hooks/useLocalMatch";
 import { sampleScorableTerritory } from "../simulation/scoring";
 import type { GameState, MatchFinishReason, PlayerId } from "../types";
 import { MatchScreen } from "./MatchScreen";
 import { PostMatchScene } from "./PostMatchScene";
+import type { ArenaPresentationState } from "./ArenaRenderer";
 
 interface GameViewProps {
   audioEnabled: boolean;
@@ -36,7 +37,18 @@ function LocalMatch({
   onLeave: () => void;
   onRestart: () => void;
 }) {
-  const { state, sendMovementCommand, deploy } = useLocalMatch();
+  const [presentationReady, setPresentationReady] = useState(false);
+  const { state, sendMovementCommand, deploy } = useLocalMatch({
+    paused: !presentationReady,
+  });
+  const handlePresentationStateChange = useCallback(
+    (presentationState: ArenaPresentationState) => {
+      setPresentationReady(
+        presentationState === "ready" || presentationState === "fallback",
+      );
+    },
+    [],
+  );
 
   if (state.matchPhase === "finished") {
     return (
@@ -50,10 +62,21 @@ function LocalMatch({
     );
   }
 
-  return <MatchScreen state={state} localPlayerId="player" playerNames={{ rival: "Bot" }} statusText="Mechanics sandbox"
-    audioEnabled={audioEnabled}
-    tutorialEnabled={tutorialEnabled}
-    interpolatePositions={true} onMovementCommand={sendMovementCommand} onDeploy={deploy} onLeave={onLeave} />;
+  return (
+    <MatchScreen
+      state={state}
+      localPlayerId="player"
+      playerNames={{ rival: "Bot" }}
+      statusText="Mechanics sandbox"
+      audioEnabled={audioEnabled}
+      tutorialEnabled={tutorialEnabled}
+      interpolatePositions={true}
+      onPresentationStateChange={handlePresentationStateChange}
+      onMovementCommand={sendMovementCommand}
+      onDeploy={deploy}
+      onLeave={onLeave}
+    />
+  );
 }
 
 function BotMatchResultView({

@@ -1,9 +1,73 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { createInitialGameState } from "../state";
-import { ArenaRenderer } from "./ArenaRenderer";
+import {
+  ArenaRenderer,
+  getArenaPresentationState,
+} from "./ArenaRenderer";
+
+describe("getArenaPresentationState", () => {
+  it("waits for terrain and both 3D model groups", () => {
+    const readiness = {
+      terrainReady: true,
+      astronautsReady: true,
+      objectsReady: true,
+      loadFailed: false,
+      compatibilityMode: false,
+    };
+
+    expect(getArenaPresentationState(readiness)).toBe("ready");
+    expect(getArenaPresentationState({ ...readiness, terrainReady: false })).toBe("loading");
+    expect(getArenaPresentationState({ ...readiness, astronautsReady: false })).toBe("loading");
+    expect(getArenaPresentationState({ ...readiness, objectsReady: false })).toBe("loading");
+  });
+
+  it("keeps terrain or model failures concealed until compatibility mode is explicit", () => {
+    const failed = {
+      terrainReady: false,
+      astronautsReady: false,
+      objectsReady: true,
+      loadFailed: true,
+      compatibilityMode: false,
+    };
+
+    expect(getArenaPresentationState(failed)).toBe("failed");
+    expect(getArenaPresentationState({ ...failed, compatibilityMode: true })).toBe("fallback");
+  });
+});
 
 describe("ArenaRenderer player layering", () => {
+  it("conceals the world until every 3D layer has rendered", () => {
+    const markup = renderToStaticMarkup(
+      <ArenaRenderer
+        state={createInitialGameState("three-loading-gate")}
+        localPlayerId="player"
+        onMovementCommand={() => undefined}
+      />,
+    );
+
+    expect(markup).toContain("world-stage world-stage--loading");
+    expect(markup).toContain('aria-busy="true"');
+    expect(markup).toContain("three-astronaut-layer");
+    expect(markup).not.toContain("world-stage--three-astronauts");
+    expect(markup).not.toContain("world-stage--three-objects");
+  });
+
+  it("only exposes sprite fallback when compatibility mode is explicit", () => {
+    const markup = renderToStaticMarkup(
+      <ArenaRenderer
+        state={createInitialGameState("compatibility-mode")}
+        localPlayerId="player"
+        compatibilityMode={true}
+        onMovementCommand={() => undefined}
+      />,
+    );
+
+    expect(markup).toContain("world-stage world-stage--fallback");
+    expect(markup).toContain("world__astronaut-sprite--active");
+    expect(markup).not.toContain("three-astronaut-layer");
+  });
+
   it("keeps player-linked world indicators in the underlay", () => {
     const state = createInitialGameState("player-underlay");
     state.players.player.astronaut.oxygen = 50;

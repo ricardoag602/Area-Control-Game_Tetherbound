@@ -1,8 +1,5 @@
 import * as THREE from "three";
-import {
-  GLTFLoader,
-  type GLTF,
-} from "three/examples/jsm/loaders/GLTFLoader.js";
+import type { GLTF } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { publicAssetUrl } from "../assetUrl";
 import {
   getAnchorPowerState,
@@ -10,6 +7,10 @@ import {
 } from "../simulation/tetherConflict";
 import { TERRAIN_TEAM_COLORS } from "./terrainLighting";
 import type { GameState, PlayerId, Vec2 } from "../types";
+import {
+  loadThreeModelAsset,
+  preloadThreeModelAsset,
+} from "./threeModelAssetCache";
 
 const MODEL_URLS = {
   salvage: publicAssetUrl("game-objects/Tether_Nugget.glb"),
@@ -124,18 +125,11 @@ export interface ThreeGameObjectRuntime {
 export async function loadThreeGameObjectAssets(
   playerIds: readonly PlayerId[],
 ): Promise<ThreeGameObjectAssets> {
-  const loader = new GLTFLoader();
-  const slots: AssetSlot[] = [
-    { kind: "salvage", url: MODEL_URLS.salvage },
-    ...playerIds.flatMap((playerId): AssetSlot[] => [
-      { kind: "homeBase", playerId, url: MODEL_URLS.homeBase[playerId] },
-      { kind: "anchor", playerId, url: MODEL_URLS.anchor[playerId] },
-    ]),
-  ];
+  const slots = getAssetSlots(playerIds);
   const results = await Promise.allSettled(
     slots.map(async (slot) => ({
       slot,
-      asset: await loader.loadAsync(slot.url),
+      asset: await loadThreeModelAsset(slot.url),
     })),
   );
   const failed = results.find((result) => result.status === "rejected");
@@ -159,6 +153,22 @@ export async function loadThreeGameObjectAssets(
   if (!salvage) throw new Error("Dropped-material model did not load.");
 
   return { salvage, homeBases, anchors };
+}
+
+export function preloadThreeGameObjectAssets(playerIds: readonly PlayerId[]) {
+  for (const slot of getAssetSlots(playerIds)) {
+    preloadThreeModelAsset(slot.url);
+  }
+}
+
+function getAssetSlots(playerIds: readonly PlayerId[]): AssetSlot[] {
+  return [
+    { kind: "salvage", url: MODEL_URLS.salvage },
+    ...playerIds.flatMap((playerId): AssetSlot[] => [
+      { kind: "homeBase", playerId, url: MODEL_URLS.homeBase[playerId] },
+      { kind: "anchor", playerId, url: MODEL_URLS.anchor[playerId] },
+    ]),
+  ];
 }
 
 export function createThreeGameObjectRuntime(

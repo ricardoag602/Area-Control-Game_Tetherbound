@@ -4,6 +4,9 @@ import {
   OBJECT_SPRITES,
 } from "./objectSprites";
 import { ACTIVE_TERRAIN_THEME } from "./terrainTheme";
+import { preloadThreeAstronautAsset } from "./threeAstronautModel";
+import { preloadThreeGameObjectAssets } from "./threeGameObjectModels";
+import type { PlayerId } from "../types";
 
 interface NetworkInformationLike {
   readonly saveData?: boolean;
@@ -14,7 +17,7 @@ type NavigatorWithConnection = Navigator & {
   readonly connection?: NetworkInformationLike;
 };
 
-const COMMON_FIRST_MATCH_PLAYERS = ["player", "rival"] as const;
+export const COMMON_FIRST_MATCH_PLAYERS = ["player", "rival"] as const;
 const activePreloads = new Map<string, HTMLImageElement>();
 
 export const FIRST_MATCH_IMAGE_URLS = [
@@ -37,10 +40,11 @@ export function allowsFirstMatchPreload(
 }
 
 /**
- * Warms the small, playable 2D path after the menu is on screen. The larger
- * 3D models deliberately remain deferred until the terrain has rendered.
+ * Warms both the terrain images and cached raw 3D model bytes while the
+ * player is still on the menu. The match readiness gate also waits for these
+ * assets, so a fast click never exposes compatibility sprites in flight.
  */
-export function scheduleFirstMatchImagePreload() {
+export function scheduleFirstMatchAssetPreload() {
   if (
     typeof window === "undefined"
     || typeof Image === "undefined"
@@ -52,6 +56,7 @@ export function scheduleFirstMatchImagePreload() {
   }
 
   const start = () => {
+    preloadThreeGameplayAssets(COMMON_FIRST_MATCH_PLAYERS);
     for (const url of FIRST_MATCH_IMAGE_URLS) preloadImage(url);
   };
 
@@ -62,6 +67,11 @@ export function scheduleFirstMatchImagePreload() {
 
   const timer = window.setTimeout(start, 800);
   return () => window.clearTimeout(timer);
+}
+
+export function preloadThreeGameplayAssets(playerIds: readonly PlayerId[]) {
+  for (const playerId of playerIds) preloadThreeAstronautAsset(playerId);
+  preloadThreeGameObjectAssets(playerIds);
 }
 
 function preloadImage(url: string) {

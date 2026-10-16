@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   allowsFirstMatchPreload,
+  COMMON_FIRST_MATCH_PLAYERS,
   FIRST_MATCH_IMAGE_URLS,
 } from "./firstMatchAssets";
 
@@ -9,6 +10,12 @@ describe("FIRST_MATCH_IMAGE_URLS", () => {
     expect(FIRST_MATCH_IMAGE_URLS).toHaveLength(10);
     expect(new Set(FIRST_MATCH_IMAGE_URLS).size).toBe(FIRST_MATCH_IMAGE_URLS.length);
     expect(FIRST_MATCH_IMAGE_URLS.every((url) => url.endsWith(".webp"))).toBe(true);
+  });
+});
+
+describe("COMMON_FIRST_MATCH_PLAYERS", () => {
+  it("warms the complete bot-match roster", () => {
+    expect(COMMON_FIRST_MATCH_PLAYERS).toEqual(["player", "rival"]);
   });
 });
 

@@ -5,12 +5,14 @@ import { applyPlayerCommands, type PlayerCommand } from "../simulation/playerCon
 import { createInitialGameState } from "../state";
 import type { MovementCommand } from "../types";
 
-export function useLocalMatch() {
+export function useLocalMatch({ paused = false }: { paused?: boolean } = {}) {
   const [state, setState] = useState(createInitialGameState);
   const movementCommands = useRef<MovementCommand[]>([]);
   const deployRequested = useRef(false);
 
   useEffect(() => {
+    if (paused) return;
+
     let frameId = 0;
     let previousTime = performance.now();
     let accumulatorSeconds = 0;
@@ -62,7 +64,7 @@ export function useLocalMatch() {
 
     frameId = requestAnimationFrame(frame);
     return () => cancelAnimationFrame(frameId);
-  }, []);
+  }, [paused]);
 
   const sendMovementCommand = useCallback((command: MovementCommand) => {
     // Commands are consumed together on the next simulation frame in event order.

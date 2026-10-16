@@ -1,6 +1,4 @@
 import {
-  lazy,
-  Suspense,
   useCallback,
   useEffect,
   useRef,
@@ -49,10 +47,29 @@ import { useFollowCamera } from "../hooks/useFollowCamera";
 import { useSmoothedPositions } from "../hooks/useSmoothedPositions";
 import { PixiTerrainLayer } from "./PixiTerrainLayer";
 import { TetherCableLayer, TetherNetworkLayer } from "./TetherNetworkLayer";
+import ThreeAstronautLayer from "./ThreeAstronautLayer";
 
-const ThreeAstronautLayer = lazy(() => import("./ThreeAstronautLayer"));
-const THREE_LAYER_FALLBACK_DELAY_MS = 4_000;
-const THREE_LAYER_IDLE_TIMEOUT_MS = 800;
+export type ArenaPresentationState = "loading" | "ready" | "failed" | "fallback";
+
+interface ArenaPresentationReadiness {
+  readonly terrainReady: boolean;
+  readonly astronautsReady: boolean;
+  readonly objectsReady: boolean;
+  readonly loadFailed: boolean;
+  readonly compatibilityMode: boolean;
+}
+
+export function getArenaPresentationState({
+  terrainReady,
+  astronautsReady,
+  objectsReady,
+  loadFailed,
+  compatibilityMode,
+}: ArenaPresentationReadiness): ArenaPresentationState {
+  if (compatibilityMode) return "fallback";
+  if (loadFailed) return "failed";
+  return terrainReady && astronautsReady && objectsReady ? "ready" : "loading";
+}
 
 interface ArenaRendererProps {
   state: GameState;
@@ -65,6 +82,8 @@ interface ArenaRendererProps {
   onOverviewSettled?: () => void;
   tutorialStep?: TutorialStepId | null;
   tutorialTarget?: Vec2 | null;
+  compatibilityMode?: boolean;
+  onPresentationStateChange?: (state: ArenaPresentationState) => void;
 }
 
 type GestureMode =
@@ -97,6 +116,8 @@ export function ArenaRenderer({
   onOverviewSettled,
   tutorialStep = null,
   tutorialTarget = null,
+  compatibilityMode = false,
+  onPresentationStateChange,
 }: ArenaRendererProps) {
   const renderPositions = useSmoothedPositions(state, interpolatePositions);
   const localAstronaut = state.players[localPlayerId].astronaut;
@@ -106,9 +127,9 @@ export function ArenaRenderer({
   );
   const arenaRef = useRef<SVGSVGElement>(null);
   const [terrainReady, setTerrainReady] = useState(false);
-  const [threeLayerEnabled, setThreeLayerEnabled] = useState(false);
   const [threeAstronautsReady, setThreeAstronautsReady] = useState(false);
   const [threeObjectsReady, setThreeObjectsReady] = useState(false);
+  const [threeLoadFailed, setThreeLoadFailed] = useState(false);
   const [chargeIntentActive, setChargeIntentActive] = useState(false);
   const [oxygenRefillSerial, setOxygenRefillSerial] = useState(0);
   const oxygenWasDepletedRef = useRef(
@@ -132,33 +153,20 @@ export function ArenaRenderer({
   const [touchChargePreview, setTouchChargePreview] = useState<TankInput | null>(null);
   commandRef.current = onMovementCommand;
   localAstronautRef.current = localAstronaut;
+  const presentationState = getArenaPresentationState({
+    terrainReady,
+    astronautsReady: threeAstronautsReady,
+    objectsReady: threeObjectsReady,
+    loadFailed: threeLoadFailed,
+    compatibilityMode,
+  });
+  const interactionDisabled = disabled
+    || presentationState === "loading"
+    || presentationState === "failed";
 
   useEffect(() => {
-    if (threeLayerEnabled) return;
-
-    const enableThreeLayer = () => setThreeLayerEnabled(true);
-    const fallbackTimer = window.setTimeout(
-      enableThreeLayer,
-      THREE_LAYER_FALLBACK_DELAY_MS,
-    );
-    if (!terrainReady) return () => window.clearTimeout(fallbackTimer);
-
-    let idleCallback: number | null = null;
-    let idleFallbackTimer: number | null = null;
-    if (typeof window.requestIdleCallback === "function") {
-      idleCallback = window.requestIdleCallback(enableThreeLayer, {
-        timeout: THREE_LAYER_IDLE_TIMEOUT_MS,
-      });
-    } else {
-      idleFallbackTimer = window.setTimeout(enableThreeLayer, 120);
-    }
-
-    return () => {
-      window.clearTimeout(fallbackTimer);
-      if (idleCallback !== null) window.cancelIdleCallback(idleCallback);
-      if (idleFallbackTimer !== null) window.clearTimeout(idleFallbackTimer);
-    };
-  }, [terrainReady, threeLayerEnabled]);
+    onPresentationStateChange?.(presentationState);
+  }, [onPresentationStateChange, presentationState]);
 
   useEffect(() => {
     if (localAstronaut.oxygen < GAME_RULES.oxygenMaximum - 0.001) {
@@ -216,7 +224,7 @@ export function ArenaRenderer({
   }, [clearPointerGesture]);
 
   const { clearKeyboardMovement } = useKeyboardMovement({
-    disabled,
+    disabled: interactionDisabled,
     movementMode: localAstronaut.movement.mode,
     onMovementCommand,
     onKeyboardTakeover: cancelGesture,
@@ -242,14 +250,14 @@ export function ArenaRenderer({
   ]);
 
   useEffect(() => {
-    if (document.activeElement === document.body) {
+    if (!interactionDisabled && document.activeElement === document.body) {
       arenaRef.current?.focus({ preventScroll: true });
     }
-  }, []);
+  }, [interactionDisabled]);
 
   useEffect(() => {
-    if (disabled) cancelGesture();
-  }, [cancelGesture, disabled]);
+    if (interactionDisabled) cancelGesture();
+  }, [cancelGesture, interactionDisabled]);
 
   useEffect(() => {
     const gesture = gestureRef.current;
@@ -290,7 +298,7 @@ export function ArenaRenderer({
 
   function beginGesture(event: PointerEvent<SVGSVGElement>) {
     if (
-      disabled ||
+      interactionDisabled ||
       gestureRef.current ||
       !event.isPrimary ||
       (event.pointerType === "mouse" && event.button !== 0)
@@ -387,7 +395,7 @@ export function ArenaRenderer({
 
   function continueGesture(event: PointerEvent<SVGSVGElement>) {
     const gesture = gestureRef.current;
-    if (disabled || !gesture || gesture.pointerId !== event.pointerId) return;
+    if (interactionDisabled || !gesture || gesture.pointerId !== event.pointerId) return;
 
     event.preventDefault();
     const clientPoint = { x: event.clientX, y: event.clientY };
@@ -418,7 +426,7 @@ export function ArenaRenderer({
   function finishGesture(event: PointerEvent<SVGSVGElement>) {
     const gesture = gestureRef.current;
     if (!gesture || gesture.pointerId !== event.pointerId) return;
-    if (disabled) {
+    if (interactionDisabled) {
       cancelGesture();
       return;
     }
@@ -474,12 +482,24 @@ export function ArenaRenderer({
     if (gestureRef.current?.pointerId === event.pointerId) cancelGesture();
   }
 
+  const handlePresentationLoadError = useCallback(() => {
+    setTerrainReady(false);
+    setThreeAstronautsReady(false);
+    setThreeObjectsReady(false);
+    setThreeLoadFailed(true);
+  }, []);
+  const threePresentationReady = presentationState === "ready";
+
   return (
-    <div className={`world-stage${threeAstronautsReady ? " world-stage--three-astronauts" : ""}${threeObjectsReady ? " world-stage--three-objects" : ""}`}>
+    <div
+      className={`world-stage world-stage--${presentationState}${threePresentationReady ? " world-stage--three-astronauts world-stage--three-objects" : ""}`}
+      aria-busy={presentationState === "loading"}
+    >
       <PixiTerrainLayer
         state={state}
         camera={camera}
         onInitialRender={() => setTerrainReady(true)}
+        onLoadError={handlePresentationLoadError}
       />
       <svg
         className="world world--player-underlay"
@@ -514,11 +534,11 @@ export function ArenaRenderer({
         className="world"
         viewBox={`${camera.x} ${camera.y} ${camera.width} ${camera.height}`}
         role="application"
-        tabIndex={0}
+        tabIndex={interactionDisabled ? -1 : 0}
         aria-roledescription="game arena"
         aria-label="Tetherbound game arena. Keyboard controls stay active throughout the match. Use W and S or the up and down arrows to drive forward and reverse. Use A and D or the left and right arrows to turn. Tap W or S, then press and hold that same key to charge; release it to burst. Press T to deploy a tether and Escape to cancel keyboard movement. Drag to move with a pointer. On a touch screen, tap once, then press and hold nearby to charge toward your finger; release to burst."
         aria-keyshortcuts="W A S D T ArrowUp ArrowDown ArrowLeft ArrowRight"
-        aria-disabled={disabled}
+        aria-disabled={interactionDisabled}
         onContextMenu={(event) => event.preventDefault()}
         onPointerDown={beginGesture}
         onPointerMove={continueGesture}
@@ -557,16 +577,15 @@ export function ArenaRenderer({
           />
         ))}
       </svg>
-      {threeLayerEnabled && (
-        <Suspense fallback={null}>
-          <ThreeAstronautLayer
-            state={state}
-            renderPositions={renderPositions}
-            camera={camera}
-            onReadyChange={setThreeAstronautsReady}
-            onObjectReadyChange={setThreeObjectsReady}
-          />
-        </Suspense>
+      {!compatibilityMode && !threeLoadFailed && (
+        <ThreeAstronautLayer
+          state={state}
+          renderPositions={renderPositions}
+          camera={camera}
+          onReadyChange={setThreeAstronautsReady}
+          onObjectReadyChange={setThreeObjectsReady}
+          onLoadError={handlePresentationLoadError}
+        />
       )}
     </div>
   );

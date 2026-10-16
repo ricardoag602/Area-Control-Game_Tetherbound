@@ -1,4 +1,11 @@
-import { useMemo, type CSSProperties } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import { GAME_RULES } from "../constants";
 import { distance } from "../geometry";
 import {
@@ -21,7 +28,10 @@ import {
   type TutorialStepId,
 } from "../tutorial/guidedSetup";
 import { useGuidedSetup } from "../tutorial/useGuidedSetup";
-import { ArenaRenderer } from "./ArenaRenderer";
+import {
+  ArenaRenderer,
+  type ArenaPresentationState,
+} from "./ArenaRenderer";
 import {
   GuidedSetupCoach,
   GuidedSetupObjectiveReminder,
@@ -44,6 +54,7 @@ interface MatchScreenProps {
   onMovementCommand: (command: MovementCommand) => void;
   onDeploy: () => void;
   onLeave: () => void;
+  onPresentationStateChange?: (state: ArenaPresentationState) => void;
 }
 
 function formatTime(milliseconds: number) {
@@ -51,7 +62,20 @@ function formatTime(milliseconds: number) {
   return `${Math.floor(totalSeconds / 60)}:${(totalSeconds % 60).toString().padStart(2, "0")}`;
 }
 
-export function MatchScreen({ audioEnabled, tutorialEnabled, state, localPlayerId, playerNames = {}, statusText, latencyMs, controlsDisabled = false, reconnectPrompt, interpolatePositions = false, onMovementCommand, onDeploy, onLeave }: MatchScreenProps) {
+export const MATCH_PRESENTATION_TIMEOUT_MS = 45_000;
+
+export function scheduleMatchPresentationTimeout(
+  onTimeout: () => void,
+  timeoutMs = MATCH_PRESENTATION_TIMEOUT_MS,
+) {
+  const timeout = setTimeout(onTimeout, timeoutMs);
+  return () => clearTimeout(timeout);
+}
+
+export function MatchScreen({ audioEnabled, tutorialEnabled, state, localPlayerId, playerNames = {}, statusText, latencyMs, controlsDisabled = false, reconnectPrompt, interpolatePositions = false, onMovementCommand, onDeploy, onLeave, onPresentationStateChange }: MatchScreenProps) {
+  const [presentationState, setPresentationState] = useState<ArenaPresentationState>("loading");
+  const [presentationAttempt, setPresentationAttempt] = useState(0);
+  const [compatibilityMode, setCompatibilityMode] = useState(false);
   const astronaut = state.players[localPlayerId].astronaut;
   const { progress: guidedSetup } = useGuidedSetup(
     state,
@@ -118,7 +142,10 @@ export function MatchScreen({ audioEnabled, tutorialEnabled, state, localPlayerI
         collapsePercent,
       )
     : null;
-  const controlHint = controlsDisabled
+  const presentationBlocked = presentationState === "loading"
+    || presentationState === "failed";
+  const interactionDisabled = controlsDisabled || presentationBlocked;
+  const controlHint = interactionDisabled
     ? "Match paused while the link recovers"
     : astronaut.movement.mode === "charging"
       ? chargePercent >= 100
@@ -127,7 +154,7 @@ export function MatchScreen({ audioEnabled, tutorialEnabled, state, localPlayerI
       : astronaut.movement.mode === "burst"
         ? "Momentum burst"
         : null;
-  const deployDisabled = controlsDisabled || !canDeployAnchor(state, localPlayerId);
+  const deployDisabled = interactionDisabled || !canDeployAnchor(state, localPlayerId);
   const showFinalMinuteFlash = state.matchPhase === "regulation" &&
     state.remainingMs <= GAME_RULES.scoreSurgeDurationMs &&
     state.remainingMs > GAME_RULES.scoreSurgeDurationMs - 5_000;
@@ -153,13 +180,38 @@ export function MatchScreen({ audioEnabled, tutorialEnabled, state, localPlayerI
   );
   useDeployShortcut({ disabled: deployDisabled, onDeploy });
 
+  const handleArenaPresentationStateChange = useCallback(
+    (nextState: ArenaPresentationState) => {
+      setPresentationState((currentState) =>
+        currentState === "failed" ? currentState : nextState
+      );
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (presentationState !== "loading") return;
+    return scheduleMatchPresentationTimeout(() => setPresentationState("failed"));
+  }, [presentationAttempt, presentationState]);
+
+  useEffect(() => {
+    onPresentationStateChange?.(presentationState);
+  }, [onPresentationStateChange, presentationState]);
+
   return (
-    <div className={`screen screen--game screen--active-match${hideMatchProgress ? " screen--final-countdown" : ""}`}>
+    <div
+      className={`screen screen--game screen--active-match screen--presentation-${presentationState}${hideMatchProgress ? " screen--final-countdown" : ""}`}
+    >
+      <div
+        className="match-presentation-content"
+        aria-hidden={presentationBlocked || undefined}
+        inert={presentationBlocked || undefined}
+      >
       <GameAudioLayer
         state={state}
         localPlayerId={localPlayerId}
         enabled={audioEnabled}
-        disabled={controlsDisabled}
+        disabled={interactionDisabled}
       />
       {!hideMatchProgress && (
         <div className="game-top-bar">
@@ -179,11 +231,13 @@ export function MatchScreen({ audioEnabled, tutorialEnabled, state, localPlayerI
         </div>
       )}
       <div className="arena">
-        <ArenaRenderer state={state} localPlayerId={localPlayerId} disabled={controlsDisabled}
+        <ArenaRenderer key={presentationAttempt} state={state} localPlayerId={localPlayerId} disabled={interactionDisabled}
           interpolatePositions={interpolatePositions}
           oxygenZoomMultiplier={oxygenPresentation.cameraZoomMultiplier}
           tutorialStep={tutorialStep}
           tutorialTarget={tutorialTarget}
+          compatibilityMode={compatibilityMode}
+          onPresentationStateChange={handleArenaPresentationStateChange}
           onMovementCommand={onMovementCommand} />
         <div className="oxygen-danger-overlay" style={oxygenEffectStyle} aria-hidden="true" />
         {!hideMatchProgress && (
@@ -313,6 +367,83 @@ export function MatchScreen({ audioEnabled, tutorialEnabled, state, localPlayerI
           <span className="deploy-button__label">Deploy</span>
           <kbd className="deploy-button__shortcut">T</kbd>
         </button>
+      </div>
+      </div>
+      {presentationBlocked && (
+        <MatchPresentationGate
+          failed={presentationState === "failed"}
+          onRetry={() => {
+            setCompatibilityMode(false);
+            setPresentationState("loading");
+            setPresentationAttempt((attempt) => attempt + 1);
+          }}
+          onUseCompatibilityMode={() => {
+            setCompatibilityMode(true);
+            setPresentationState("fallback");
+          }}
+          onLeave={onLeave}
+        />
+      )}
+    </div>
+  );
+}
+
+export function MatchPresentationGate({
+  failed,
+  onRetry,
+  onUseCompatibilityMode,
+  onLeave,
+}: {
+  failed: boolean;
+  onRetry: () => void;
+  onUseCompatibilityMode: () => void;
+  onLeave: () => void;
+}) {
+  const initialFocusRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    initialFocusRef.current?.focus({ preventScroll: true });
+  }, [failed]);
+
+  return (
+    <div className="match-presentation-gate">
+      <div
+        className="match-presentation-gate__card"
+        role={failed ? "alertdialog" : "dialog"}
+        aria-modal="true"
+        aria-labelledby="match-presentation-title"
+        aria-describedby="match-presentation-description"
+        aria-live={failed ? "assertive" : "polite"}
+        aria-atomic="true"
+      >
+        <div className="match-presentation-gate__orbit" aria-hidden="true">
+          <span />
+          <i />
+        </div>
+        <p className="eyebrow">Mission visuals</p>
+        <h2 id="match-presentation-title">
+          {failed ? "3D scene unavailable" : "Preparing the frontier…"}
+        </h2>
+        <p id="match-presentation-description">
+          {failed
+            ? "Tetherbound could not prepare the complete 3D scene on this device."
+            : "Loading the terrain, astronauts, and tether equipment before launch."}
+        </p>
+        {failed ? (
+          <div className="match-presentation-gate__actions">
+            <button ref={initialFocusRef} className="button button--primary" onClick={onRetry}>
+              Try 3D again
+            </button>
+            <button className="button button--secondary" onClick={onUseCompatibilityMode}>
+              Use compatibility graphics
+            </button>
+            <button className="button button--text" onClick={onLeave}>Return to menu</button>
+          </div>
+        ) : (
+          <button ref={initialFocusRef} className="button button--text" onClick={onLeave}>
+            Return to menu
+          </button>
+        )}
       </div>
     </div>
   );

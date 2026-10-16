@@ -48,6 +48,7 @@ interface ThreeAstronautLayerProps {
   camera: CameraViewBox;
   onReadyChange?: (ready: boolean) => void;
   onObjectReadyChange?: (ready: boolean) => void;
+  onLoadError?: (error: unknown) => void;
 }
 
 interface LatestFrame {
@@ -63,6 +64,7 @@ export default function ThreeAstronautLayer({
   camera,
   onReadyChange,
   onObjectReadyChange,
+  onLoadError,
 }: ThreeAstronautLayerProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const terrainLightZones = collectTerrainLightZones(state);
@@ -86,6 +88,7 @@ export default function ThreeAstronautLayer({
     let animationFrame = 0;
     let cancelled = false;
     let contextLost = false;
+    let loadFailureReported = false;
     let resizeDirty = true;
     let renderer: THREE.WebGLRenderer | null = null;
     let boostSmokeRuntime: ThreeBoostChargeSmokeRuntime | null = null;
@@ -161,6 +164,7 @@ export default function ThreeAstronautLayer({
       scene.add(interactionEffectsRuntime.mesh);
     } catch (error) {
       console.error("Unable to initialize 3D astronaut renderer", error);
+      reportLoadFailure(error);
       resizeObserver.disconnect();
       motionPreference.removeEventListener("change", handleMotionPreference);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
@@ -180,7 +184,7 @@ export default function ThreeAstronautLayer({
     }
 
     const requestedPlayerIds = [...latestRef.current.state.activePlayerIds];
-    const astronautLoad = Promise.allSettled(
+    void Promise.allSettled(
       requestedPlayerIds.map(async (playerId) => ({
         playerId,
         asset: await loadThreeAstronautAsset(playerId),
@@ -190,9 +194,12 @@ export default function ThreeAstronautLayer({
         result.status === "fulfilled" ? [result.value] : []
       );
       const failed = results.find((result) => result.status === "rejected");
-      if (cancelled || failed) {
+      if (cancelled || failed || loadFailureReported) {
         for (const { asset } of loaded) disposeThreeAstronautAsset(asset);
-        if (failed) console.error("Unable to load a 3D astronaut model", failed.reason);
+        if (failed) {
+          console.error("Unable to load a 3D astronaut model", failed.reason);
+          reportLoadFailure(failed.reason);
+        }
         return;
       }
 
@@ -211,6 +218,7 @@ export default function ThreeAstronautLayer({
           if (!consumedScenes.has(asset.scene)) disposeThreeAstronautAsset(asset);
         }
         console.error("Unable to create a 3D astronaut model", error);
+        reportLoadFailure(error);
         return;
       }
 
@@ -221,32 +229,33 @@ export default function ThreeAstronautLayer({
       astronautAssetsReady = true;
     });
 
-    void astronautLoad.then(() => {
-      if (cancelled) return;
-      // Keep the essential terrain and astronaut requests ahead of decorative
-      // object models. SVG bases, anchors, and salvage remain visible meanwhile.
-      void loadThreeGameObjectAssets(requestedPlayerIds).then((assets) => {
-        if (cancelled) {
-          disposeThreeGameObjectAssets(assets);
-          return;
-        }
-        try {
-          objectRuntime = createThreeGameObjectRuntime(
-            assets,
-            latestRef.current.state,
-            reduceMotion,
-          );
-          scene.add(objectRuntime.root);
-          reconciledObjectState = latestRef.current.state;
-          reconciledObjectElapsedMs = latestRef.current.state.elapsedMs;
-          objectAssetsReady = true;
-        } catch (error) {
-          disposeThreeGameObjectAssets(assets);
-          console.error("Unable to create 3D game objects", error);
-        }
-      }).catch((error) => {
-        if (!cancelled) console.error("Unable to load 3D game objects", error);
-      });
+    // Start every required model request together. The outer readiness gate
+    // keeps the world concealed until both groups have rendered atomically.
+    void loadThreeGameObjectAssets(requestedPlayerIds).then((assets) => {
+      if (cancelled || loadFailureReported) {
+        disposeThreeGameObjectAssets(assets);
+        return;
+      }
+      try {
+        objectRuntime = createThreeGameObjectRuntime(
+          assets,
+          latestRef.current.state,
+          reduceMotion,
+        );
+        scene.add(objectRuntime.root);
+        reconciledObjectState = latestRef.current.state;
+        reconciledObjectElapsedMs = latestRef.current.state.elapsedMs;
+        objectAssetsReady = true;
+      } catch (error) {
+        disposeThreeGameObjectAssets(assets);
+        console.error("Unable to create 3D game objects", error);
+        reportLoadFailure(error);
+      }
+    }).catch((error) => {
+      if (!cancelled) {
+        console.error("Unable to load 3D game objects", error);
+        reportLoadFailure(error);
+      }
     });
 
     const draw = (timeMs: number) => {
@@ -372,6 +381,7 @@ export default function ThreeAstronautLayer({
       }
       readyCallbackRef.current?.(false);
       objectReadyCallbackRef.current?.(false);
+      reportLoadFailure(new Error("The 3D rendering context was lost."));
     }
 
     function handleContextRestored() {
@@ -386,7 +396,13 @@ export default function ThreeAstronautLayer({
         );
       }
     }
-  }, [playerKey]);
+
+    function reportLoadFailure(error: unknown) {
+      if (cancelled || loadFailureReported) return;
+      loadFailureReported = true;
+      onLoadError?.(error);
+    }
+  }, [onLoadError, playerKey]);
 
   return <div ref={hostRef} className="three-astronaut-layer" aria-hidden="true" />;
 }

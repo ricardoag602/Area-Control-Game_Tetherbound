@@ -21,7 +21,10 @@ import {
     AUDIO_PREFERENCE_KEY,
     readAudioPreference,
 } from "./game/audio/gameAudio";
-import { scheduleFirstMatchImagePreload } from "./game/presentation/firstMatchAssets";
+import {
+    preloadThreeGameplayAssets,
+    scheduleFirstMatchAssetPreload,
+} from "./game/presentation/firstMatchAssets";
 import {
     readTutorialPreference,
     writeTutorialPreference,
@@ -67,8 +70,15 @@ export function App() {
 
     useEffect(() => {
         if (view !== "menu") return;
-        return scheduleFirstMatchImagePreload();
+        return scheduleFirstMatchAssetPreload();
     }, [view]);
+
+    useEffect(() => {
+        if (view !== "lobby" || !roomSession.room) return;
+        preloadThreeGameplayAssets(
+            roomSession.room.players.map((player) => player.id),
+        );
+    }, [roomSession.room, view]);
 
     useEffect(() => {
         if (resumeAttempted.current || !initialRoomCode) return;
@@ -115,6 +125,7 @@ export function App() {
     ]);
 
     function startBotGame() {
+        preloadThreeGameplayAssets(["player", "rival"]);
         roomClient.leave();
         clearRoomFromUrl();
         setGameMode("bot");

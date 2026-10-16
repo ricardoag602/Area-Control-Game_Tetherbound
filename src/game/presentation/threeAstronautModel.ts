@@ -1,10 +1,11 @@
 import * as THREE from "three";
-import {
-  GLTFLoader,
-  type GLTF,
-} from "three/examples/jsm/loaders/GLTFLoader.js";
+import type { GLTF } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { publicAssetUrl } from "../assetUrl";
 import type { AstronautState, MovementState, PlayerId, Vec2 } from "../types";
+import {
+  loadThreeModelAsset,
+  preloadThreeModelAsset,
+} from "./threeModelAssetCache";
 
 const MODEL_URLS = {
   player: publicAssetUrl("astronauts/Astronaut_Blue.glb"),
@@ -42,8 +43,12 @@ export interface ThreeAstronautPose {
   readonly animation: ThreeAstronautAnimationState;
 }
 
+export function preloadThreeAstronautAsset(playerId: PlayerId) {
+  preloadThreeModelAsset(MODEL_URLS[playerId]);
+}
+
 export async function loadThreeAstronautAsset(playerId: PlayerId) {
-  return new GLTFLoader().loadAsync(MODEL_URLS[playerId]);
+  return loadThreeModelAsset(MODEL_URLS[playerId]);
 }
 
 /**
