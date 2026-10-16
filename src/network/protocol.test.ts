@@ -9,11 +9,13 @@ describe("movement protocol", () => {
       requestId: "room-request-123",
       name: "Host",
       playerLimit,
+      visibility: "public",
     }))).toEqual({
       type: "create_room",
       requestId: "room-request-123",
       name: "Host",
       playerLimit,
+      visibility: "public",
     });
   });
 
@@ -23,7 +25,27 @@ describe("movement protocol", () => {
       requestId: "room-request-123",
       name: "Host",
       playerLimit,
+      visibility: "private",
     }))).toBeNull();
+  });
+
+  it.each(["friends", "", null])("rejects invalid room visibility %j", (visibility) => {
+    expect(parseClientMessage(JSON.stringify({
+      type: "create_room",
+      requestId: "room-request-123",
+      name: "Host",
+      playerLimit: 2,
+      visibility,
+    }))).toBeNull();
+  });
+
+  it("defaults older create-room messages to private visibility", () => {
+    expect(parseClientMessage(JSON.stringify({
+      type: "create_room",
+      requestId: "room-request-123",
+      name: "Host",
+      playerLimit: 2,
+    }))).toMatchObject({ visibility: "private" });
   });
 
   it.each([

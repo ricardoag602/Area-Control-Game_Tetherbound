@@ -3,7 +3,6 @@ import { parseClientMessage, type ClientMessage } from "@/src/network/protocol";
 import {
   RoomServiceError,
   type D1DatabaseLike,
-  type RoomServiceResponse,
 } from "@/sites-server/roomService";
 
 const NO_STORE_HEADERS = { "cache-control": "no-store" };
@@ -54,8 +53,8 @@ export function bearerToken(request: Request): string {
   return token;
 }
 
-export async function roomServiceResponse(
-  operation: () => Promise<RoomServiceResponse>,
+export async function roomServiceResponse<T extends object>(
+  operation: () => Promise<T>,
 ): Promise<Response> {
   try {
     return Response.json(await operation(), { headers: NO_STORE_HEADERS });

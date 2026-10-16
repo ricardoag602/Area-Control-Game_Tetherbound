@@ -8,6 +8,9 @@ process or public WebSocket port is required.
 Rooms are persisted as versioned documents. Clients send ordered input batches
 and poll versioned snapshots; optimistic compare-and-swap updates keep two
 simultaneous players from advancing the authoritative state independently.
+Hosts can create either public rooms, which appear in the join screen's live
+directory while they remain joinable, or private rooms, which are unlisted and
+available only through their room code or invitation link.
 
 ## Build and publish
 
@@ -23,15 +26,19 @@ The production artifact must contain:
 - `dist/client/game/index.html`
 - `dist/.openai/hosting.json`
 - `dist/.openai/drizzle/0000_flowery_shinobi_shaw.sql`
+- `dist/.openai/drizzle/0001_outstanding_reavers.sql`
 
-Publish the built artifact through Sites. The bundled migration creates the
-room tables before the Worker begins handling multiplayer requests.
+Publish the built artifact through Sites. The bundled migrations create the
+room tables and add the public-room directory metadata before the Worker begins
+handling multiplayer requests.
 
 ## Release verification
 
 1. Open the published Site and confirm it redirects to `/game/index.html`.
-2. Create a room and copy its invitation link.
-3. Join from a second browser session or phone.
+2. Create a private room and confirm it stays out of the public directory but
+   remains joinable by code or invitation link.
+3. Create a public room, enter a name in a second browser session or phone,
+   browse public rooms, and select the host's room.
 4. Ready both players and verify that movement and tether deployment appear on
    both devices.
 5. Refresh one client and verify it resumes its slot within 30 seconds.

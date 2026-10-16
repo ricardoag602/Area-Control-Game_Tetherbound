@@ -52,6 +52,7 @@ interface MatchRoom {
   revision: number;
   stateVersion: number;
   phase: "lobby" | "playing" | "finished";
+  visibility: "public" | "private";
   playerLimit: PlayerLimit;
   players: Map<PlayerId, ConnectedPlayer>;
   gameState: GameState | null;
@@ -215,6 +216,7 @@ export class RoomServer {
       revision: 1,
       stateVersion: 0,
       phase: "lobby",
+      visibility: message.visibility ?? "private",
       playerLimit: message.playerLimit,
       players: new Map(),
       gameState: null,
@@ -640,6 +642,7 @@ export class RoomServer {
       code: room.code,
       revision: room.revision,
       playerLimit: room.playerLimit,
+      visibility: room.visibility,
       phase: room.phase,
       players,
       winner: room.winner,

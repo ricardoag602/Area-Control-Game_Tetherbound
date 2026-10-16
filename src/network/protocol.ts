@@ -9,6 +9,7 @@ import type {
 } from "../game/types";
 
 export type RoomPhase = "lobby" | "playing" | "finished";
+export type RoomVisibility = "public" | "private";
 
 export interface RoomPlayerSummary {
   id: PlayerId;
@@ -21,14 +22,30 @@ export interface RoomSnapshot {
   code: string;
   revision: number;
   playerLimit: PlayerLimit;
+  visibility: RoomVisibility;
   phase: RoomPhase;
   players: RoomPlayerSummary[];
   winner: PlayerId | "draw" | null;
   finishReason: MatchFinishReason | "disconnect" | null;
 }
 
+export interface PublicRoomSummary {
+  code: string;
+  hostName: string;
+  playerCount: number;
+  playerLimit: PlayerLimit;
+  updatedAt: number;
+}
+
 export type ClientMessage =
-  | { type: "create_room"; requestId: string; name: string; playerLimit: PlayerLimit }
+  | {
+      type: "create_room";
+      requestId: string;
+      name: string;
+      playerLimit: PlayerLimit;
+      /** Older clients omitted this field; the parser treats that as private. */
+      visibility?: RoomVisibility;
+    }
   | { type: "join_room"; requestId: string; code: string; name: string; sessionToken?: string }
   | { type: "set_ready"; ready: boolean }
   | { type: "movement_input"; seq: number; command: MovementCommand }
@@ -63,15 +80,23 @@ export function parseClientMessage(value: string): ClientMessage | null {
     if (!isRecord(candidate) || typeof candidate.type !== "string") return null;
 
     switch (candidate.type) {
-      case "create_room":
-        return validRequestId(candidate.requestId) && validName(candidate.name) && validPlayerLimit(candidate.playerLimit)
+      case "create_room": {
+        const visibility = candidate.visibility === undefined
+          ? "private"
+          : candidate.visibility;
+        return validRequestId(candidate.requestId) &&
+          validName(candidate.name) &&
+          validPlayerLimit(candidate.playerLimit) &&
+          validRoomVisibility(visibility)
           ? {
               type: "create_room",
               requestId: candidate.requestId,
               name: candidate.name,
               playerLimit: candidate.playerLimit,
+              visibility,
             }
           : null;
+      }
       case "join_room":
         return validRequestId(candidate.requestId) &&
           typeof candidate.code === "string" &&
@@ -139,6 +164,10 @@ function validSequence(value: unknown): value is number {
 
 function validPlayerLimit(value: unknown): value is PlayerLimit {
   return value === 2 || value === 3 || value === 4;
+}
+
+function validRoomVisibility(value: unknown): value is RoomVisibility {
+  return value === "public" || value === "private";
 }
 
 function validTarget(value: unknown): value is Vec2 | null {

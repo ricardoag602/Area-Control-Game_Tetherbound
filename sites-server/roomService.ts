@@ -14,8 +14,10 @@ import {
 import {
   parseClientMessage,
   type ClientMessage,
+  type PublicRoomSummary,
   type RoomPlayerSummary,
   type RoomSnapshot,
+  type RoomVisibility,
   type ServerMessage,
 } from "../src/network/protocol";
 
@@ -27,6 +29,7 @@ const MAX_ACTION_HISTORY = 256;
 const MAX_PENDING_INPUTS = 64;
 const MAX_REQUEST_KEYS_PER_PLAYER = 16;
 const MAX_SYNC_COMMANDS = 64;
+const MAX_PUBLIC_ROOM_RESULTS = 50;
 const PRESENCE_LEASE_MS = 10_000;
 const DISCONNECT_GRACE_MS = 30_000;
 const ACTIVE_ROOM_TTL_MS = 20 * 60 * 1000;
@@ -85,6 +88,11 @@ export interface RoomServiceResponse {
   serverTime: number;
 }
 
+export interface PublicRoomDirectoryResponse {
+  rooms: PublicRoomSummary[];
+  serverTime: number;
+}
+
 export class RoomServiceError extends Error {
   constructor(
     readonly code: string,
@@ -121,16 +129,18 @@ interface PersistedPlayer {
 }
 
 interface PersistedRoom {
-  schemaVersion: 1;
+  schemaVersion: 2;
   code: string;
   revision: number;
   stateVersion: number;
+  visibility: RoomVisibility;
   phase: "lobby" | "playing" | "finished";
   playerLimit: PlayerLimit;
   players: PersistedPlayer[];
   gameState: GameState | null;
   winner: PlayerId | "draw" | null;
   finishReason: MatchFinishReason | "disconnect" | null;
+  createdAt: number;
   lastSimulatedAt: number;
   lastActivityAt: number;
 }
@@ -139,6 +149,15 @@ interface RoomRow {
   version: number;
   document: string;
   expires_at: number;
+}
+
+interface PublicRoomRow {
+  code: string;
+  host_name: string;
+  player_count: number;
+  player_limit: number;
+  phase: string;
+  updated_at: number;
 }
 
 interface MutationResult<T> {
@@ -157,6 +176,7 @@ export async function createRoom(
 ): Promise<RoomServiceResponse> {
   validateCreateMessage(message);
   const now = Date.now();
+  const visibility = message.visibility ?? "private";
 
   const existing = await findCreateRequest(db, message.requestId);
   if (existing) {
@@ -172,16 +192,18 @@ export async function createRoom(
     const code = createRoomCode();
     const player = createPlayer("player", message.name, now, `create:${message.requestId}`);
     const room: PersistedRoom = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       code,
       revision: 2,
       stateVersion: 0,
+      visibility,
       phase: "lobby",
       playerLimit: message.playerLimit,
       players: [player],
       gameState: null,
       winner: null,
       finishReason: null,
+      createdAt: now,
       lastSimulatedAt: now,
       lastActivityAt: now,
     };
@@ -189,8 +211,20 @@ export async function createRoom(
     try {
       const batchResults = await db.batch([
         db.prepare(
-          "INSERT INTO rooms (code, version, document, updated_at, expires_at) VALUES (?1, 1, ?2, ?3, ?4)",
-        ).bind(code, serializeRoom(room), now, roomExpiry(room, now)),
+          "INSERT INTO rooms (code, version, document, visibility, phase, player_count, player_limit, host_name, host_last_seen_at, created_at, updated_at, expires_at) VALUES (?1, 1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+        ).bind(
+          code,
+          serializeRoom(room),
+          room.visibility,
+          room.phase,
+          room.players.length,
+          room.playerLimit,
+          roomHostName(room),
+          roomHostLastSeenAt(room),
+          room.createdAt,
+          now,
+          roomExpiry(room, now),
+        ),
         db.prepare(
           "INSERT INTO create_requests (request_id, room_code, created_at) VALUES (?1, ?2, ?3)",
         ).bind(message.requestId, code, now),
@@ -218,6 +252,32 @@ export async function createRoom(
     true,
     500,
   );
+}
+
+export async function listPublicRooms(
+  db: D1DatabaseLike,
+): Promise<PublicRoomDirectoryResponse> {
+  const now = Date.now();
+  const result = await db.prepare(
+    "SELECT code, host_name, player_count, player_limit, phase, updated_at FROM rooms WHERE visibility = 'public' AND phase = 'lobby' AND player_count < player_limit AND expires_at > ?1 AND host_last_seen_at > ?2 ORDER BY updated_at DESC, code ASC LIMIT ?3",
+  ).bind(
+    now,
+    now - PRESENCE_LEASE_MS,
+    MAX_PUBLIC_ROOM_RESULTS,
+  ).all<PublicRoomRow>();
+
+  const rooms = (result.results ?? []).flatMap((row) => {
+    if (!validPublicRoomRow(row)) return [];
+    return [{
+      code: row.code,
+      hostName: row.host_name,
+      playerCount: row.player_count,
+      playerLimit: row.player_limit,
+      updatedAt: row.updated_at,
+    }];
+  });
+
+  return { rooms, serverTime: now };
 }
 
 export async function joinRoom(
@@ -428,9 +488,16 @@ async function mutateRoom<T>(
     }
 
     const updated = await db.prepare(
-      "UPDATE rooms SET document = ?1, version = version + 1, updated_at = ?2, expires_at = ?3 WHERE code = ?4 AND version = ?5 RETURNING version",
+      "UPDATE rooms SET document = ?1, visibility = ?2, phase = ?3, player_count = ?4, player_limit = ?5, host_name = ?6, host_last_seen_at = ?7, created_at = ?8, version = version + 1, updated_at = ?9, expires_at = ?10 WHERE code = ?11 AND version = ?12 RETURNING version",
     ).bind(
       serializeRoom(room),
+      room.visibility,
+      room.phase,
+      room.players.length,
+      room.playerLimit,
+      roomHostName(room),
+      roomHostLastSeenAt(room),
+      room.createdAt,
       now,
       roomExpiry(room, now),
       code,
@@ -779,6 +846,7 @@ function roomSnapshot(room: PersistedRoom): RoomSnapshot {
     code: room.code,
     revision: room.revision,
     playerLimit: room.playerLimit,
+    visibility: room.visibility,
     phase: room.phase,
     players,
     winner: room.winner,
@@ -955,15 +1023,24 @@ function serializeRoom(room: PersistedRoom) {
 
 function parseRoom(raw: string, expectedCode?: string): PersistedRoom {
   try {
-    const room = JSON.parse(raw) as PersistedRoom;
+    const parsed = JSON.parse(raw) as Partial<Omit<PersistedRoom, "schemaVersion">> & {
+      schemaVersion?: number;
+    };
     if (
-      room?.schemaVersion !== 1 ||
-      typeof room.code !== "string" ||
-      !Array.isArray(room.players) ||
-      (expectedCode && room.code !== expectedCode)
+      (parsed?.schemaVersion !== 1 && parsed?.schemaVersion !== 2) ||
+      typeof parsed.code !== "string" ||
+      !Array.isArray(parsed.players) ||
+      (expectedCode && parsed.code !== expectedCode)
     ) {
       throw new Error("Unsupported room document");
     }
+    const room = parsed as PersistedRoom;
+    // Rooms created before visibility was introduced must remain private.
+    room.schemaVersion = 2;
+    room.visibility = room.visibility === "public" ? "public" : "private";
+    room.createdAt = Number.isFinite(room.createdAt)
+      ? room.createdAt
+      : room.lastActivityAt;
     return room;
   } catch {
     throw new RoomServiceError(
@@ -973,6 +1050,37 @@ function parseRoom(raw: string, expectedCode?: string): PersistedRoom {
       500,
     );
   }
+}
+
+function roomHostName(room: PersistedRoom) {
+  return room.players.find((player) => player.id === "player")?.name ??
+    room.players[0]?.name ??
+    "Unknown host";
+}
+
+function roomHostLastSeenAt(room: PersistedRoom) {
+  const host = room.players.find((player) => player.id === "player") ??
+    room.players[0];
+  return host?.lastSeenAt ?? 0;
+}
+
+function validPublicRoomRow(row: PublicRoomRow): row is PublicRoomRow & {
+  player_limit: PlayerLimit;
+  phase: "lobby";
+} {
+  return (
+    typeof row.code === "string" &&
+    ROOM_CODE_PATTERN.test(row.code) &&
+    typeof row.host_name === "string" &&
+    row.host_name.length > 0 &&
+    Number.isSafeInteger(row.player_count) &&
+    row.player_count >= 1 &&
+    (row.player_limit === 2 || row.player_limit === 3 || row.player_limit === 4) &&
+    row.player_count < row.player_limit &&
+    row.phase === "lobby" &&
+    Number.isSafeInteger(row.updated_at) &&
+    row.updated_at >= 0
+  );
 }
 
 function createRoomCode() {

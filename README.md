@@ -14,10 +14,11 @@ Where opposing life-support zones overlap, the ground becomes contested and stop
 npm install
 npm run build
 node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file drizzle/0000_flowery_shinobi_shaw.sql
+node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file drizzle/0001_outstanding_reavers.sql
 npm run dev
 ```
 
-The one-time D1 command creates the local room database. The development command then starts the full Sites-compatible app: the game at `/game/` and the same-origin multiplayer API at `/api/rooms`.
+The one-time D1 commands create and migrate the local room database in order. The development command then starts the full Sites-compatible app: the game at `/game/` and the same-origin multiplayer API at `/api/rooms`.
 
 ## Controls
 
@@ -55,9 +56,9 @@ The one-time D1 command creates the local room database. The development command
 ### Multiple browser tabs
 
 1. Open the local URL in the first tab.
-2. Select **Create Multiplayer Room**, enter a name, choose a two-, three-, or four-player limit, and create the room.
-3. Copy the invitation link or note the five-character room code.
-4. In the required additional tabs, open the link or select **Join Multiplayer Room** and enter the code, then join with different names.
+2. Select **Create Multiplayer Room**, enter a name, choose whether the room is public or private, choose a two-, three-, or four-player limit, and create it.
+3. For a private room, copy the invitation link or note the five-character room code. Private rooms are unlisted but remain joinable by code.
+4. For a public room, open **Join Multiplayer Room** in another tab, enter a different name, select **Public rooms**, and choose the host's room. Code joining remains available in the adjacent tab.
 5. Mark every player ready.
 6. Move or deploy a tether in any tab and verify the others update.
 7. Refresh a tab to verify it reconnects to the same player slot.
@@ -92,7 +93,7 @@ For a production test, open the published Sites address on both devices. For loc
 
 - `src/game/README.md` — game-folder boundaries and dependency rules
 - `sites-server/roomService.ts` — Sites/D1 room lifecycle, authoritative simulation, leases, idempotency, and compare-and-swap updates
-- `app/api/rooms/` — same-origin Sites API routes for create, join, synchronize, and leave
+- `app/api/rooms/` — same-origin Sites API routes for create, public-room discovery, join, synchronize, and leave
 - `src/network/RoomClient.ts` — HTTP synchronization, command batching, session resume, backoff, and latency tracking
 - `server/RoomServer.ts` — retained legacy Node/WebSocket room server and compatibility tests
 - `src/network/protocol.ts` — shared network message contracts
@@ -113,7 +114,7 @@ npm run build
 npm audit
 ```
 
-The test suite includes deterministic rules coverage for setup, cumulative scoring, Signal Surge, overtime, multiplayer base collapse, fair two-/three-/four-player placement, and result resolution. It also covers the Sites HTTP client, D1-backed room journeys, request/action idempotency, ready/start, synchronization, disconnect handling, session resume, and the retained local WebSocket server.
+The test suite includes deterministic rules coverage for setup, cumulative scoring, Signal Surge, overtime, multiplayer base collapse, fair two-/three-/four-player placement, and result resolution. It also covers the Sites HTTP client, public/private room creation and discovery, D1-backed room journeys, request/action idempotency, ready/start, synchronization, disconnect handling, session resume, and the retained local WebSocket server.
 
 ## Sites configuration
 

@@ -5,6 +5,7 @@ import {
   createRoom,
   joinRoom,
   leaveRoom,
+  listPublicRooms,
   RoomServiceError,
   syncRoom,
   type D1DatabaseLike,
@@ -64,6 +65,13 @@ class SqliteD1 implements D1DatabaseLike {
         code TEXT PRIMARY KEY NOT NULL,
         version INTEGER NOT NULL DEFAULT 1,
         document TEXT NOT NULL,
+        visibility TEXT NOT NULL DEFAULT 'private',
+        phase TEXT NOT NULL DEFAULT 'lobby',
+        player_count INTEGER NOT NULL DEFAULT 0,
+        player_limit INTEGER NOT NULL DEFAULT 2,
+        host_name TEXT NOT NULL DEFAULT '',
+        host_last_seen_at INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL DEFAULT 0,
         updated_at INTEGER NOT NULL,
         expires_at INTEGER NOT NULL
       );
@@ -129,6 +137,7 @@ describe("D1 room service", () => {
       requestId: "create-idempotency-request",
       name: "Host",
       playerLimit: 2,
+      visibility: "private",
     } as const;
 
     const first = await createRoom(db, request);
@@ -150,6 +159,7 @@ describe("D1 room service", () => {
       requestId: "full-journey-create",
       name: "Host",
       playerLimit: 2,
+      visibility: "private",
     });
     const hostWelcome = message(created.messages, "welcome")!;
     const joined = await joinRoom(db, {
@@ -243,6 +253,7 @@ describe("D1 room service", () => {
       requestId: "idle-expiry-create",
       name: "Host",
       playerLimit: 2,
+      visibility: "private",
     });
     const welcome = message(created.messages, "welcome")!;
     now += 15 * 60 * 1000 + 1;
@@ -260,5 +271,117 @@ describe("D1 room service", () => {
     expect(
       db.database.prepare("SELECT count(*) AS count FROM create_requests").get(),
     ).toEqual({ count: 0 });
+  });
+
+  it("lists only public, joinable, current lobbies without exposing secrets", async () => {
+    await createRoom(db, {
+      type: "create_room",
+      requestId: "private-directory-room",
+      name: "Private Host",
+      playerLimit: 4,
+      visibility: "private",
+    });
+    const open = await createRoom(db, {
+      type: "create_room",
+      requestId: "public-directory-open",
+      name: "Open Host",
+      playerLimit: 3,
+      visibility: "public",
+    });
+    const openWelcome = message(open.messages, "welcome")!;
+
+    const full = await createRoom(db, {
+      type: "create_room",
+      requestId: "public-directory-full",
+      name: "Full Host",
+      playerLimit: 2,
+      visibility: "public",
+    });
+    const fullWelcome = message(full.messages, "welcome")!;
+    await joinRoom(db, {
+      type: "join_room",
+      requestId: "public-directory-full-join",
+      code: fullWelcome.room.code,
+      name: "Second Player",
+    });
+
+    const playing = await createRoom(db, {
+      type: "create_room",
+      requestId: "public-directory-playing",
+      name: "Playing Host",
+      playerLimit: 2,
+      visibility: "public",
+    });
+    const playingHost = message(playing.messages, "welcome")!;
+    const playingJoin = await joinRoom(db, {
+      type: "join_room",
+      requestId: "public-directory-playing-join",
+      code: playingHost.room.code,
+      name: "Ready Player",
+    });
+    const playingGuest = message(playingJoin.messages, "welcome")!;
+    await syncRoom(db, playingHost.room.code, playingHost.sessionToken, {
+      commands: [{ type: "set_ready", ready: true }],
+    });
+    await syncRoom(db, playingHost.room.code, playingGuest.sessionToken, {
+      commands: [{ type: "set_ready", ready: true }],
+    });
+
+    const expired = await createRoom(db, {
+      type: "create_room",
+      requestId: "public-directory-expired",
+      name: "Expired Host",
+      playerLimit: 4,
+      visibility: "public",
+    });
+    const expiredWelcome = message(expired.messages, "welcome")!;
+    db.database.prepare(
+      "UPDATE rooms SET expires_at = ?1 WHERE code = ?2",
+    ).run(now, expiredWelcome.room.code);
+
+    const stale = await createRoom(db, {
+      type: "create_room",
+      requestId: "public-directory-stale",
+      name: "Stale Host",
+      playerLimit: 4,
+      visibility: "public",
+    });
+    const staleWelcome = message(stale.messages, "welcome")!;
+    db.database.prepare(
+      "UPDATE rooms SET host_last_seen_at = ?1 WHERE code = ?2",
+    ).run(now - 10_001, staleWelcome.room.code);
+
+    const directory = await listPublicRooms(db);
+
+    expect(directory.serverTime).toBe(now);
+    expect(directory.rooms).toEqual([{
+      code: openWelcome.room.code,
+      hostName: "Open Host",
+      playerCount: 1,
+      playerLimit: 3,
+      updatedAt: now,
+    }]);
+    expect(JSON.stringify(directory)).not.toContain("sessionToken");
+    expect(openWelcome.room.visibility).toBe("public");
+  });
+
+  it("returns a public lobby to the directory after its host reconnects", async () => {
+    const created = await createRoom(db, {
+      type: "create_room",
+      requestId: "public-directory-reconnect",
+      name: "Returning Host",
+      playerLimit: 2,
+      visibility: "public",
+    });
+    const welcome = message(created.messages, "welcome")!;
+
+    now += 10_001;
+    expect((await listPublicRooms(db)).rooms).toEqual([]);
+
+    await syncRoom(db, welcome.room.code, welcome.sessionToken, {});
+
+    expect((await listPublicRooms(db)).rooms).toEqual([
+      expect.objectContaining({ code: welcome.room.code }),
+    ]);
   });
 });

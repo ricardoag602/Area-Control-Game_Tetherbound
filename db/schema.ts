@@ -12,10 +12,29 @@ export const rooms = sqliteTable(
     code: text("code").primaryKey(),
     version: integer("version").notNull().default(1),
     document: text("document").notNull(),
+    visibility: text("visibility", { enum: ["public", "private"] })
+      .notNull()
+      .default("private"),
+    phase: text("phase", { enum: ["lobby", "playing", "finished"] })
+      .notNull()
+      .default("lobby"),
+    playerCount: integer("player_count").notNull().default(0),
+    playerLimit: integer("player_limit").notNull().default(2),
+    hostName: text("host_name").notNull().default(""),
+    hostLastSeenAt: integer("host_last_seen_at").notNull().default(0),
+    createdAt: integer("created_at").notNull().default(0),
     updatedAt: integer("updated_at").notNull(),
     expiresAt: integer("expires_at").notNull(),
   },
-  (table) => [index("rooms_expires_at_idx").on(table.expiresAt)],
+  (table) => [
+    index("rooms_expires_at_idx").on(table.expiresAt),
+    index("rooms_public_listing_idx").on(
+      table.visibility,
+      table.phase,
+      table.expiresAt,
+      table.updatedAt,
+    ),
+  ],
 );
 
 /**

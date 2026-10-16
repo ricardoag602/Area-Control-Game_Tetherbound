@@ -52,6 +52,7 @@ describe("RoomClient Sites HTTP lifecycle", () => {
       type: "create_room",
       name: "Host",
       playerLimit: 2,
+      visibility: "private",
     });
     expect(client.getSnapshot()).toMatchObject({
       connection: "connected",
@@ -62,6 +63,51 @@ describe("RoomClient Sites HTTP lifecycle", () => {
       token: "session-token",
       name: "Host",
     });
+  });
+
+  it("creates a discoverable room when public visibility is requested", async () => {
+    const api = createApi();
+    api.respond([welcomeMessage()]);
+    const client = createClient(api);
+
+    client.createRoom("Public Host", 4, "public");
+    await flushPromises();
+
+    expect(bodyOf(api.calls[0])).toMatchObject({
+      type: "create_room",
+      name: "Public Host",
+      playerLimit: 4,
+      visibility: "public",
+    });
+  });
+
+  it("loads and validates the public room directory", async () => {
+    const api = createApi();
+    api.respondPublicRooms([{
+      code: "ABC9Z",
+      hostName: "Mission Lead",
+      playerCount: 1,
+      playerLimit: 3,
+      updatedAt: 1_700_000_001_000,
+    }]);
+    const client = createClient(api);
+
+    await expect(client.listPublicRooms()).resolves.toEqual([expect.objectContaining({
+      code: "ABC9Z",
+      hostName: "Mission Lead",
+      playerCount: 1,
+      playerLimit: 3,
+    })]);
+    expect(api.calls[0].url).toBe("/api/rooms/public");
+    expect(api.calls[0].init.method).toBe("GET");
+  });
+
+  it("rejects a malformed public room directory response", async () => {
+    const api = createApi();
+    api.respondRaw({ rooms: [{ code: "INVALID" }], serverTime: Date.now() });
+    const client = createClient(api);
+
+    await expect(client.listPublicRooms()).rejects.toThrow(/could not be loaded/i);
   });
 
   it("stops retrying and reports an unreachable service after bounded failures", async () => {
@@ -297,6 +343,18 @@ function createApi() {
     respond(messages: ServerMessage[], status = 200) {
       replies.push(async () => apiResponse(messages, status));
     },
+    respondPublicRooms(rooms: unknown[], status = 200) {
+      replies.push(async () => new Response(JSON.stringify({ rooms, serverTime: Date.now() }), {
+        status,
+        headers: { "content-type": "application/json" },
+      }));
+    },
+    respondRaw(value: unknown, status = 200) {
+      replies.push(async () => new Response(JSON.stringify(value), {
+        status,
+        headers: { "content-type": "application/json" },
+      }));
+    },
     reject(error = new TypeError("Network unavailable")) {
       replies.push(async () => Promise.reject(error));
     },
@@ -346,6 +404,7 @@ function lobbyRoom() {
     code: "ABC9Z",
     revision: 1,
     playerLimit: 2 as const,
+    visibility: "private" as const,
     phase: "lobby" as const,
     players: [{ id: "player" as const, name: "Host", ready: false, connected: true }],
     winner: null,

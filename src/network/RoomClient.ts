@@ -1,7 +1,13 @@
 import type { GameState, MovementCommand, PlayerId, PlayerLimit } from "../game/types";
 import { createClientId } from "./clientId";
 import { resolveRoomApiUrl } from "./connectionInfo";
-import type { ClientMessage, RoomSnapshot, ServerMessage } from "./protocol";
+import type {
+  ClientMessage,
+  PublicRoomSummary,
+  RoomSnapshot,
+  RoomVisibility,
+  ServerMessage,
+} from "./protocol";
 
 export type ConnectionStatus = "idle" | "connecting" | "connected" | "reconnecting" | "offline";
 
@@ -17,7 +23,13 @@ export interface RoomClientSnapshot {
 
 type Listener = () => void;
 type SessionIntent =
-  | { kind: "create"; requestId: string; name: string; playerLimit: PlayerLimit }
+  | {
+      kind: "create";
+      requestId: string;
+      name: string;
+      playerLimit: PlayerLimit;
+      visibility: RoomVisibility;
+    }
   | { kind: "join"; requestId: string; name: string; roomCode: string };
 type SyncCommand = Extract<
   ClientMessage,
@@ -26,6 +38,11 @@ type SyncCommand = Extract<
 
 interface RoomApiEnvelope {
   messages: ServerMessage[];
+  serverTime: number;
+}
+
+interface PublicRoomListEnvelope {
+  rooms: PublicRoomSummary[];
   serverTime: number;
 }
 
@@ -42,6 +59,8 @@ const SERVER_UNRESPONSIVE_MESSAGE =
   "The multiplayer room service did not return a valid response. Try again.";
 const ROOM_CONNECTION_LOST_MESSAGE =
   "Connection to the room was lost. Try reconnecting while your slot is still reserved.";
+const PUBLIC_ROOMS_UNAVAILABLE_MESSAGE =
+  "Public rooms could not be loaded. Check your connection and try again.";
 
 export interface RoomClientOptions {
   fetch?: typeof fetch;
@@ -111,11 +130,47 @@ export class RoomClient {
 
   getSnapshot = () => this.snapshot;
 
-  createRoom(name: string, playerLimit: PlayerLimit = 2) {
+  createRoom(
+    name: string,
+    playerLimit: PlayerLimit = 2,
+    visibility: RoomVisibility = "private",
+  ) {
     this.begin(
-      { kind: "create", requestId: createClientId(), name: name.trim(), playerLimit },
+      {
+        kind: "create",
+        requestId: createClientId(),
+        name: name.trim(),
+        playerLimit,
+        visibility,
+      },
       null,
     );
+  }
+
+  async listPublicRooms(): Promise<PublicRoomSummary[]> {
+    const controller = new AbortController();
+    const timeoutMs = this.options.requestTimeoutMs ??
+      this.options.handshakeTimeoutMs ??
+      this.options.socketOpenTimeoutMs ??
+      REQUEST_TIMEOUT_MS;
+    const timeoutTimer = window.setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const response = await this.fetcher()(`${this.apiUrl()}/public`, {
+        method: "GET",
+        headers: { accept: "application/json" },
+        signal: controller.signal,
+      });
+      const value: unknown = await response.json();
+      if (!response.ok || !isPublicRoomListEnvelope(value)) {
+        throw new Error(PUBLIC_ROOMS_UNAVAILABLE_MESSAGE);
+      }
+      return value.rooms;
+    } catch {
+      throw new Error(PUBLIC_ROOMS_UNAVAILABLE_MESSAGE);
+    } finally {
+      window.clearTimeout(timeoutTimer);
+    }
   }
 
   joinRoom(roomCode: string, name: string) {
@@ -305,6 +360,7 @@ export class RoomClient {
             requestId: intent.requestId,
             name: intent.name,
             playerLimit: intent.playerLimit,
+            visibility: intent.visibility,
           }
         : {
             type: "join_room",
@@ -679,6 +735,32 @@ function isRoomApiEnvelope(value: unknown): value is RoomApiEnvelope {
   return Array.isArray(candidate.messages) &&
     typeof candidate.serverTime === "number" &&
     Number.isFinite(candidate.serverTime);
+}
+
+function isPublicRoomListEnvelope(value: unknown): value is PublicRoomListEnvelope {
+  if (!isRecord(value) || !Array.isArray(value.rooms) || !isFiniteNumber(value.serverTime)) {
+    return false;
+  }
+  return value.rooms.every(isPublicRoomSummary);
+}
+
+function isPublicRoomSummary(value: unknown): value is PublicRoomSummary {
+  if (!isRecord(value)) return false;
+  return typeof value.code === "string" && /^[A-HJ-NP-Z2-9]{5}$/.test(value.code) &&
+    typeof value.hostName === "string" && value.hostName.trim().length > 0 &&
+    typeof value.playerCount === "number" &&
+    Number.isSafeInteger(value.playerCount) && value.playerCount >= 1 &&
+    (value.playerLimit === 2 || value.playerLimit === 3 || value.playerLimit === 4) &&
+    value.playerCount < value.playerLimit &&
+    isFiniteNumber(value.updatedAt);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
 }
 
 function normalizeApiUrl(value: string) {

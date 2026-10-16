@@ -180,13 +180,17 @@ export function App() {
                 {view === "create-room" && (
                     <CreateRoomView connection={roomSession.connection} error={roomSession.error}
                         onBack={() => setView("menu")}
-                        onCreate={(name, playerLimit) => { roomClient.createRoom(name, playerLimit); setView("lobby"); }} />
+                        onCreate={(name, playerLimit, visibility) => {
+                            roomClient.createRoom(name, playerLimit, visibility);
+                            setView("lobby");
+                        }} />
                 )}
                 {view === "join-room" && (
                     <JoinRoomView code={joinRoomCode} connection={roomSession.connection} error={roomSession.error}
                         onBack={leaveMultiplayer}
                         onCodeChange={setJoinRoomCode}
-                        onJoin={(name, code) => { setJoinRoomCode(code); roomClient.joinRoom(code, name); }} />
+                        onJoin={(name, code) => { setJoinRoomCode(code); roomClient.joinRoom(code, name); }}
+                        loadPublicRooms={() => roomClient.listPublicRooms()} />
                 )}
                 {view === "lobby" && roomSession.room && roomSession.playerId && (
                     <RoomLobby room={roomSession.room} localPlayerId={roomSession.playerId}
@@ -312,7 +316,7 @@ function MainMenu({
                 </button>
                 <button className="button button--secondary" onClick={onJoinRoom}>
                     <span>Join Multiplayer Room</span>
-                    <small>Enter an existing room code</small>
+                    <small>Enter a code or browse public rooms</small>
                 </button>
             </div>
 

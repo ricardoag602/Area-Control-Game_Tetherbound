@@ -4,18 +4,19 @@ import { sampleScorableTerritory } from "../../game/simulation/scoring";
 import { PLAYER_IDS, type GameState, type MatchFinishReason, type PlayerId, type PlayerLimit } from "../../game/types";
 import type { ConnectionStatus } from "../RoomClient";
 import { isValidRoomCode, normalizeRoomCode } from "../connectionInfo";
-import type { RoomSnapshot } from "../protocol";
+import type { PublicRoomSummary, RoomSnapshot, RoomVisibility } from "../protocol";
 
 interface CreateRoomViewProps {
   connection: ConnectionStatus;
   error: string | null;
   onBack: () => void;
-  onCreate: (name: string, playerLimit: PlayerLimit) => void;
+  onCreate: (name: string, playerLimit: PlayerLimit, visibility: RoomVisibility) => void;
 }
 
 export function CreateRoomView({ connection, error, onBack, onCreate }: CreateRoomViewProps) {
   const [name, setName] = useState("Explorer 1");
   const [playerLimit, setPlayerLimit] = useState<PlayerLimit>(2);
+  const [visibility, setVisibility] = useState<RoomVisibility>("private");
   const busy = connection === "connecting";
 
   return (
@@ -30,6 +31,25 @@ export function CreateRoomView({ connection, error, onBack, onCreate }: CreateRo
         <label className="field-label" htmlFor="host-name">Astronaut name</label>
         <input id="host-name" className="text-input" value={name} maxLength={20}
           onChange={(event) => setName(event.target.value)} autoComplete="nickname" />
+        <fieldset className="room-choice-fieldset">
+          <legend className="field-label">Room visibility</legend>
+          <div className="visibility-picker">
+            <label className={visibility === "public" ? "visibility-option visibility-option--selected" : "visibility-option"}>
+              <input type="radio" name="room-visibility" value="public"
+                checked={visibility === "public"} onChange={() => setVisibility("public")} />
+              <span className="visibility-option__icon" aria-hidden="true">◎</span>
+              <span><strong>Public</strong><small>Listed for anyone looking for a crew</small></span>
+              <span className="visibility-option__check" aria-hidden="true" />
+            </label>
+            <label className={visibility === "private" ? "visibility-option visibility-option--selected" : "visibility-option"}>
+              <input type="radio" name="room-visibility" value="private"
+                checked={visibility === "private"} onChange={() => setVisibility("private")} />
+              <span className="visibility-option__icon" aria-hidden="true">⌁</span>
+              <span><strong>Private</strong><small>Only people with your code or invite link</small></span>
+              <span className="visibility-option__check" aria-hidden="true" />
+            </label>
+          </div>
+        </fieldset>
         <span className="field-label">Player limit</span>
         <div className="player-limit-picker" aria-label="Player limit">
           {([2, 3, 4] as const).map((limit) => (
@@ -49,8 +69,8 @@ export function CreateRoomView({ connection, error, onBack, onCreate }: CreateRo
         {error && <p className="form-error" role="alert">{error}</p>}
       </div>
       <button className="button button--primary" disabled={busy || !name.trim()}
-        onClick={() => onCreate(name, playerLimit)}>
-        {busy ? "Contacting room server…" : "Create Multiplayer Room"}
+        onClick={() => onCreate(name, playerLimit, visibility)}>
+        {busy ? "Contacting room service…" : "Create Multiplayer Room"}
       </button>
     </div>
   );
@@ -63,10 +83,27 @@ interface JoinRoomViewProps {
   onBack: () => void;
   onCodeChange: (code: string) => void;
   onJoin: (name: string, code: string) => void;
+  loadPublicRooms: () => Promise<PublicRoomSummary[]>;
 }
 
-export function JoinRoomView({ code, connection, error, onBack, onCodeChange, onJoin }: JoinRoomViewProps) {
+type JoinMethod = "code" | "public";
+type PublicRoomListStatus = "idle" | "loading" | "ready" | "error";
+
+export function JoinRoomView({
+  code,
+  connection,
+  error,
+  onBack,
+  onCodeChange,
+  onJoin,
+  loadPublicRooms,
+}: JoinRoomViewProps) {
   const [name, setName] = useState("Explorer 2");
+  const [joinMethod, setJoinMethod] = useState<JoinMethod>("code");
+  const [publicRooms, setPublicRooms] = useState<PublicRoomSummary[]>([]);
+  const [publicRoomStatus, setPublicRoomStatus] = useState<PublicRoomListStatus>("idle");
+  const [publicRoomError, setPublicRoomError] = useState<string | null>(null);
+  const [joiningRoomCode, setJoiningRoomCode] = useState<string | null>(null);
   const busy = connection === "connecting" || connection === "reconnecting";
   const validCode = isValidRoomCode(code);
 
@@ -75,16 +112,71 @@ export function JoinRoomView({ code, connection, error, onBack, onCodeChange, on
     if (!busy && validCode && name.trim()) onJoin(name, code);
   }
 
+  async function refreshPublicRooms() {
+    if (publicRoomStatus === "loading") return;
+    setPublicRoomStatus("loading");
+    setPublicRoomError(null);
+    try {
+      const rooms = await loadPublicRooms();
+      setPublicRooms([...rooms].sort((left, right) => right.updatedAt - left.updatedAt));
+      setPublicRoomStatus("ready");
+    } catch (loadError) {
+      setPublicRoomStatus("error");
+      setPublicRoomError(loadError instanceof Error
+        ? loadError.message
+        : "Public rooms could not be loaded. Try again.");
+    }
+  }
+
+  function selectJoinMethod(method: JoinMethod) {
+    setJoinMethod(method);
+    if (method === "public" && publicRoomStatus === "idle") {
+      void refreshPublicRooms();
+    }
+  }
+
+  function joinPublicRoom(room: PublicRoomSummary) {
+    if (busy || !name.trim()) return;
+    setJoiningRoomCode(room.code);
+    onCodeChange(room.code);
+    onJoin(name, room.code);
+  }
+
   return (
     <div className="screen screen--room">
       <button className="text-button back-button" onClick={onBack}>← Back</button>
       <header className="section-heading">
         <p className="eyebrow">Incoming signal</p>
         <h2>Join room</h2>
-        <p>Enter the five-character room code shared by the host.</p>
+        <p>Choose your call sign, then use an invite code or find an open public crew.</p>
       </header>
-      <form className="join-form" onSubmit={submit}>
-        <div className="room-card">
+      <div className="join-form">
+        <div className="room-card join-identity-card">
+          <label className="field-label" htmlFor="guest-name">Astronaut name</label>
+          <input id="guest-name" className="text-input" value={name} maxLength={20}
+            onChange={(event) => setName(event.target.value)} autoComplete="nickname" />
+          <p className="field-help">This is how your crew will see you in the lobby.</p>
+          {error && <p className="form-error" role="alert">{error}</p>}
+        </div>
+
+        <div className="join-method-tabs" role="tablist" aria-label="Ways to join a room">
+          <button type="button" role="tab" id="join-code-tab" aria-controls="join-code-panel"
+            aria-selected={joinMethod === "code"}
+            className={joinMethod === "code" ? "join-method-tab join-method-tab--selected" : "join-method-tab"}
+            onClick={() => selectJoinMethod("code")}>
+            <span aria-hidden="true">#</span> Join by code
+          </button>
+          <button type="button" role="tab" id="join-public-tab" aria-controls="join-public-panel"
+            aria-selected={joinMethod === "public"}
+            className={joinMethod === "public" ? "join-method-tab join-method-tab--selected" : "join-method-tab"}
+            onClick={() => selectJoinMethod("public")}>
+            <span aria-hidden="true">◎</span> Public rooms
+          </button>
+        </div>
+
+        {joinMethod === "code" && (
+          <form id="join-code-panel" role="tabpanel" aria-labelledby="join-code-tab"
+            className="room-card join-method-panel" onSubmit={submit}>
           <label className="field-label" htmlFor="room-code">Room code</label>
           <input id="room-code" className="text-input room-code-input" value={code}
             maxLength={5} autoCapitalize="characters" autoComplete="off" autoCorrect="off"
@@ -95,17 +187,120 @@ export function JoinRoomView({ code, connection, error, onBack, onCodeChange, on
           {code.length === 5 && !validCode && (
             <p className="form-error" role="alert">Check the code—the characters I, O, 0, and 1 are not used.</p>
           )}
-          <label className="field-label" htmlFor="guest-name">Astronaut name</label>
-          <input id="guest-name" className="text-input" value={name} maxLength={20}
-            onChange={(event) => setName(event.target.value)} autoComplete="nickname" />
-          {error && <p className="form-error" role="alert">{error}</p>}
-        </div>
-        <button type="submit" className="button button--primary"
-          disabled={busy || !validCode || !name.trim()}>
-          {busy ? "Connecting…" : "Join Room"}
-        </button>
-      </form>
+            <button type="submit" className="button button--primary"
+              disabled={busy || !validCode || !name.trim()}>
+              {busy ? "Connecting…" : "Join with code"}
+            </button>
+          </form>
+        )}
+
+        {joinMethod === "public" && (
+          <PublicRoomDirectory
+            rooms={publicRooms}
+            status={publicRoomStatus}
+            error={publicRoomError}
+            busy={busy}
+            canJoin={Boolean(name.trim())}
+            joiningRoomCode={joiningRoomCode}
+            onJoin={joinPublicRoom}
+            onRefresh={() => { void refreshPublicRooms(); }}
+          />
+        )}
+      </div>
     </div>
+  );
+}
+
+interface PublicRoomDirectoryProps {
+  rooms: PublicRoomSummary[];
+  status: PublicRoomListStatus;
+  error: string | null;
+  busy: boolean;
+  canJoin: boolean;
+  joiningRoomCode: string | null;
+  onJoin: (room: PublicRoomSummary) => void;
+  onRefresh: () => void;
+}
+
+export function PublicRoomDirectory({
+  rooms,
+  status,
+  error,
+  busy,
+  canJoin,
+  joiningRoomCode,
+  onJoin,
+  onRefresh,
+}: PublicRoomDirectoryProps) {
+  return (
+    <section id="join-public-panel" role="tabpanel" aria-labelledby="join-public-tab"
+      className="room-card public-room-browser" aria-busy={status === "loading"}>
+      <div className="public-room-browser__header">
+        <div>
+          <span className="field-label">Available crews</span>
+          <p>Open rooms with space for another astronaut.</p>
+        </div>
+        <button type="button" className="refresh-rooms-button" onClick={onRefresh}
+          disabled={status === "loading"} aria-label="Refresh public rooms">
+          <span aria-hidden="true">↻</span> Refresh
+        </button>
+      </div>
+
+      {status === "loading" && (
+        <div className="public-room-state" role="status">
+          <span className="signal-loader" aria-hidden="true" />
+          <strong>Scanning for open signals…</strong>
+          <small>Checking the public room network</small>
+        </div>
+      )}
+
+      {status === "error" && (
+        <div className="public-room-state public-room-state--error" role="alert">
+          <span className="public-room-state__icon" aria-hidden="true">!</span>
+          <strong>Signal scan failed</strong>
+          <small>{error ?? "Public rooms could not be loaded."}</small>
+          <button type="button" className="button button--secondary button--compact" onClick={onRefresh}>
+            Try again
+          </button>
+        </div>
+      )}
+
+      {status === "ready" && rooms.length === 0 && (
+        <div className="public-room-state" role="status">
+          <span className="public-room-state__icon" aria-hidden="true">◇</span>
+          <strong>No public rooms yet</strong>
+          <small>Start a public room and be the first signal on the network.</small>
+        </div>
+      )}
+
+      {status === "ready" && rooms.length > 0 && (
+        <div className="public-room-list" aria-label={`${rooms.length} public ${rooms.length === 1 ? "room" : "rooms"}`}>
+          {rooms.map((room) => {
+            const joining = busy && joiningRoomCode === room.code;
+            const spaces = room.playerLimit - room.playerCount;
+            return (
+              <button key={room.code} type="button" className="public-room-option"
+                disabled={busy || !canJoin} onClick={() => onJoin(room)}
+                aria-label={`Join ${room.hostName}'s room, ${room.playerCount} of ${room.playerLimit} players`}>
+                <span className="public-room-option__signal" aria-hidden="true"><i /></span>
+                <span className="public-room-option__copy">
+                  <strong>{room.hostName}<small>’s crew</small></strong>
+                  <small>Code {room.code} · {spaces} {spaces === 1 ? "seat" : "seats"} open</small>
+                </span>
+                <span className="public-room-option__count">
+                  <strong>{room.playerCount}/{room.playerLimit}</strong>
+                  <small>{joining ? "Joining…" : "Join"}</small>
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {!canJoin && status === "ready" && rooms.length > 0 && (
+        <p className="public-room-browser__hint">Enter your astronaut name above to join a crew.</p>
+      )}
+    </section>
   );
 }
 
@@ -153,6 +348,15 @@ export function RoomLobby({ room, localPlayerId, connection, error, latencyMs, i
         </div>
       )}
       <div className="room-card invite-card">
+        <div className={`room-visibility-badge room-visibility-badge--${room.visibility}`}>
+          <span aria-hidden="true">{room.visibility === "public" ? "◎" : "⌁"}</span>
+          <div>
+            <strong>{room.visibility === "public" ? "Public room" : "Private room"}</strong>
+            <small>{room.visibility === "public"
+              ? "Listed while this lobby is open"
+              : "Available only by code or invite link"}</small>
+          </div>
+        </div>
         <div className="room-code-block">
           <span>Room code</span>
           <strong>{room.code}</strong>
@@ -325,10 +529,10 @@ export function MatchResultView({
 
 function getConnectionLabel(connection: ConnectionStatus) {
   switch (connection) {
-    case "connected": return "Room server connected";
+    case "connected": return "Room service connected";
     case "reconnecting": return "Reconnecting…";
     case "connecting": return "Connecting…";
-    case "offline": return "Room server unavailable";
+    case "offline": return "Room service unavailable";
     default: return "Connection lost";
   }
 }
