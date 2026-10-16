@@ -60,8 +60,8 @@ export const MOVEMENT_RULES = {
     chargeSlowdownSeconds: 1,
     minimumBurstChargeSeconds: 0.2,
 
-    minimumBurstDistance: 6.5,
-    maximumBurstDistance: 35.1,
+    minimumBurstDistance: 7.2,
+    maximumBurstDistance: 38.6,
     burstSpeed: 70,
 } as const;
 

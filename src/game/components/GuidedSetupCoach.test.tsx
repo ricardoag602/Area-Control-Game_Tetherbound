@@ -1,8 +1,25 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { GuidedSetupCoach } from "./GuidedSetupCoach";
+import {
+  GuidedSetupCoach,
+  GuidedSetupObjectiveReminder,
+} from "./GuidedSetupCoach";
 
 describe("GuidedSetupCoach", () => {
+  it("hands the player a game-like objective after training", () => {
+    const markup = renderToStaticMarkup(<GuidedSetupObjectiveReminder />);
+
+    expect(markup).toContain('class="guided-setup guided-setup--objective"');
+    expect(markup).toContain('role="status"');
+    expect(markup).toContain('aria-live="polite"');
+    expect(markup).toContain('aria-atomic="true"');
+    expect(markup).toContain("Training complete");
+    expect(markup).toContain("Claim the frontier");
+    expect(markup).toContain("cover more territory");
+    expect(markup).toContain("rack up signal points");
+    expect(markup).toContain("the highest score wins");
+  });
+
   it("renders an accessible, visual six-step setup card", () => {
     const markup = renderToStaticMarkup(
       <GuidedSetupCoach

@@ -7,7 +7,7 @@ import type { Vec2 } from "../types";
  */
 export const CAMERA_RULES = {
   // Keep more nearby terrain and network decisions visible during normal play.
-  baseVisibleHeight: 96,
+  baseVisibleHeight: 104,
   // Charging opens the frame further so the player can read the launch route.
   maximumChargeZoomOut: 0.14,
   chargeZoomDecayRate: 4,

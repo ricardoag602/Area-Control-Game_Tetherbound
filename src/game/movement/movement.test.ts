@@ -795,8 +795,8 @@ describe("astronaut movement", () => {
   });
 
   it.each([
-    { label: "partial", seconds: MOVEMENT_RULES.fullChargeSeconds / 2, expected: 20.8 },
-    { label: "full", seconds: MOVEMENT_RULES.fullChargeSeconds, expected: 35.1 },
+    { label: "partial", seconds: MOVEMENT_RULES.fullChargeSeconds / 2, expected: 22.9 },
+    { label: "full", seconds: MOVEMENT_RULES.fullChargeSeconds, expected: 38.6 },
   ])("turns a $label charge into one burst", ({ seconds, expected }) => {
     const start = { x: 20, y: 80 };
     const charged = chargeAt(start, { x: 100, y: 80 }, seconds);

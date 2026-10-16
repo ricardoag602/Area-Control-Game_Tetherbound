@@ -19,7 +19,7 @@ const REQUIRED_CLIPS = {
   boosting: "Quad_Jump_Up",
 } as const;
 
-const TARGET_FOOTPRINT_SIZE = 14.3;
+const TARGET_FOOTPRINT_SIZE = 15.2;
 const SHADOW_RADIUS = TARGET_FOOTPRINT_SIZE * 0.3;
 const TRANSITION_SECONDS = 0.14;
 const MOVING_SPEED_EPSILON = 0.01;

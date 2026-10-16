@@ -892,7 +892,7 @@ button { -webkit-tap-highlight-color: transparent; }
   cursor: crosshair;
 }
 
-.world--tether-sprites {
+.world--player-underlay {
   z-index: 1;
   pointer-events: none;
   cursor: default;
@@ -1774,6 +1774,23 @@ button { -webkit-tap-highlight-color: transparent; }
     linear-gradient(145deg, rgba(45, 22, 19, .96), rgba(15, 13, 17, .95));
 }
 
+.guided-setup--objective .guided-setup__card {
+  border-color: rgba(107, 240, 181, .62);
+  background:
+    radial-gradient(circle at 8% 45%, rgba(74, 223, 167, .2), transparent 31%),
+    linear-gradient(145deg, rgba(8, 39, 38, .96), rgba(5, 18, 25, .95));
+}
+
+.guided-setup--objective .guided-setup__glyph {
+  color: #76efbd;
+  background: rgba(46, 174, 134, .18);
+  box-shadow: 0 0 1.2rem rgba(87, 236, 180, .2);
+}
+
+.guided-setup--objective .guided-setup__heading {
+  color: #76e5ba;
+}
+
 @keyframes guided-setup-pop {
   from { opacity: 0; transform: translateY(.65rem) scale(.97); }
   to { opacity: 1; transform: translateY(0) scale(1); }
@@ -2312,20 +2329,153 @@ button { -webkit-tap-highlight-color: transparent; }
   .deploy-button__shortcut { display: inline-block; }
 }
 
-@media (max-width: 31rem) {
-  .game-top-bar { gap: .35rem; padding-inline: .45rem; }
-  .match-scoreboard { gap: .25rem; }
-  .score-panel { padding-inline: .3rem; }
-  .match-timer-panel__status { display: none; }
-  .zone-status { top: calc(env(safe-area-inset-top) + 6.35rem); }
-  .world-event-toast { top: calc(env(safe-area-inset-top) + 8.85rem); }
-  .base-collapse-alert {
-    top: calc(env(safe-area-inset-top) + 11.2rem);
-    width: min(18rem, calc(100% - 2rem));
+@media (max-width: 31rem), (max-height: 34rem) and (any-pointer: coarse) {
+  .game-top-bar { gap: .28rem; padding: .4rem; }
+  .game-top-bar .icon-button {
+    width: calc(2.35rem * var(--control-scale));
+    height: calc(2.35rem * var(--control-scale));
+    font-size: 1.25rem;
   }
-  .guided-setup { width: min(calc(100% - .7rem), 23rem); }
-  .guided-setup__card { grid-template-columns: 3rem minmax(0, 1fr); gap: .55rem; padding-left: .58rem; }
-  .guided-setup__glyph { width: 3rem; height: 3rem; }
+  .match-scoreboard { gap: .2rem; }
+  .score-panel { padding: .32rem .26rem; border-radius: .58rem; }
+  .score-panel span { font-size: .5rem; }
+  .score-panel strong { margin-top: .08rem; font-size: clamp(.78rem, 3.2vw, .95rem); }
+  .score-panel small { margin-top: .08rem; font-size: .43rem; }
+  .minimap {
+    top: calc(env(safe-area-inset-top) + 4.35rem);
+    right: .45rem;
+    width: 4.8rem;
+    border-radius: .34rem;
+  }
+  .minimap > span { right: .22rem; bottom: .16rem; font-size: .4rem; }
+  .match-timer-panel {
+    top: calc(env(safe-area-inset-top) + 4.3rem);
+    left: .45rem;
+    width: min(7.6rem, 31vw);
+    padding: .45rem .5rem;
+    border-radius: .55rem;
+  }
+  .match-timer-panel > span { font-size: .47rem; }
+  .match-timer-panel > strong { margin-top: .08rem; font-size: 1.12rem; }
+  .match-timer-panel small { margin-top: .2rem; font-size: .44rem; }
+  .match-timer-panel__status { display: none; }
+  .biome-status {
+    top: calc(env(safe-area-inset-top) + 8.15rem);
+    left: .45rem;
+    max-width: 6.6rem;
+    padding: .34rem .42rem;
+    border-radius: .4rem;
+  }
+  .biome-status span { font-size: .4rem; }
+  .biome-status strong { margin-top: .08rem; font-size: .62rem; }
+  .biome-status small { margin-top: .14rem; font-size: .46rem; }
+  .zone-status {
+    top: calc(env(safe-area-inset-top) + 4.5rem);
+    padding: .16rem .28rem;
+    font-size: .64rem;
+  }
+  .control-hint {
+    left: max(.5rem, env(safe-area-inset-left));
+    bottom: calc(env(safe-area-inset-bottom) + .42rem);
+    font-size: .55rem;
+  }
+  .world-event-toast {
+    top: calc(env(safe-area-inset-top) + 6.75rem);
+    max-width: min(16rem, 64vw);
+    padding: .36rem .55rem;
+    border-radius: .42rem;
+    font-size: .54rem;
+  }
+  .base-collapse-alert {
+    top: calc(env(safe-area-inset-top) + 9.15rem);
+    width: min(15.5rem, calc(100% - 4rem));
+    padding: .42rem .55rem .48rem;
+    border-radius: .52rem;
+  }
+  .base-collapse-alert__label { gap: .55rem; font-size: .55rem; }
+  .base-collapse-alert__meter { height: .22rem; margin-top: .34rem; }
+  .signal-surge-flash {
+    min-width: min(18rem, calc(100% - 3rem));
+    padding: .8rem 1.05rem;
+    border-radius: .7rem;
+  }
+  .signal-surge-flash strong { font-size: .94rem; }
+  .signal-surge-flash span { margin-top: .2rem; font-size: .6rem; }
+  .final-countdown strong { font-size: clamp(3.5rem, 16vw, 5.5rem); }
+  .tether-resources {
+    top: calc(env(safe-area-inset-top) + 9.65rem);
+    right: max(.45rem, env(safe-area-inset-right));
+    gap: .35rem;
+    padding: .4rem .35rem;
+    border-radius: .56rem;
+  }
+  .tether-resources__recipe { gap: .22rem; }
+  .tether-resources__slots {
+    grid-template-columns: repeat(3, .48rem);
+    gap: .23rem;
+    padding: .16rem;
+  }
+  .tether-resources__slot {
+    width: .5rem;
+    height: .5rem;
+    border-width: 1.5px;
+  }
+  .tether-resources__overflow { font-size: .62rem; }
+  .tether-resources__kits { grid-template-columns: 1.05rem auto; column-gap: .28rem; }
+  .tether-resources__spool {
+    width: 1rem;
+    height: 1rem;
+    border-width: .18rem;
+  }
+  .tether-resources__kits strong { font-size: .85rem; }
+  .tether-resources__kits small { font-size: .43rem; }
+  .guided-setup {
+    bottom: max(7.5rem, calc(env(safe-area-inset-bottom) + 7rem));
+    width: min(calc(100% - 1.2rem), 20.5rem);
+  }
+  .guided-setup__card {
+    grid-template-columns: 2.45rem minmax(0, 1fr);
+    gap: .5rem;
+    min-height: 5.1rem;
+    padding: .52rem;
+    border-radius: .78rem;
+  }
+  .guided-setup__glyph { width: 2.4rem; height: 2.4rem; }
+  .guided-setup__glyph svg { width: 1.55rem; height: 1.55rem; }
+  .guided-setup__heading { gap: .4rem; font-size: .45rem; }
+  .guided-setup__heading strong { font-size: .47rem; }
+  .guided-setup__content h2 { margin-top: .24rem; font-size: .82rem; }
+  .guided-setup__content > p { margin-top: .22rem; font-size: .55rem; line-height: 1.28; }
+  .guided-setup__material-progress { gap: .38rem; margin-top: .3rem; }
+  .guided-setup__material-progress > strong { font-size: .5rem; }
+  .guided-setup__material-slots { gap: .32rem; }
+  .guided-setup__material-slots i { width: .5rem; height: .5rem; }
+  .guided-setup__conversion { gap: .34rem; margin-top: .3rem; }
+  .guided-setup__conversion > b { font-size: .64rem; }
+  .guided-setup__conversion > strong { font-size: .5rem; }
+  .guided-setup__conversion-spool { width: .62rem; height: .62rem; border-width: 1.5px; }
+  .guided-setup__conversion-spool::after { inset: .13rem; }
+  .guided-setup__controls { margin-top: .32rem; }
+  .guided-setup__controls > span { gap: .28rem; font-size: .5rem; }
+  .guided-setup__touch-hint i { width: .64rem; height: .64rem; }
+  .guided-setup__progress {
+    gap: .12rem;
+    margin: .28rem .35rem 0;
+    padding: .26rem .32rem;
+  }
+  .guided-setup__progress li { gap: .16rem; }
+  .guided-setup__progress li > span { width: .72rem; height: .72rem; font-size: .39rem; }
+  .guided-setup__progress small { font-size: .4rem; }
+  .match-reconnect-prompt {
+    bottom: max(5.5rem, calc(env(safe-area-inset-bottom) + 4.9rem));
+    width: min(calc(100% - 1.2rem), 20rem);
+    gap: .4rem;
+    padding: .72rem;
+    border-radius: .8rem;
+  }
+  .match-reconnect-prompt strong { font-size: .88rem; }
+  .match-reconnect-prompt p { font-size: .68rem; }
+  .match-reconnect-prompt .button--compact { min-height: 2.4rem; padding: .6rem .85rem; }
 }
 
 @media (max-width: 23rem) {
@@ -2333,15 +2483,15 @@ button { -webkit-tap-highlight-color: transparent; }
   .game-top-bar .icon-button { width: 2.35rem; height: 2.35rem; }
   .score-panel small { display: none; }
   .match-timer-panel { width: 7.5rem; }
-  .tether-resources { right: max(.7rem, env(safe-area-inset-right)); gap: .4rem; }
+  .tether-resources { right: max(.4rem, env(safe-area-inset-right)); gap: .3rem; }
   .tether-resources__kits small { display: none; }
   .tether-resources__kits { grid-template-rows: auto; }
   .tether-resources__spool { grid-row: auto; }
   .tether-resources__kits strong { align-self: center; line-height: 1; }
   .deploy-button { width: calc(4.8rem * var(--control-scale)); height: calc(4.8rem * var(--control-scale)); }
   .guided-setup__progress small { display: none; }
-  .guided-setup__content h2 { font-size: .9rem; }
-  .guided-setup__content > p { font-size: .6rem; }
+  .guided-setup__content h2 { font-size: .78rem; }
+  .guided-setup__content > p { font-size: .52rem; }
 }
 
 @media (max-height: 34rem) and (min-width: 36rem) {

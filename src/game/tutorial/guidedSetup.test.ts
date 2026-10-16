@@ -3,10 +3,12 @@ import { GAME_RULES } from "../constants";
 import { createInitialGameState } from "../state";
 import type { Anchor, GameState, PlayerId } from "../types";
 import {
+  GUIDED_SETUP_OBJECTIVE_REMINDER_DURATION_MS,
   GUIDED_SETUP_STEPS,
   advanceGuidedSetup,
   createGuidedSetupProgress,
   getCurrentGuidedSetupStep,
+  shouldShowGuidedSetupObjectiveReminder,
   type GuidedSetupProgress,
 } from "./guidedSetup";
 
@@ -25,6 +27,7 @@ describe("guided setup progress", () => {
       "break",
     ]);
     expect(progress.status).toBe("active");
+    expect(progress.completedAtElapsedMs).toBeNull();
     expect(getCurrentGuidedSetupStep(progress)).toBe("move");
   });
 
@@ -403,6 +406,7 @@ describe("guided setup progress", () => {
     state.hasDeployedAnchor.player = true;
     state.anchorTetherFabrications.player += 1;
     state.tetherDisruptions.player += 1;
+    state.elapsedMs = 12_345;
 
     progress = advanceGuidedSetup(progress, state, PLAYER_ID);
 
@@ -415,8 +419,55 @@ describe("guided setup progress", () => {
       break: true,
     });
     expect(progress.status).toBe("completed");
+    expect(progress.completedAtElapsedMs).toBe(12_345);
     expect(getCurrentGuidedSetupStep(progress)).toBeNull();
     expect(advanceGuidedSetup(progress, state, PLAYER_ID)).toBe(progress);
+  });
+
+  it("shows the objective reminder once, immediately after completion", () => {
+    const completedAtElapsedMs = 10_000;
+    const progress: GuidedSetupProgress = {
+      ...createProgress(),
+      status: "completed",
+      completedAtElapsedMs,
+    };
+
+    expect(
+      shouldShowGuidedSetupObjectiveReminder(progress, completedAtElapsedMs),
+    ).toBe(true);
+    expect(
+      shouldShowGuidedSetupObjectiveReminder(
+        progress,
+        completedAtElapsedMs + GUIDED_SETUP_OBJECTIVE_REMINDER_DURATION_MS - 1,
+      ),
+    ).toBe(true);
+    expect(
+      shouldShowGuidedSetupObjectiveReminder(
+        progress,
+        completedAtElapsedMs + GUIDED_SETUP_OBJECTIVE_REMINDER_DURATION_MS,
+      ),
+    ).toBe(false);
+  });
+
+  it("does not replay the objective reminder for invalid or incomplete progress", () => {
+    const progress = createProgress();
+
+    expect(shouldShowGuidedSetupObjectiveReminder(progress, 0)).toBe(false);
+    expect(shouldShowGuidedSetupObjectiveReminder({
+      ...progress,
+      status: "completed",
+      completedAtElapsedMs: 10_000,
+    }, 9_999)).toBe(false);
+    expect(shouldShowGuidedSetupObjectiveReminder({
+      ...progress,
+      status: "completed",
+      completedAtElapsedMs: Number.NaN,
+    }, 10_000)).toBe(false);
+    expect(shouldShowGuidedSetupObjectiveReminder({
+      ...progress,
+      status: "completed",
+      completedAtElapsedMs: 10_000,
+    }, Number.NaN)).toBe(false);
   });
 
   it("pre-credits actions that an in-progress match snapshot proves", () => {
@@ -512,6 +563,7 @@ describe("guided setup progress", () => {
     const setupState = createState();
     const disabled = createGuidedSetupProgress(setupState, PLAYER_ID, false);
     expect(disabled.status).toBe("disabled");
+    expect(disabled.completedAtElapsedMs).toBeNull();
     expect(getCurrentGuidedSetupStep(disabled)).toBeNull();
     expect(advanceGuidedSetup(disabled, setupState, PLAYER_ID)).toBe(disabled);
 

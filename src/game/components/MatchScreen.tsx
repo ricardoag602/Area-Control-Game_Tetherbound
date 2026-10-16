@@ -17,11 +17,15 @@ import { sampleWorld } from "../world/map";
 import {
   GUIDED_SETUP_MATERIAL_GOAL,
   getCurrentGuidedSetupStep,
+  shouldShowGuidedSetupObjectiveReminder,
   type TutorialStepId,
 } from "../tutorial/guidedSetup";
 import { useGuidedSetup } from "../tutorial/useGuidedSetup";
 import { ArenaRenderer } from "./ArenaRenderer";
-import { GuidedSetupCoach } from "./GuidedSetupCoach";
+import {
+  GuidedSetupCoach,
+  GuidedSetupObjectiveReminder,
+} from "./GuidedSetupCoach";
 import { Minimap } from "./Minimap";
 import { TetherResources } from "./TetherResources";
 import { GameAudioLayer } from "./GameAudioLayer";
@@ -135,6 +139,8 @@ export function MatchScreen({ audioEnabled, tutorialEnabled, state, localPlayerI
   const tutorialStep = tutorialEnabled
     ? getCurrentGuidedSetupStep(guidedSetup)
     : null;
+  const showTutorialObjectiveReminder = tutorialEnabled &&
+    shouldShowGuidedSetupObjectiveReminder(guidedSetup, elapsedMs);
   const completedTutorialSteps = useMemo(
     () => (Object.keys(guidedSetup.completed) as TutorialStepId[]).filter(
       (step) => guidedSetup.completed[step],
@@ -273,6 +279,9 @@ export function MatchScreen({ audioEnabled, tutorialEnabled, state, localPlayerI
           materialsAvailable={guidedSetup.materialsAvailable}
           targetAvailable={tutorialTarget !== null}
         />
+      )}
+      {!hideMatchProgress && showTutorialObjectiveReminder && (
+        <GuidedSetupObjectiveReminder />
       )}
       <div
         className="sr-only"

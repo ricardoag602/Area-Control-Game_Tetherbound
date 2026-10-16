@@ -60,6 +60,17 @@ describe("getThreeAstronautAnimationState", () => {
 });
 
 describe("createThreeAstronautModel", () => {
+  it("normalizes the rendered astronaut to the intended footprint", () => {
+    const rig = createThreeAstronautModel("player", astronautAsset());
+    const normalized = rig.model.children[0];
+
+    expect(normalized.scale.x).toBeCloseTo(15.2);
+    expect(normalized.scale.y).toBeCloseTo(15.2);
+    expect(normalized.scale.z).toBeCloseTo(15.2);
+
+    disposeThreeAstronautModel(rig);
+  });
+
   it("uses a circular contact shadow", () => {
     const rig = createThreeAstronautModel("player", astronautAsset());
     const shadow = rig.root.getObjectByName("astronaut-player-shadow") as THREE.Mesh;
@@ -67,7 +78,7 @@ describe("createThreeAstronautModel", () => {
 
     expect(shadow.scale.x).toBe(1);
     expect(shadow.scale.y).toBe(1);
-    expect(geometry.parameters.radius).toBeCloseTo(14.3 * 0.3);
+    expect(geometry.parameters.radius).toBeCloseTo(15.2 * 0.3);
 
     disposeThreeAstronautModel(rig);
   });

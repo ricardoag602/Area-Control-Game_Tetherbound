@@ -28,6 +28,8 @@ describe("charge radar", () => {
     const full = calculateChargeRadar(
       chargingMovement(MOVEMENT_RULES.fullChargeSeconds),
     );
+    const center = { x: WORLD.width / 2, y: WORLD.height / 2 };
+    const endpoint = chargeRadarEndpoint(center, full);
 
     expect(empty.burstDistance).toBe(MOVEMENT_RULES.minimumBurstDistance);
     expect(empty.powerRatio).toBe(0);
@@ -36,6 +38,10 @@ describe("charge radar", () => {
     expect(full.powerRatio).toBe(1);
     expect(full.canRelease).toBe(true);
     expect(full.outerRadius).toBe(CHARGE_RADAR_RULES.maximumOuterRadius);
+    expect(endpoint).toEqual({
+      x: center.x,
+      y: center.y - MOVEMENT_RULES.maximumBurstDistance,
+    });
   });
 
   it("does not promise launch reach before the minimum release charge", () => {

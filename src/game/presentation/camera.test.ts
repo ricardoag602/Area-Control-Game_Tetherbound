@@ -16,7 +16,7 @@ describe("camera framing", () => {
   it("uses a responsive view centered directly on the local player", () => {
     const view = calculateCameraViewBox({ x: 50, y: 80 }, 0.5, 1);
 
-    expect(view).toEqual({ x: 26, y: 32, width: 48, height: 96 });
+    expect(view).toEqual({ x: 24, y: 28, width: 52, height: 104 });
   });
 
   it.each([
@@ -24,12 +24,12 @@ describe("camera framing", () => {
     [
       "bottom-right",
       { x: WORLD.width, y: WORLD.height },
-      { x: WORLD.width - 48, y: WORLD.height - 96 },
+      { x: WORLD.width - 52, y: WORLD.height - 104 },
     ],
   ])("locks the follow camera to the %s world edge", (_, center, origin) => {
     const view = calculateCameraViewBox(center, 0.5, 1);
 
-    expect(view).toEqual({ ...origin, width: 48, height: 96 });
+    expect(view).toEqual({ ...origin, width: 52, height: 104 });
     expect(view.x).toBeGreaterThanOrEqual(0);
     expect(view.y).toBeGreaterThanOrEqual(0);
     expect(view.x + view.width).toBeLessThanOrEqual(WORLD.width);
@@ -52,7 +52,7 @@ describe("camera framing", () => {
       1,
     );
 
-    expect(view).toEqual({ x: 31, y: 127, width: 288, height: 96 });
+    expect(view).toEqual({ x: 19, y: 123, width: 312, height: 104 });
   });
 
   it("fits an ultrawide zoomed-out view inside the world", () => {
@@ -90,10 +90,10 @@ describe("camera framing", () => {
       Number.NaN,
     );
 
-    expect(view.x).toBeCloseTo(WORLD.width / 2 - 48, 10);
-    expect(view.y).toBeCloseTo(WORLD.height / 2 - 48, 10);
-    expect(view.width).toBeCloseTo(96, 10);
-    expect(view.height).toBeCloseTo(96, 10);
+    expect(view.x).toBeCloseTo(WORLD.width / 2 - 52, 10);
+    expect(view.y).toBeCloseTo(WORLD.height / 2 - 52, 10);
+    expect(view.width).toBeCloseTo(104, 10);
+    expect(view.height).toBeCloseTo(104, 10);
     expect(Object.values(view).every(Number.isFinite)).toBe(true);
   });
 

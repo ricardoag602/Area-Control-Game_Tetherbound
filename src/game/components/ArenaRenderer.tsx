@@ -482,7 +482,7 @@ export function ArenaRenderer({
         onInitialRender={() => setTerrainReady(true)}
       />
       <svg
-        className="world world--tether-sprites"
+        className="world world--player-underlay"
         viewBox={`${camera.x} ${camera.y} ${camera.width} ${camera.height}`}
         aria-hidden="true"
       >
@@ -491,6 +491,22 @@ export function ArenaRenderer({
           oxygen={localAstronaut.oxygen}
           position={renderPositions[localPlayerId]}
           refillSerial={oxygenRefillSerial}
+        />
+        {tutorialStep && (
+          <TutorialWorldCue
+            step={tutorialStep}
+            astronautPosition={renderPositions[localPlayerId]}
+            facing={localAstronaut.movement.facing}
+            target={tutorialTarget}
+            camera={camera}
+          />
+        )}
+        <ChargeFeedback
+          astronaut={localAstronaut}
+          position={renderPositions[localPlayerId]}
+          playerId={localPlayerId}
+          touchChargePreview={touchChargePreview}
+          turnRateMultiplier={localEnvironment.turnRateMultiplier}
         />
       </svg>
       <svg
@@ -531,24 +547,6 @@ export function ArenaRenderer({
             aria-hidden="true"
           />
         ))}
-
-        {tutorialStep && (
-          <TutorialWorldCue
-            step={tutorialStep}
-            astronautPosition={renderPositions[localPlayerId]}
-            facing={localAstronaut.movement.facing}
-            target={tutorialTarget}
-            camera={camera}
-          />
-        )}
-
-        <ChargeFeedback
-          astronaut={localAstronaut}
-          position={renderPositions[localPlayerId]}
-          playerId={localPlayerId}
-          touchChargePreview={touchChargePreview}
-          turnRateMultiplier={localEnvironment.turnRateMultiplier}
-        />
 
         {state.activePlayerIds.map((playerId) => (
           <Astronaut

@@ -208,6 +208,41 @@ export function GuidedSetupCoach({
   );
 }
 
+export function GuidedSetupObjectiveReminder() {
+  return (
+    <aside className="guided-setup guided-setup--objective">
+      <div className="guided-setup__card">
+        <div className="guided-setup__glyph" aria-hidden="true">
+          <svg viewBox="0 0 64 64">
+            <path d="M12 49 24 37l9 7 19-24" />
+            <path d="M39 20h13v13" />
+            <circle cx="12" cy="49" r="5" />
+            <circle cx="24" cy="37" r="5" />
+            <circle cx="33" cy="44" r="5" />
+          </svg>
+        </div>
+
+        <div
+          className="guided-setup__content"
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+        >
+          <div className="guided-setup__heading">
+            <span>Training complete</span>
+            <strong>Mission live</strong>
+          </div>
+          <h2>Claim the frontier</h2>
+          <p>
+            Spread your tether network to cover more territory and rack up signal
+            points. When the clock hits zero, the highest score wins.
+          </p>
+        </div>
+      </div>
+    </aside>
+  );
+}
+
 function TutorialGlyph({ step }: { step: TutorialStepId }) {
   if (step === "move") {
     return (

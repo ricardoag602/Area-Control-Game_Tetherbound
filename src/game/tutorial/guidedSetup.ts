@@ -20,6 +20,8 @@ export const GUIDED_SETUP_STEPS = [
 export type TutorialStepId = (typeof GUIDED_SETUP_STEPS)[number];
 export type GuidedSetupStatus = "active" | "completed" | "disabled";
 
+export const GUIDED_SETUP_OBJECTIVE_REMINDER_DURATION_MS = 5_000;
+
 const MOVEMENT_GOAL_DISTANCE = 6;
 const STARTING_TETHER_KITS = 2;
 const RESOURCE_EPSILON = 1e-6;
@@ -28,6 +30,7 @@ export const GUIDED_SETUP_MATERIAL_GOAL = GAME_RULES.salvagePerTether;
 export interface GuidedSetupProgress {
   enabled: boolean;
   status: GuidedSetupStatus;
+  completedAtElapsedMs: number | null;
   completed: Record<TutorialStepId, boolean>;
   movementDistance: number;
   previousPosition: Vec2;
@@ -69,6 +72,7 @@ export function createGuidedSetupProgress(
   return {
     enabled,
     status,
+    completedAtElapsedMs: null,
     completed: {
       move: false,
       boost: astronaut.movement.mode === "burst" || astronaut.movement.burstDistanceTotal > 0,
@@ -131,6 +135,9 @@ export function advanceGuidedSetup(
   return {
     ...progress,
     status,
+    completedAtElapsedMs: status === "completed"
+      ? state.elapsedMs
+      : progress.completedAtElapsedMs,
     completed,
     movementDistance,
     previousPosition: position,
@@ -141,6 +148,23 @@ export function advanceGuidedSetup(
     anchorTetherFabrications,
     tetherDisruptions,
   };
+}
+
+export function shouldShowGuidedSetupObjectiveReminder(
+  progress: GuidedSetupProgress,
+  elapsedMs: number,
+): boolean {
+  if (
+    progress.status !== "completed" ||
+    progress.completedAtElapsedMs === null ||
+    !Number.isFinite(progress.completedAtElapsedMs) ||
+    !Number.isFinite(elapsedMs)
+  ) {
+    return false;
+  }
+
+  const ageMs = elapsedMs - progress.completedAtElapsedMs;
+  return ageMs >= 0 && ageMs < GUIDED_SETUP_OBJECTIVE_REMINDER_DURATION_MS;
 }
 
 export function getCurrentGuidedSetupStep(
