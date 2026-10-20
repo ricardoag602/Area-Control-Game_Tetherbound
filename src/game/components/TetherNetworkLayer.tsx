@@ -1,4 +1,4 @@
-import { useId, type ReactElement } from "react";
+import { memo, useId, type ReactElement } from "react";
 import { GAME_RULES } from "../constants";
 import {
   getAnchorPowerState,
@@ -39,17 +39,23 @@ export function TetherNetworkLayer({
   return (
     <g className="world__tether-layer">
       <InteractionFilaments state={state} renderPositions={renderPositions} />
-
-      {state.activePlayerIds.map((playerId) => (
-        <NetworkNodes key={playerId} state={state} playerId={playerId}
-          highlightDelivery={localPlayerId === playerId}
-          isLocalBase={localPlayerId === playerId} />
-      ))}
+      <NetworkNodeLayer state={state} localPlayerId={localPlayerId} />
     </g>
   );
 }
 
-export function TetherCableLayer({
+const NetworkNodeLayer = memo(function NetworkNodeLayer({
+  state,
+  localPlayerId,
+}: Pick<TetherNetworkLayerProps, "state" | "localPlayerId">) {
+  return state.activePlayerIds.map((playerId) => (
+    <NetworkNodes key={playerId} state={state} playerId={playerId}
+      highlightDelivery={localPlayerId === playerId}
+      isLocalBase={localPlayerId === playerId} />
+  ));
+}, sameStaticNetworkProps);
+
+export const TetherCableLayer = memo(function TetherCableLayer({
   state,
   localPlayerId,
 }: Pick<TetherNetworkLayerProps, "state" | "localPlayerId">) {
@@ -106,7 +112,7 @@ export function TetherCableLayer({
       ))}
     </g>
   );
-}
+}, sameStaticNetworkProps);
 
 function NetworkZones({
   state,
@@ -395,6 +401,13 @@ function InteractionFilaments({
   state,
   renderPositions,
 }: Pick<TetherNetworkLayerProps, "state" | "renderPositions">) {
+  const hasActiveInteraction = state.activePlayerIds.some(
+    (playerId) => state.baseCollapseProgressMs[playerId] > 0,
+  ) || state.anchors.some(
+    (anchor) => anchor.overloadProgress > 0 || anchor.repairProgress > 0,
+  );
+  if (!hasActiveInteraction) return null;
+
   const collapseFilaments = state.activePlayerIds.flatMap((defenderId) => {
     if (state.baseCollapseProgressMs[defenderId] <= 0) return [];
     const attackerId = state.baseCollapseAttacker[defenderId];
@@ -527,4 +540,41 @@ function collectZoneOverlaps(networks: readonly (readonly NetworkNode[])[]): Zon
   }
 
   return overlaps;
+}
+
+function sameStaticNetworkProps(
+  previous: Pick<TetherNetworkLayerProps, "state" | "localPlayerId">,
+  next: Pick<TetherNetworkLayerProps, "state" | "localPlayerId">,
+) {
+  if (previous.localPlayerId !== next.localPlayerId) return false;
+  if (previous.state === next.state) return true;
+  const previousState = previous.state;
+  const nextState = next.state;
+  if (
+    previousState.matchPhase !== nextState.matchPhase ||
+    previousState.anchors !== nextState.anchors ||
+    previousState.activePlayerIds.length !== nextState.activePlayerIds.length
+  ) return false;
+
+  for (let index = 0; index < previousState.activePlayerIds.length; index += 1) {
+    const playerId = previousState.activePlayerIds[index];
+    if (playerId !== nextState.activePlayerIds[index]) return false;
+    const previousPlayer = previousState.players[playerId];
+    const nextPlayer = nextState.players[playerId];
+    if (
+      previousPlayer.basePosition.x !== nextPlayer.basePosition.x ||
+      previousPlayer.basePosition.y !== nextPlayer.basePosition.y ||
+      previousPlayer.astronaut.carriedSalvage !== nextPlayer.astronaut.carriedSalvage ||
+      previousState.hasDeployedAnchor[playerId] !== nextState.hasDeployedAnchor[playerId] ||
+      previousState.baseCollapseProgressMs[playerId] !== nextState.baseCollapseProgressMs[playerId] ||
+      previousState.baseCollapseAttacker[playerId] !== nextState.baseCollapseAttacker[playerId]
+    ) return false;
+  }
+
+  // Timed disruption/shield transitions can change presentation even when the
+  // immutable anchor collection itself is unchanged.
+  return previousState.anchors.every((anchor) =>
+    getAnchorPowerState(anchor, previousState.elapsedMs) ===
+      getAnchorPowerState(anchor, nextState.elapsedMs)
+  );
 }

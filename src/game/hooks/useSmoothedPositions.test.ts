@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { WORLD } from "../constants";
 import {
+  advanceSmoothedPosition,
   extrapolateMotionPosition,
   MAX_EXTRAPOLATION_MS,
+  type MotionSnapshot,
 } from "./useSmoothedPositions";
 
 describe("multiplayer position extrapolation", () => {
@@ -74,5 +76,73 @@ describe("multiplayer position extrapolation", () => {
       target: null,
       burstDistanceRemaining: 0,
     }, 200)).toEqual({ x: WORLD.width, y: 0 });
+  });
+
+  it("keeps 20 Hz snapshots moving uniformly on a 144 Hz render clock", () => {
+    const frameMs = 1_000 / 144;
+    const snapshotMs = 1_000 / 20;
+    const speed = 60;
+    let trackTime = 0;
+    let receivedAt = 0;
+    let nextSnapshotAt = snapshotMs;
+    let displayed = { x: 100, y: 100 };
+    let correction = { x: 0, y: 0 };
+    let motion: MotionSnapshot = {
+      position: { ...displayed },
+      velocity: { x: speed, y: 0 },
+      mode: "walking",
+      target: null,
+      burstDistanceRemaining: 0,
+    };
+    const frameDistances: number[] = [];
+
+    for (let frame = 1; frame <= 144; frame += 1) {
+      const frameAt = frame * frameMs;
+      const prior = displayed;
+
+      // Reconcile at each 20 Hz timestamp, including snapshots that land
+      // between 144 Hz frames. Advance the old motion to the handoff first.
+      while (nextSnapshotAt <= frameAt) {
+        const advanced = advanceSmoothedPosition(
+          motion,
+          correction,
+          nextSnapshotAt - receivedAt,
+          nextSnapshotAt - trackTime,
+        );
+        displayed = advanced.position;
+        correction = advanced.correction;
+
+        const authoritative = {
+          x: 100 + speed * nextSnapshotAt / 1_000,
+          y: 100,
+        };
+        motion = {
+          ...motion,
+          position: authoritative,
+        };
+        receivedAt = nextSnapshotAt;
+        correction = {
+          x: displayed.x - authoritative.x,
+          y: displayed.y - authoritative.y,
+        };
+        trackTime = nextSnapshotAt;
+        nextSnapshotAt += snapshotMs;
+      }
+
+      const advanced = advanceSmoothedPosition(
+        motion,
+        correction,
+        frameAt - receivedAt,
+        frameAt - trackTime,
+      );
+      displayed = advanced.position;
+      correction = advanced.correction;
+      frameDistances.push(displayed.x - prior.x);
+      trackTime = frameAt;
+    }
+
+    const expectedDistance = speed * frameMs / 1_000;
+    expect(Math.min(...frameDistances)).toBeCloseTo(expectedDistance, 7);
+    expect(Math.max(...frameDistances)).toBeCloseTo(expectedDistance, 7);
   });
 });

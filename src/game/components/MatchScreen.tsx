@@ -19,7 +19,10 @@ import { calculateSupplyDropToast } from "../presentation/supplyDrop";
 import { useDeployShortcut } from "../input/useDeployShortcut";
 import { sampleScorableTerritory } from "../simulation/scoring";
 import type { GameState, MovementCommand, PlayerId } from "../types";
-import { sampleTerritoryGrid } from "../world/territory";
+import {
+  getTerritoryTopologyKey,
+  sampleTerritoryGrid,
+} from "../world/territory";
 import { sampleWorld } from "../world/map";
 import {
   GUIDED_SETUP_MATERIAL_GOAL,
@@ -82,16 +85,17 @@ export function MatchScreen({ audioEnabled, tutorialEnabled, state, localPlayerI
     localPlayerId,
     tutorialEnabled,
   );
-  const territoryGrid = useMemo(() => sampleTerritoryGrid(state), [
-    state.anchors,
-    state.players,
-    state.activePlayerIds,
-  ]);
-  const scorableTerritory = useMemo(() => sampleScorableTerritory(state).fractions, [
-    state.anchors,
-    state.players,
-    state.activePlayerIds,
-  ]);
+  const territoryTopologyKey = getTerritoryTopologyKey(state);
+  const { territoryGrid, scorableTerritory } = useMemo(() => {
+    const grid = sampleTerritoryGrid(state);
+    return {
+      territoryGrid: grid,
+      scorableTerritory: sampleScorableTerritory(state, grid).fractions,
+    };
+    // The key contains every state field used by both territory samplers. The
+    // remaining state changes at simulation frequency but cannot affect them.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [territoryTopologyKey]);
   const safe = isInsideSafeZone(state, localPlayerId, astronaut.position);
   const oxygenRounded = Math.round(astronaut.oxygen);
   const oxygenPresentation = calculateOxygenPresentation(

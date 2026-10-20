@@ -6,6 +6,8 @@ import {
   createThreeAstronautModel,
   disposeThreeAstronautModel,
   getThreeAstronautAnimationState,
+  smoothThreeAstronautHeading,
+  updateThreeAstronautModel,
 } from "./threeAstronautModel";
 
 function movement(overrides: Record<string, unknown> = {}) {
@@ -59,6 +61,28 @@ describe("getThreeAstronautAnimationState", () => {
   });
 });
 
+describe("smoothThreeAstronautHeading", () => {
+  it("takes the shortest arc across the angle boundary", () => {
+    const current = Math.PI - 0.05;
+    const target = -Math.PI + 0.05;
+    const next = smoothThreeAstronautHeading(current, target, 1 / 60);
+
+    expect(next).toBeGreaterThan(current);
+    expect(next).toBeLessThan(current + 0.1);
+  });
+
+  it("has the same response independent of frame cadence", () => {
+    const target = Math.PI / 2;
+    const singleFrame = smoothThreeAstronautHeading(0, target, 0.1);
+    let tenFrames = 0;
+    for (let index = 0; index < 10; index += 1) {
+      tenFrames = smoothThreeAstronautHeading(tenFrames, target, 0.01);
+    }
+
+    expect(tenFrames).toBeCloseTo(singleFrame, 10);
+  });
+});
+
 describe("createThreeAstronautModel", () => {
   it("normalizes the rendered astronaut to the intended footprint", () => {
     const rig = createThreeAstronautModel("player", astronautAsset());
@@ -79,6 +103,37 @@ describe("createThreeAstronautModel", () => {
     expect(shadow.scale.x).toBe(1);
     expect(shadow.scale.y).toBe(1);
     expect(geometry.parameters.radius).toBeCloseTo(15.2 * 0.3);
+
+    disposeThreeAstronautModel(rig);
+  });
+
+  it("snaps to the first heading, then smooths subsequent turns", () => {
+    const rig = createThreeAstronautModel("player", astronautAsset());
+    const astronaut = {
+      movement: movement({ headingRadians: 0 }),
+    } as Parameters<typeof updateThreeAstronautModel>[1];
+
+    updateThreeAstronautModel(rig, astronaut, { x: 0, y: 0 }, 0, false);
+    expect(rig.heading.rotation.z).toBeCloseTo(Math.PI / 2);
+
+    astronaut.movement.headingRadians = Math.PI;
+    updateThreeAstronautModel(rig, astronaut, { x: 0, y: 0 }, 1 / 60, false);
+    expect(rig.heading.rotation.z).toBeLessThan(Math.PI / 2);
+    expect(rig.heading.rotation.z).toBeGreaterThan(-Math.PI / 2);
+
+    disposeThreeAstronautModel(rig);
+  });
+
+  it("snaps heading changes when reduced motion is enabled", () => {
+    const rig = createThreeAstronautModel("player", astronautAsset());
+    const astronaut = {
+      movement: movement({ headingRadians: 0 }),
+    } as Parameters<typeof updateThreeAstronautModel>[1];
+
+    updateThreeAstronautModel(rig, astronaut, { x: 0, y: 0 }, 0, false);
+    astronaut.movement.headingRadians = Math.PI;
+    updateThreeAstronautModel(rig, astronaut, { x: 0, y: 0 }, 1 / 60, true);
+    expect(rig.heading.rotation.z).toBeCloseTo(-Math.PI / 2);
 
     disposeThreeAstronautModel(rig);
   });

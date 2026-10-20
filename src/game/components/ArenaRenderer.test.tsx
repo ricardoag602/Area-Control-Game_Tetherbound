@@ -68,7 +68,7 @@ describe("ArenaRenderer player layering", () => {
     expect(markup).not.toContain("three-astronaut-layer");
   });
 
-  it("keeps player-linked world indicators in the underlay", () => {
+  it("raises oxygen above the world while keeping other player cues in the underlay", () => {
     const state = createInitialGameState("player-underlay");
     state.players.player.astronaut.oxygen = 50;
     state.players.player.astronaut.movement.mode = "charging";
@@ -88,10 +88,14 @@ describe("ArenaRenderer player layering", () => {
     const interactiveWorld = markup.match(
       /<svg class="world"[\s\S]*?<\/svg>/,
     )?.[0];
+    const overlay = markup.match(
+      /<svg class="world world--player-overlay"[\s\S]*?<\/svg>/,
+    )?.[0];
 
-    expect(underlay).toContain("world__oxygen-meter");
-    expect(underlay).toContain("world__oxygen-meter-label");
-    expect(underlay).toContain("O²");
+    expect(overlay).toContain("world__oxygen-meter");
+    expect(overlay).toContain("world__oxygen-meter-label");
+    expect(overlay).toContain("O²");
+    expect(underlay).not.toContain("world__oxygen-meter");
     expect(underlay).toContain("world__tutorial-cue");
     expect(underlay).toContain("world__charge-feedback");
     expect(underlay).not.toContain("world__astronaut");

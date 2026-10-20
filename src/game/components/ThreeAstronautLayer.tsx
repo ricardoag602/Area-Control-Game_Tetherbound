@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { memo, useEffect, useLayoutEffect, useRef, type RefObject } from "react";
 import * as THREE from "three";
 import type { CameraViewBox } from "../presentation/camera";
 import {
@@ -44,8 +44,8 @@ import type { GameState, PlayerId, Vec2 } from "../types";
 
 interface ThreeAstronautLayerProps {
   state: GameState;
-  renderPositions: Readonly<Record<PlayerId, Vec2>>;
-  camera: CameraViewBox;
+  renderPositionsRef: RefObject<Readonly<Record<PlayerId, Vec2>>>;
+  cameraRef: RefObject<CameraViewBox>;
   onReadyChange?: (ready: boolean) => void;
   onObjectReadyChange?: (ready: boolean) => void;
   onLoadError?: (error: unknown) => void;
@@ -53,15 +53,13 @@ interface ThreeAstronautLayerProps {
 
 interface LatestFrame {
   state: GameState;
-  renderPositions: Readonly<Record<PlayerId, Vec2>>;
-  camera: CameraViewBox;
   terrainLightZones: readonly TerrainLightZone[];
 }
 
-export default function ThreeAstronautLayer({
+function ThreeAstronautLayer({
   state,
-  renderPositions,
-  camera,
+  renderPositionsRef,
+  cameraRef,
   onReadyChange,
   onObjectReadyChange,
   onLoadError,
@@ -70,16 +68,17 @@ export default function ThreeAstronautLayer({
   const terrainLightZones = collectTerrainLightZones(state);
   const latestRef = useRef<LatestFrame>({
     state,
-    renderPositions,
-    camera,
     terrainLightZones,
   });
   const readyCallbackRef = useRef(onReadyChange);
   const objectReadyCallbackRef = useRef(onObjectReadyChange);
-  latestRef.current = { state, renderPositions, camera, terrainLightZones };
-  readyCallbackRef.current = onReadyChange;
-  objectReadyCallbackRef.current = onObjectReadyChange;
   const playerKey = state.activePlayerIds.join("|");
+
+  useLayoutEffect(() => {
+    latestRef.current = { state, terrainLightZones };
+    readyCallbackRef.current = onReadyChange;
+    objectReadyCallbackRef.current = onObjectReadyChange;
+  }, [onObjectReadyChange, onReadyChange, state, terrainLightZones]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -130,7 +129,7 @@ export default function ThreeAstronautLayer({
 
     const initial = latestRef.current;
     const sceneLighting = createThreeSceneLighting(
-      initial.camera,
+      cameraRef.current,
       initial.terrainLightZones,
     );
     scene.add(sceneLighting.hemisphere, sceneLighting.key, sceneLighting.fill);
@@ -269,6 +268,8 @@ export default function ThreeAstronautLayer({
         return;
       }
       const latest = latestRef.current;
+      const camera = cameraRef.current;
+      const renderPositions = renderPositionsRef.current;
       if (resizeDirty) {
         renderer.setSize(
           Math.max(1, host.clientWidth),
@@ -278,10 +279,10 @@ export default function ThreeAstronautLayer({
         resizeDirty = false;
       }
 
-      positionCamera(viewCamera, latest.camera);
+      positionCamera(viewCamera, camera);
       renderer.toneMappingExposure = updateThreeSceneLighting(
         sceneLighting,
-        latest.camera,
+        camera,
         latest.terrainLightZones,
         deltaSeconds,
       );
@@ -291,7 +292,7 @@ export default function ThreeAstronautLayer({
         updateThreeAstronautModel(
           rig,
           latest.state.players[playerId].astronaut,
-          latest.renderPositions[playerId],
+          renderPositions[playerId],
           deltaSeconds,
           reduceMotion,
         );
@@ -300,7 +301,7 @@ export default function ThreeAstronautLayer({
         updateThreeBoostChargeSmoke(
           boostSmokeRuntime,
           latest.state,
-          latest.renderPositions,
+          renderPositions,
           deltaSeconds,
           reduceMotion,
         );
@@ -402,10 +403,12 @@ export default function ThreeAstronautLayer({
       loadFailureReported = true;
       onLoadError?.(error);
     }
-  }, [onLoadError, playerKey]);
+  }, [cameraRef, onLoadError, playerKey, renderPositionsRef]);
 
   return <div ref={hostRef} className="three-astronaut-layer" aria-hidden="true" />;
 }
+
+export default memo(ThreeAstronautLayer);
 
 function positionCamera(camera: THREE.OrthographicCamera, view: CameraViewBox) {
   const centerX = view.x + view.width / 2;

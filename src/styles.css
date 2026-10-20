@@ -1290,6 +1290,12 @@ button { -webkit-tap-highlight-color: transparent; }
   cursor: default;
 }
 
+.world--player-overlay {
+  z-index: 4;
+  pointer-events: none;
+  cursor: default;
+}
+
 .world:focus-visible {
   outline: 2px solid rgba(105, 221, 244, .85);
   outline-offset: -3px;
@@ -1324,10 +1330,10 @@ button { -webkit-tap-highlight-color: transparent; }
 }
 
 .world__oxygen-meter {
-  color: #75e7fa;
+  color: #fff;
   opacity: .78;
   pointer-events: none;
-  filter: drop-shadow(0 0 .55px rgba(102, 229, 250, .6));
+  filter: drop-shadow(0 0 .55px rgba(255, 255, 255, .6));
   transform-box: fill-box;
   transform-origin: center;
 }
@@ -1347,7 +1353,7 @@ button { -webkit-tap-highlight-color: transparent; }
 
 .world__oxygen-meter-track {
   fill: rgba(3, 10, 14, .68);
-  stroke: rgba(235, 251, 255, .28);
+  stroke: rgba(255, 255, 255, .28);
   stroke-width: .18;
 }
 
@@ -1370,7 +1376,7 @@ button { -webkit-tap-highlight-color: transparent; }
 }
 
 .world__oxygen-meter--refilled {
-  color: #b9f8ff;
+  color: #fff;
   animation: oxygen-meter-refilled 680ms ease-out both;
 }
 

@@ -24,6 +24,7 @@ const TARGET_FOOTPRINT_SIZE = 15.2;
 const SHADOW_RADIUS = TARGET_FOOTPRINT_SIZE * 0.3;
 const TRANSITION_SECONDS = 0.14;
 const MOVING_SPEED_EPSILON = 0.01;
+const HEADING_RESPONSE_PER_SECOND = 16;
 
 export type ThreeAstronautAnimationState = keyof typeof REQUIRED_CLIPS;
 
@@ -36,6 +37,7 @@ export interface ThreeAstronautRig {
   readonly actions: Readonly<Record<ThreeAstronautAnimationState, THREE.AnimationAction>>;
   activeAnimation: ThreeAstronautAnimationState;
   activeAction: THREE.AnimationAction;
+  headingInitialized: boolean;
 }
 
 export interface ThreeAstronautPose {
@@ -124,6 +126,7 @@ export function createThreeAstronautModel(
     actions,
     activeAnimation: "idle",
     activeAction: actions.idle,
+    headingInitialized: false,
   };
 }
 
@@ -167,9 +170,41 @@ export function updateThreeAstronautModel(
   const animation = reduceMotion ? "idle" : pose.animation;
 
   rig.root.position.set(position.x, -position.y, 0);
-  rig.heading.rotation.z = pose.headingRotation;
+  if (!rig.headingInitialized || reduceMotion) {
+    rig.heading.rotation.z = pose.headingRotation;
+    rig.headingInitialized = true;
+  } else {
+    rig.heading.rotation.z = smoothThreeAstronautHeading(
+      rig.heading.rotation.z,
+      pose.headingRotation,
+      deltaSeconds,
+    );
+  }
   if (animation !== rig.activeAnimation) transitionTo(rig, animation);
   if (!reduceMotion) rig.mixer.update(clamp(deltaSeconds, 0, 0.1));
+}
+
+/**
+ * Exponentially damps a visual heading along the shortest arc. Exponential
+ * response keeps the turn rate consistent across different display refresh
+ * rates while allowing the authoritative heading to remain untouched.
+ */
+export function smoothThreeAstronautHeading(
+  currentRotation: number,
+  targetRotation: number,
+  deltaSeconds: number,
+) {
+  if (!Number.isFinite(targetRotation)) return currentRotation;
+  if (!Number.isFinite(currentRotation)) return targetRotation;
+  const elapsedSeconds = Math.max(0, deltaSeconds);
+  if (elapsedSeconds === 0) return currentRotation;
+
+  const shortestDelta = Math.atan2(
+    Math.sin(targetRotation - currentRotation),
+    Math.cos(targetRotation - currentRotation),
+  );
+  const blend = 1 - Math.exp(-HEADING_RESPONSE_PER_SECOND * elapsedSeconds);
+  return currentRotation + shortestDelta * blend;
 }
 
 export function disposeThreeAstronautModel(rig: ThreeAstronautRig) {

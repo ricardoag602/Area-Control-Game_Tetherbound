@@ -3,6 +3,7 @@ import { GAME_RULES, WORLD } from "../constants";
 import { createInitialGameState } from "../state";
 import type { Anchor, GameState, PlayerId, PlayerLimit, Vec2 } from "../types";
 import { createWorldTimeline } from "../world/timeline";
+import { sampleTerritoryGrid } from "../world/territory";
 import { advanceMatch } from "./match";
 import { deployAnchor } from "./tetherNetwork";
 import {
@@ -32,6 +33,28 @@ describe("authoritative match scoring", () => {
     expect(getScorableTerritoryFraction(state, "player")).toBe(
       claimed.fractions.player,
     );
+  });
+
+  it("can derive scoring from an already sampled presentation grid", () => {
+    const state = regulationState();
+    state.anchors = [anchor("player-claim", "player", { x: 80, y: 175 })];
+    const grid = sampleTerritoryGrid(state);
+
+    expect(sampleScorableTerritory(state, grid)).toEqual(
+      sampleScorableTerritory(state),
+    );
+  });
+
+  it("reuses scoring for states with unchanged territory topology", () => {
+    const state = regulationState();
+    state.anchors = [anchor("stable-claim", "player", { x: 80, y: 175 })];
+    const initial = sampleScorableTerritory(state);
+
+    state.elapsedMs += 50;
+    state.players.player.astronaut.position = { x: 110, y: 175 };
+    state.players.player.astronaut.oxygen -= 1;
+
+    expect(sampleScorableTerritory(state)).toBe(initial);
   });
 
   it("protects the 30-second setup from scoring and base collapse", () => {

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { memo, useEffect, useRef, type RefObject } from "react";
 import {
   Application,
   Assets,
@@ -24,7 +24,7 @@ const MAX_RENDER_RESOLUTION = 1.5;
 
 interface PixiTerrainLayerProps {
   state: GameState;
-  camera: CameraViewBox;
+  cameraRef: RefObject<CameraViewBox>;
   theme?: TerrainVisualTheme;
   onInitialRender?: () => void;
   onLoadError?: (error: unknown) => void;
@@ -48,9 +48,9 @@ interface TerrainScene {
  * layers above it. Pixi keeps the source texture as daylight, applies a dusk
  * veil everywhere else, and softly tints powered reveals with their team.
  */
-export function PixiTerrainLayer({
+export const PixiTerrainLayer = memo(function PixiTerrainLayer({
   state,
-  camera,
+  cameraRef,
   theme = ACTIVE_TERRAIN_THEME,
   onInitialRender,
   onLoadError,
@@ -59,10 +59,8 @@ export function PixiTerrainLayer({
   const sceneRef = useRef<TerrainScene | null>(null);
   const initialRenderCallbackRef = useRef(onInitialRender);
   const latestStateRef = useRef(state);
-  const latestCameraRef = useRef(camera);
   initialRenderCallbackRef.current = onInitialRender;
   latestStateRef.current = state;
-  latestCameraRef.current = camera;
   const terrainLightingKey = [
     ...state.activePlayerIds.map((playerId) => {
       const position = state.players[playerId].basePosition;
@@ -77,6 +75,8 @@ export function PixiTerrainLayer({
     if (!host) return;
 
     let cancelled = false;
+    let cameraFrame = 0;
+    let renderedCamera: CameraViewBox | null = null;
     let resizeObserver: ResizeObserver | null = null;
     const app = new Application();
 
@@ -166,13 +166,29 @@ export function PixiTerrainLayer({
       };
       sceneRef.current = scene;
       updateTerrainLighting(scene, latestStateRef.current, theme);
-      resizeAndPosition(scene, host, latestCameraRef.current);
+      resizeAndPosition(scene, host, cameraRef.current);
+      renderedCamera = { ...cameraRef.current };
 
       resizeObserver = new ResizeObserver(() => {
         const current = sceneRef.current;
-        if (current) resizeAndPosition(current, host, latestCameraRef.current);
+        if (current) {
+          resizeAndPosition(current, host, cameraRef.current);
+          renderedCamera = { ...cameraRef.current };
+        }
       });
       resizeObserver.observe(host);
+
+      const drawCamera = () => {
+        if (cancelled) return;
+        const current = sceneRef.current;
+        const camera = cameraRef.current;
+        if (current && !sameCamera(renderedCamera, camera)) {
+          positionAndRender(current, camera);
+          renderedCamera = { ...camera };
+        }
+        cameraFrame = requestAnimationFrame(drawCamera);
+      };
+      cameraFrame = requestAnimationFrame(drawCamera);
     };
 
     void settleTerrainInitialization(
@@ -187,13 +203,14 @@ export function PixiTerrainLayer({
 
     return () => {
       cancelled = true;
+      cancelAnimationFrame(cameraFrame);
       resizeObserver?.disconnect();
       sceneRef.current = null;
       if (app.renderer) {
         app.destroy({ removeView: true }, { children: true });
       }
     };
-  }, [onLoadError, theme]);
+  }, [cameraRef, onLoadError, theme]);
 
   useEffect(() => {
     const scene = sceneRef.current;
@@ -202,15 +219,8 @@ export function PixiTerrainLayer({
     scene.app.render();
   }, [terrainLightingKey, theme]);
 
-  useEffect(() => {
-    const scene = sceneRef.current;
-    const host = hostRef.current;
-    if (!scene || !host) return;
-    resizeAndPosition(scene, host, camera);
-  }, [camera]);
-
   return <div ref={hostRef} className="pixi-terrain-layer" aria-hidden="true" />;
-}
+});
 
 export async function settleTerrainInitialization(
   initialize: () => Promise<void>,
@@ -323,9 +333,26 @@ function resizeAndPosition(
     scene.viewportHeight = height;
     scene.resolution = resolution;
   }
+  positionAndRender(scene, camera);
+}
+
+function positionAndRender(
+  scene: TerrainScene,
+  camera: CameraViewBox,
+) {
+  const width = scene.viewportWidth;
+  const height = scene.viewportHeight;
   const scaleX = width / camera.width;
   const scaleY = height / camera.height;
   scene.world.scale.set(scaleX, scaleY);
   scene.world.position.set(-camera.x * scaleX, -camera.y * scaleY);
   scene.app.render();
+}
+
+function sameCamera(first: CameraViewBox | null, second: CameraViewBox) {
+  return first !== null &&
+    first.x === second.x &&
+    first.y === second.y &&
+    first.width === second.width &&
+    first.height === second.height;
 }

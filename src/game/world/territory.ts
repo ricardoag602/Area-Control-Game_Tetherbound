@@ -38,6 +38,31 @@ export const TERRITORY_GRID_RULES = {
   maximumGridDimension: 256,
 } as const;
 
+/**
+ * Returns a stable key for the small subset of match state that can change
+ * territory ownership. Movement, oxygen, anchor interaction progress, and the
+ * match clock intentionally do not participate, so presentation consumers can
+ * retain a sampled grid while only those rapidly changing fields update.
+ */
+export function getTerritoryTopologyKey(state: GameState): string {
+  const activePlayerIds = [...state.activePlayerIds].sort();
+  const activePlayers = new Set(activePlayerIds);
+  const bases = activePlayerIds.map((playerId) => {
+    const position = state.players[playerId].basePosition;
+    return [playerId, finiteCoordinate(position.x), finiteCoordinate(position.y)];
+  });
+  const poweredAnchors = state.anchors
+    .filter((anchor) => anchor.powered && activePlayers.has(anchor.owner))
+    .map((anchor) => [
+      anchor.owner,
+      finiteCoordinate(anchor.position.x),
+      finiteCoordinate(anchor.position.y),
+    ] as const)
+    .sort(compareTopologyNodes);
+
+  return JSON.stringify([activePlayerIds, bases, poweredAnchors]);
+}
+
 interface TerritoryNode {
   readonly owner: PlayerId;
   readonly position: Vec2;
@@ -137,6 +162,29 @@ function squaredDistance(a: Vec2, b: Vec2) {
   const x = a.x - b.x;
   const y = a.y - b.y;
   return x * x + y * y;
+}
+
+function finiteCoordinate(value: number): number | null {
+  return Number.isFinite(value) ? value : null;
+}
+
+function compareTopologyNodes(
+  left: readonly [PlayerId, number | null, number | null],
+  right: readonly [PlayerId, number | null, number | null],
+) {
+  return left[0].localeCompare(right[0]) ||
+    compareTopologyCoordinates(left[1], right[1]) ||
+    compareTopologyCoordinates(left[2], right[2]);
+}
+
+function compareTopologyCoordinates(
+  left: number | null,
+  right: number | null,
+) {
+  if (left === right) return 0;
+  if (left === null) return -1;
+  if (right === null) return 1;
+  return left - right;
 }
 
 function createEmptyTotals(): TerritoryTotals {

@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { WORLD } from "../constants";
 import { createInitialGameState } from "../state";
-import { sampleTerritoryGrid, type TerritoryGrid } from "./territory";
+import {
+  getTerritoryTopologyKey,
+  sampleTerritoryGrid,
+  type TerritoryGrid,
+} from "./territory";
 import type { Anchor, GameState, PlayerId, Vec2 } from "../types";
 
 describe("territory grid", () => {
@@ -114,6 +118,39 @@ describe("territory grid", () => {
 
     expect(ownerNearest(grid, { x: 0, y: WORLD.height / 2 })).toBe("player");
     expect(ownerNearest(grid, { x: WORLD.width, y: WORLD.height / 2 })).toBe("rival");
+  });
+
+  it("keeps its topology key stable across rapid non-territory updates", () => {
+    const state = createInitialGameState();
+    state.anchors = [anchor("player-anchor", "player", { x: 85, y: 155 })];
+    const key = getTerritoryTopologyKey(state);
+
+    state.elapsedMs += 50;
+    state.players.player.astronaut.position = { x: 140, y: 180 };
+    state.players.player.astronaut.oxygen -= 1;
+    state.anchors = [{
+      ...state.anchors[0],
+      overloadProgress: 0.75,
+      repairProgress: 0.25,
+      protectedUntilMs: 10_000,
+    }];
+
+    expect(getTerritoryTopologyKey(state)).toBe(key);
+  });
+
+  it("changes its topology key only when territory-affecting nodes change", () => {
+    const state = createInitialGameState();
+    state.anchors = [
+      anchor("first", "player", { x: 85, y: 155 }),
+      anchor("second", "rival", { x: 125, y: 155 }),
+    ];
+    const key = getTerritoryTopologyKey(state);
+
+    state.anchors.reverse();
+    expect(getTerritoryTopologyKey(state)).toBe(key);
+
+    state.anchors[0] = { ...state.anchors[0], powered: false };
+    expect(getTerritoryTopologyKey(state)).not.toBe(key);
   });
 });
 

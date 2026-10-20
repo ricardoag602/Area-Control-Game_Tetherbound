@@ -41,12 +41,16 @@ export function useFollowCamera(
   const authoritativeProgressRef = useRef(0);
   const oxygenZoomRef = useRef(oxygenZoomMultiplier);
   const overviewSettledRef = useRef(onOverviewSettled);
-  chargeIntentRef.current = chargeIntentActive;
-  oxygenZoomRef.current = oxygenZoomMultiplier;
-  overviewSettledRef.current = onOverviewSettled;
-  authoritativeProgressRef.current = movement.mode === "charging"
-    ? Math.min(1, movement.chargeSeconds / MOVEMENT_RULES.fullChargeSeconds)
-    : 0;
+  const centerRef = useRef(center);
+  useLayoutEffect(() => {
+    centerRef.current = center;
+    chargeIntentRef.current = chargeIntentActive;
+    oxygenZoomRef.current = oxygenZoomMultiplier;
+    overviewSettledRef.current = onOverviewSettled;
+    authoritativeProgressRef.current = movement.mode === "charging"
+      ? Math.min(1, movement.chargeSeconds / MOVEMENT_RULES.fullChargeSeconds)
+      : 0;
+  });
 
   useEffect(() => {
     const media = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -165,7 +169,7 @@ export function useFollowCamera(
     if (!hasMeasured) return;
 
     const startView = calculateCameraViewBox(
-      center,
+      centerRef.current,
       aspectRatio,
       (reduceMotion ? oxygenZoomMultiplier : springRef.current.zoom) *
         viewportBufferZoom,
@@ -204,8 +208,6 @@ export function useFollowCamera(
   }, [
     aspectRatio,
     cameraMode,
-    center.x,
-    center.y,
     hasMeasured,
     oxygenZoomMultiplier,
     reduceMotion,

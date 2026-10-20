@@ -6,7 +6,14 @@ import type {
   PlayerId,
 } from "../types";
 import { PLAYER_IDS } from "../types";
-import { sampleTerritoryGrid } from "../world/territory";
+import {
+  getTerritoryTopologyKey,
+  sampleTerritoryGrid,
+  type TerritoryGrid,
+} from "../world/territory";
+
+const MAX_CACHED_TERRITORY_TOPOLOGIES = 128;
+const scorableTerritoryCache = new Map<string, ScorableTerritory>();
 
 export interface ScorableTerritory {
   /** Grid cells outside both guaranteed home zones. */
@@ -23,8 +30,32 @@ export interface ScorableTerritory {
  * them. Contested and neutral cells remain in the denominator but not either
  * player's numerator.
  */
-export function sampleScorableTerritory(state: GameState): ScorableTerritory {
-  const grid = sampleTerritoryGrid(state);
+export function sampleScorableTerritory(
+  state: GameState,
+  grid?: TerritoryGrid,
+): ScorableTerritory {
+  if (!grid) {
+    const topologyKey = getTerritoryTopologyKey(state);
+    const cached = scorableTerritoryCache.get(topologyKey);
+    if (cached) return cached;
+    const sampled = calculateScorableTerritory(
+      state,
+      sampleTerritoryGrid(state),
+    );
+    scorableTerritoryCache.set(topologyKey, sampled);
+    if (scorableTerritoryCache.size > MAX_CACHED_TERRITORY_TOPOLOGIES) {
+      const oldestKey = scorableTerritoryCache.keys().next().value;
+      if (oldestKey !== undefined) scorableTerritoryCache.delete(oldestKey);
+    }
+    return sampled;
+  }
+  return calculateScorableTerritory(state, grid);
+}
+
+function calculateScorableTerritory(
+  state: GameState,
+  grid: TerritoryGrid,
+): ScorableTerritory {
   const totals = createNumberRecord(0);
   const activePlayerIds = getActivePlayerIds(state);
   let totalCells = 0;

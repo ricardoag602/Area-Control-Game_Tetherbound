@@ -1,6 +1,9 @@
 import {
+  memo,
   useCallback,
   useEffect,
+  useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type PointerEvent,
@@ -39,6 +42,7 @@ import type {
   GameState,
   MovementCommand,
   PlayerId,
+  SalvageDeposit,
   TankInput,
   Vec2,
 } from "../types";
@@ -120,10 +124,11 @@ export function ArenaRenderer({
   onPresentationStateChange,
 }: ArenaRendererProps) {
   const renderPositions = useSmoothedPositions(state, interpolatePositions);
+  const renderPositionsRef = useRef(renderPositions);
   const localAstronaut = state.players[localPlayerId].astronaut;
-  const localEnvironment = getEnvironmentModifiers(
-    state,
-    localAstronaut.position,
+  const localEnvironment = useMemo(
+    () => getEnvironmentModifiers(state, localAstronaut.position),
+    [state, localAstronaut.position],
   );
   const arenaRef = useRef<SVGSVGElement>(null);
   const [terrainReady, setTerrainReady] = useState(false);
@@ -144,6 +149,7 @@ export function ArenaRenderer({
     cameraMode,
     onOverviewSettled,
   );
+  const cameraRef = useRef(camera);
   const commandRef = useRef(onMovementCommand);
   const localAstronautRef = useRef(localAstronaut);
   const gestureRef = useRef<ActiveGesture | null>(null);
@@ -151,8 +157,12 @@ export function ArenaRenderer({
   const lastTouchTapRef = useRef<TouchBoostTap | null>(null);
   const lastTouchChargeInputRef = useRef<TankInput | null>(null);
   const [touchChargePreview, setTouchChargePreview] = useState<TankInput | null>(null);
-  commandRef.current = onMovementCommand;
-  localAstronautRef.current = localAstronaut;
+  useLayoutEffect(() => {
+    renderPositionsRef.current = renderPositions;
+    cameraRef.current = camera;
+    commandRef.current = onMovementCommand;
+    localAstronautRef.current = localAstronaut;
+  });
   const presentationState = getArenaPresentationState({
     terrainReady,
     astronautsReady: threeAstronautsReady,
@@ -488,6 +498,7 @@ export function ArenaRenderer({
     setThreeObjectsReady(false);
     setThreeLoadFailed(true);
   }, []);
+  const handleTerrainReady = useCallback(() => setTerrainReady(true), []);
   const threePresentationReady = presentationState === "ready";
 
   return (
@@ -497,8 +508,8 @@ export function ArenaRenderer({
     >
       <PixiTerrainLayer
         state={state}
-        camera={camera}
-        onInitialRender={() => setTerrainReady(true)}
+        cameraRef={cameraRef}
+        onInitialRender={handleTerrainReady}
         onLoadError={handlePresentationLoadError}
       />
       <svg
@@ -507,11 +518,6 @@ export function ArenaRenderer({
         aria-hidden="true"
       >
         <TetherCableLayer state={state} localPlayerId={localPlayerId} />
-        <OxygenWorldIndicator
-          oxygen={localAstronaut.oxygen}
-          position={renderPositions[localPlayerId]}
-          refillSerial={oxygenRefillSerial}
-        />
         {tutorialStep && (
           <TutorialWorldCue
             step={tutorialStep}
@@ -554,42 +560,62 @@ export function ArenaRenderer({
           localPlayerId={localPlayerId}
         />
 
-        {state.salvage.filter((deposit) => !deposit.collected).map((deposit) => (
-          <image
-            key={deposit.id}
-            className="world__salvage-sprite"
-            href={DROPPED_MATERIAL_SPRITE}
-            x={deposit.position.x - 2.1}
-            y={deposit.position.y - 2.1}
-            width="4.2"
-            height="4.2"
-            preserveAspectRatio="xMidYMid meet"
-            aria-hidden="true"
-          />
-        ))}
+        <SalvageLayer deposits={state.salvage} />
 
-        {state.activePlayerIds.map((playerId) => (
-          <Astronaut
-            key={playerId}
-            astronaut={state.players[playerId].astronaut}
-            position={renderPositions[playerId]}
-            playerId={playerId}
-          />
-        ))}
+        {(compatibilityMode || !threePresentationReady) &&
+          state.activePlayerIds.map((playerId) => (
+            <Astronaut
+              key={playerId}
+              astronaut={state.players[playerId].astronaut}
+              position={renderPositions[playerId]}
+              playerId={playerId}
+            />
+          ))}
       </svg>
       {!compatibilityMode && !threeLoadFailed && (
         <ThreeAstronautLayer
           state={state}
-          renderPositions={renderPositions}
-          camera={camera}
+          renderPositionsRef={renderPositionsRef}
+          cameraRef={cameraRef}
           onReadyChange={setThreeAstronautsReady}
           onObjectReadyChange={setThreeObjectsReady}
           onLoadError={handlePresentationLoadError}
         />
       )}
+      <svg
+        className="world world--player-overlay"
+        viewBox={`${camera.x} ${camera.y} ${camera.width} ${camera.height}`}
+        aria-hidden="true"
+      >
+        <OxygenWorldIndicator
+          oxygen={localAstronaut.oxygen}
+          position={renderPositions[localPlayerId]}
+          refillSerial={oxygenRefillSerial}
+        />
+      </svg>
     </div>
   );
 }
+
+const SalvageLayer = memo(function SalvageLayer({
+  deposits,
+}: {
+  deposits: readonly SalvageDeposit[];
+}) {
+  return deposits.filter((deposit) => !deposit.collected).map((deposit) => (
+    <image
+      key={deposit.id}
+      className="world__salvage-sprite"
+      href={DROPPED_MATERIAL_SPRITE}
+      x={deposit.position.x - 2.1}
+      y={deposit.position.y - 2.1}
+      width="4.2"
+      height="4.2"
+      preserveAspectRatio="xMidYMid meet"
+      aria-hidden="true"
+    />
+  ));
+});
 
 function TutorialWorldCue({
   step,
