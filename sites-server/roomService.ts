@@ -368,9 +368,16 @@ export async function syncRoom(
     room.lastActivityAt = now;
 
     const directMessages: ServerMessage[] = [];
+    let hasFreshMovementInput = false;
     for (const rawCommand of body.commands ?? []) {
       const command = validateRoomCommand(rawCommand);
-      applyRoomCommand(room, player, command, now, directMessages);
+      hasFreshMovementInput =
+        applyRoomCommand(room, player, command, now, directMessages) ||
+        hasFreshMovementInput;
+    }
+
+    if (hasFreshMovementInput) {
+      applyPendingRoomInputs(room, now);
     }
 
     if (typeof body.sentAt === "number" && Number.isFinite(body.sentAt)) {
@@ -569,44 +576,44 @@ function applyRoomCommand(
       sentAt: command.sentAt,
       serverTime: now,
     });
-    return;
+    return false;
   }
 
   if (command.type === "set_ready") {
-    if (room.phase !== "lobby") return;
+    if (room.phase !== "lobby") return false;
     if (player.ready !== command.ready) {
       player.ready = command.ready;
       room.revision += 1;
     }
     if (canStartMatch(room)) startMatch(room, now);
-    return;
+    return false;
   }
 
   if (command.type === "request_rematch") {
-    if (room.phase !== "finished" || !player.connected) return;
+    if (room.phase !== "finished" || !player.connected) return false;
     if (!player.ready) {
       player.ready = true;
       room.revision += 1;
     }
     if (canStartMatch(room)) startMatch(room, now);
-    return;
+    return false;
   }
 
-  if (room.phase !== "playing" || !room.gameState) return;
+  if (room.phase !== "playing" || !room.gameState) return false;
 
   if (command.type === "movement_input") {
     if (
       command.seq <= player.lastInputSeq ||
       player.pendingInputs.length >= MAX_PENDING_INPUTS
     ) {
-      return;
+      return false;
     }
     player.lastInputSeq = command.seq;
     player.pendingInputs.push({
       sequence: command.seq,
       command: command.command,
     });
-    return;
+    return true;
   }
 
   const priorResult = player.processedActions.find(
@@ -618,7 +625,7 @@ function applyRoomCommand(
       actionId: command.actionId,
       accepted: priorResult[1],
     });
-    return;
+    return false;
   }
 
   const nextState = deployAnchor(room.gameState, player.id);
@@ -638,6 +645,29 @@ function applyRoomCommand(
   if (accepted) {
     room.gameState = nextState;
     room.stateVersion += 1;
+  }
+  return false;
+}
+
+function applyPendingRoomInputs(room: PersistedRoom, now: number) {
+  if (!room.gameState || room.phase !== "playing" || !matchReady(room)) return;
+
+  const inputs = drainPendingInputs(room);
+  if (!inputs) return;
+
+  // The elapsed wall time was advanced before commands were accepted, so apply
+  // their state transition at zero elapsed time. This lets the response carry
+  // the new authoritative movement mode without retroactively moving a player
+  // through time that passed before the server received the command.
+  room.gameState = advanceMatch(room.gameState, inputs, 0);
+  room.stateVersion += 1;
+  if (room.gameState.matchPhase === "finished") {
+    finishMatch(
+      room,
+      room.gameState.matchOutcome?.reason ?? "regulation_score",
+      room.gameState.matchOutcome?.winner,
+      now,
+    );
   }
 }
 
@@ -701,24 +731,35 @@ function advanceRoomTo(room: PersistedRoom, targetTime: number) {
   const fullSteps = Math.floor(
     (previousRemainder + deltaMs + 0.000001) / FIXED_STEP_MS,
   );
-  const inputs: Partial<Record<PlayerId, GameInput[]>> = {};
-  for (const player of room.players) {
-    if (player.pendingInputs.length > 0) {
-      inputs[player.id] = player.pendingInputs.splice(0);
-    }
-  }
+  const inputs = drainPendingInputs(room) ?? {};
 
   room.gameState = advanceMatch(room.gameState, inputs, deltaMs / 1_000);
-  room.lastSimulatedAt = targetTime;
+  // Only move the authoritative cursor through time that was actually
+  // simulated. Any excess remains as backlog for a later request rather than
+  // making the match clock permanently run slower than wall time.
+  room.lastSimulatedAt += deltaMs;
   room.stateVersion += fullSteps;
   if (room.gameState.matchPhase === "finished") {
     finishMatch(
       room,
       room.gameState.matchOutcome?.reason ?? "regulation_score",
       room.gameState.matchOutcome?.winner,
-      targetTime,
+      room.lastSimulatedAt,
     );
   }
+}
+
+function drainPendingInputs(
+  room: PersistedRoom,
+): Partial<Record<PlayerId, GameInput[]>> | null {
+  const inputs: Partial<Record<PlayerId, GameInput[]>> = {};
+  let hasInputs = false;
+  for (const player of room.players) {
+    if (player.pendingInputs.length === 0) continue;
+    inputs[player.id] = player.pendingInputs.splice(0);
+    hasInputs = true;
+  }
+  return hasInputs ? inputs : null;
 }
 
 function startMatch(room: PersistedRoom, now: number) {

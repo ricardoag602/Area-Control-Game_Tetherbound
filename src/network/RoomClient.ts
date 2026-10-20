@@ -257,6 +257,7 @@ export class RoomClient {
     const actionId = createClientId();
     this.pendingActions.add(actionId);
     this.enqueue({ type: "deploy_anchor", actionId });
+    this.requestSyncNow();
   }
 
   requestRematch() {
@@ -453,7 +454,11 @@ export class RoomClient {
     } finally {
       if (lifecycle === this.lifecycle) this.requestInFlight = false;
       if (synchronized && lifecycle === this.lifecycle && this.shouldRun) {
-        this.scheduleSync(this.pollInterval());
+        const timeUntilNextPoll = Math.max(
+          0,
+          this.pollInterval() - (performance.now() - sentAt),
+        );
+        this.scheduleSync(this.pendingCommands.length > 0 ? 0 : timeUntilNextPoll);
       }
     }
   }
@@ -532,6 +537,21 @@ export class RoomClient {
     this.lastMovementSentAt = performance.now();
     this.lastMovementType = command.type;
     this.enqueue({ type: "movement_input", seq: this.inputSequence, command });
+    this.requestSyncNow();
+  }
+
+  /**
+   * Gameplay commands should not wait behind the background snapshot cadence.
+   * If a request is already running, performSync's completion path notices the
+   * queued command and starts the next request immediately.
+   */
+  private requestSyncNow() {
+    if (!this.shouldRun || !this.snapshot.room || !this.sessionToken) return;
+    if (this.pollTimer !== null) {
+      window.clearTimeout(this.pollTimer);
+      this.pollTimer = null;
+    }
+    if (!this.requestInFlight) this.scheduleSync(0);
   }
 
   private scheduleSync(delay: number) {

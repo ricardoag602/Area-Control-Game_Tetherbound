@@ -191,15 +191,48 @@ describe("D1 room service", () => {
     expect(message(started.messages, "room_state")?.room.phase).toBe("playing");
 
     now += 100;
-    await syncRoom(db, hostWelcome.room.code, hostWelcome.sessionToken, {
-      knownRoomRevision: 0,
-      knownStateVersion: initialState.stateVersion,
-      commands: [{
-        type: "movement_input",
-        seq: 1,
-        command: { type: "walk_direction", direction: { x: 0, y: -1 } },
-      }],
-    });
+    const acceptedMovement = await syncRoom(
+      db,
+      hostWelcome.room.code,
+      hostWelcome.sessionToken,
+      {
+        knownRoomRevision: 0,
+        knownStateVersion: initialState.stateVersion,
+        commands: [{
+          type: "movement_input",
+          seq: 1,
+          command: { type: "walk_direction", direction: { x: 0, y: -1 } },
+        }],
+      },
+    );
+    const acceptedMovementState = message(
+      acceptedMovement.messages,
+      "game_state",
+    )!;
+    expect(acceptedMovementState.lastProcessedInput.player).toBe(1);
+    expect(
+      acceptedMovementState.state.players.player.astronaut.movement
+        .lastCommandSequence,
+    ).toBe(1);
+    expect(
+      acceptedMovementState.state.players.player.astronaut.movement.mode,
+    ).toBe("walking");
+    const duplicateMovement = await syncRoom(
+      db,
+      hostWelcome.room.code,
+      hostWelcome.sessionToken,
+      {
+        knownRoomRevision: 0,
+        knownStateVersion: acceptedMovementState.stateVersion,
+        commands: [{
+          type: "movement_input",
+          seq: 1,
+          command: { type: "walk_direction", direction: { x: 0, y: -1 } },
+        }],
+      },
+    );
+    expect(message(duplicateMovement.messages, "game_state")).toBeUndefined();
+
     now += 100;
     const moved = await syncRoom(
       db,
@@ -245,6 +278,55 @@ describe("D1 room service", () => {
     );
     expect(message(final.messages, "room_state")?.room.phase).toBe("finished");
     expect(message(final.messages, "room_state")?.room.finishReason).toBe("disconnect");
+  });
+
+  it("preserves capped simulation time as backlog for later syncs", async () => {
+    const created = await createRoom(db, {
+      type: "create_room",
+      requestId: "catch-up-backlog-create",
+      name: "Host",
+      playerLimit: 2,
+      visibility: "private",
+    });
+    const host = message(created.messages, "welcome")!;
+    const joined = await joinRoom(db, {
+      type: "join_room",
+      requestId: "catch-up-backlog-join",
+      code: host.room.code,
+      name: "Guest",
+    });
+    const guest = message(joined.messages, "welcome")!;
+
+    await syncRoom(db, host.room.code, host.sessionToken, {
+      commands: [{ type: "set_ready", ready: true }],
+    });
+    await syncRoom(db, host.room.code, guest.sessionToken, {
+      commands: [{ type: "set_ready", ready: true }],
+    });
+
+    now += 750;
+    const first = message(
+      (await syncRoom(db, host.room.code, host.sessionToken, {
+        knownStateVersion: 0,
+      })).messages,
+      "game_state",
+    )!;
+    const second = message(
+      (await syncRoom(db, host.room.code, guest.sessionToken, {
+        knownStateVersion: 0,
+      })).messages,
+      "game_state",
+    )!;
+    const third = message(
+      (await syncRoom(db, host.room.code, host.sessionToken, {
+        knownStateVersion: 0,
+      })).messages,
+      "game_state",
+    )!;
+
+    expect(first.state.elapsedMs).toBe(250);
+    expect(second.state.elapsedMs).toBe(500);
+    expect(third.state.elapsedMs).toBe(750);
   });
 
   it("expires an idle lobby and its creation idempotency record", async () => {

@@ -184,7 +184,7 @@ describe("RoomClient Sites HTTP lifecycle", () => {
       roomStateMessage("playing", 2),
       pongMessage(0),
     ]);
-    await vi.advanceTimersByTimeAsync(500);
+    await vi.advanceTimersByTimeAsync(0);
 
     expect(api.calls).toHaveLength(2);
     expect(api.calls[1].url).toBe("/api/rooms/ABC9Z/sync");
@@ -208,6 +208,49 @@ describe("RoomClient Sites HTTP lifecycle", () => {
     await vi.advanceTimersByTimeAsync(124);
     expect(api.calls).toHaveLength(2);
     await vi.advanceTimersByTimeAsync(1);
+    expect(api.calls).toHaveLength(3);
+  });
+
+  it("measures the poll interval between request starts instead of after each response", async () => {
+    const api = createApi();
+    api.respond([welcomeMessage({ room: roomStateMessage("playing", 2).room })]);
+    const client = createClient(api, { requestTimeoutMs: 1_000 });
+
+    client.createRoom("Host", 2);
+    await flushPromises();
+    const deferred = api.defer();
+    await vi.advanceTimersByTimeAsync(125);
+    expect(api.calls).toHaveLength(2);
+
+    await vi.advanceTimersByTimeAsync(75);
+    deferred.resolve(apiResponse([pongMessage(125)]));
+    await flushPromises();
+    api.respond([pongMessage(250)]);
+
+    await vi.advanceTimersByTimeAsync(49);
+    expect(api.calls).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(api.calls).toHaveLength(3);
+  });
+
+  it("starts the next serialized poll immediately when a response exceeds the interval", async () => {
+    const api = createApi();
+    api.respond([welcomeMessage({ room: roomStateMessage("playing", 2).room })]);
+    const client = createClient(api, { requestTimeoutMs: 1_000 });
+
+    client.createRoom("Host", 2);
+    await flushPromises();
+    const deferred = api.defer();
+    await vi.advanceTimersByTimeAsync(125);
+    expect(api.calls).toHaveLength(2);
+
+    await vi.advanceTimersByTimeAsync(200);
+    expect(api.calls).toHaveLength(2);
+    api.respond([pongMessage(325)]);
+    deferred.resolve(apiResponse([pongMessage(125)]));
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(0);
+
     expect(api.calls).toHaveLength(3);
   });
 
@@ -254,7 +297,7 @@ describe("RoomClient Sites HTTP lifecycle", () => {
     deferred.resolve(apiResponse([pongMessage(0)]));
     await flushPromises();
     api.respond([pongMessage(0)]);
-    await vi.advanceTimersByTimeAsync(500);
+    await vi.advanceTimersByTimeAsync(0);
 
     expect(api.calls).toHaveLength(3);
     expect((bodyOf(api.calls[1]) as { commands: ClientMessage[] }).commands).toEqual([
@@ -263,6 +306,48 @@ describe("RoomClient Sites HTTP lifecycle", () => {
     expect((bodyOf(api.calls[2]) as { commands: ClientMessage[] }).commands).toEqual([
       { type: "set_ready", ready: false },
     ]);
+  });
+
+  it("flushes movement immediately instead of waiting for the background poll", async () => {
+    const api = createApi();
+    api.respond([welcomeMessage({ room: roomStateMessage("playing", 2).room })]);
+    const client = createClient(api);
+
+    client.createRoom("Host", 2);
+    await flushPromises();
+    client.sendMovementCommand({ type: "walk_direction", direction: { x: 1, y: 0 } });
+
+    api.respond([pongMessage(0)]);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(api.calls).toHaveLength(2);
+    expect((bodyOf(api.calls[1]) as { commands: ClientMessage[] }).commands).toEqual([
+      {
+        type: "movement_input",
+        seq: 1,
+        command: { type: "walk_direction", direction: { x: 1, y: 0 } },
+      },
+    ]);
+  });
+
+  it("flushes movement queued during an active request as soon as it completes", async () => {
+    const api = createApi();
+    api.respond([welcomeMessage({ room: roomStateMessage("playing", 2).room })]);
+    const client = createClient(api);
+
+    client.createRoom("Host", 2);
+    await flushPromises();
+    const deferred = api.defer();
+    await vi.advanceTimersByTimeAsync(125);
+
+    client.sendMovementCommand({ type: "walk_direction", direction: { x: 1, y: 0 } });
+    deferred.resolve(apiResponse([pongMessage(0)]));
+    await flushPromises();
+    api.respond([pongMessage(0)]);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(api.calls).toHaveLength(3);
+    expect((bodyOf(api.calls[2]) as { commands: ClientMessage[] }).commands).toHaveLength(1);
   });
 
   it("resumes from tab-scoped sessionStorage through the join endpoint", async () => {
