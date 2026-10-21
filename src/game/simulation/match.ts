@@ -228,12 +228,14 @@ function collectSalvage(
   movementPaths: Partial<Record<PlayerId, { start: Vec2; end: Vec2 }>>,
 ): GameState {
   let players = state.players;
+  let updatedSalvage: GameState["salvage"] | null = null;
   // Exact ties rotate using the number of deposits already claimed. This keeps
   // any player slot from permanently owning the simultaneous-pickup advantage.
   let tieBreakTurn = state.salvage.filter((deposit) => deposit.collected).length;
 
-  const salvage = state.salvage.map((deposit) => {
-    if (deposit.collected) return deposit;
+  for (let depositIndex = 0; depositIndex < state.salvage.length; depositIndex += 1) {
+    const deposit = state.salvage[depositIndex];
+    if (deposit.collected) continue;
 
     const contenders = activePlayers
       .filter(
@@ -251,7 +253,7 @@ function collectSalvage(
       .filter((contender) => contender.distance <= GAME_RULES.collectionRadius)
       .sort((a, b) => a.distance - b.distance);
 
-    if (contenders.length === 0) return deposit;
+    if (contenders.length === 0) continue;
 
     const nearestDistance = contenders[0].distance;
     const tied = contenders.filter(
@@ -275,10 +277,15 @@ function collectSalvage(
       },
     };
 
-    return { ...deposit, collected: true };
-  });
+    if (!updatedSalvage) updatedSalvage = [...state.salvage];
+    updatedSalvage[depositIndex] = { ...deposit, collected: true };
+  }
 
-  return { ...state, players, salvage };
+  return {
+    ...state,
+    players,
+    salvage: updatedSalvage ?? state.salvage,
+  };
 }
 
 function deliverSalvage(state: GameState, activePlayers: PlayerId[]): GameState {

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import {
   createGameAudioRuntime,
   disposeGameAudio,
@@ -8,6 +8,10 @@ import {
   updateGameAudio,
   type GameAudioRuntime,
 } from "../audio/gameAudio";
+import {
+  PRESENTATION_FRAME_PRIORITY,
+  subscribePresentationFrame,
+} from "../presentation/presentationClock";
 import type { GameState, PlayerId } from "../types";
 
 interface GameAudioLayerProps {
@@ -37,7 +41,10 @@ export function GameAudioLayer({
   const runtimeRef = useRef<GameAudioRuntime | null>(null);
   const latestRef = useRef<LatestAudioFrame>({ state, enabled, disabled });
   const blockedRef = useRef(disabled || !enabled);
-  latestRef.current = { state, enabled, disabled };
+  const processedStateRef = useRef<GameState | null>(null);
+  useLayoutEffect(() => {
+    latestRef.current = { state, enabled, disabled };
+  }, [disabled, enabled, state]);
 
   useEffect(() => {
     let cancelled = false;
@@ -52,6 +59,7 @@ export function GameAudioLayer({
         if (!runtime) return;
         runtimeRef.current = runtime;
         updateGameAudio(runtime, latest.state);
+        processedStateRef.current = latest.state;
       } else if (runtime.context.state === "running" && !blockedRef.current) {
         return;
       }
@@ -73,6 +81,7 @@ export function GameAudioLayer({
         // replaying events that occurred while audio was suspended.
         resetGameAudioBaseline(resumedRuntime, latestRef.current.state);
         updateGameAudio(resumedRuntime, latestRef.current.state);
+        processedStateRef.current = latestRef.current.state;
       });
     };
 
@@ -92,41 +101,67 @@ export function GameAudioLayer({
     window.addEventListener("pointerdown", resumeCurrentRuntime, true);
     window.addEventListener("keydown", resumeCurrentRuntime, true);
     document.addEventListener("visibilitychange", handleVisibilityChange);
+    // Audio follows the latest authoritative snapshot after the visual layers
+    // have rendered. This keeps audio graph reconciliation out of React's
+    // commit path and coalesces multiple snapshots that arrive in one frame.
+    const unsubscribeFrame = subscribePresentationFrame(() => {
+      const runtime = runtimeRef.current;
+      const latest = latestRef.current;
+      if (
+        !runtime
+        || blockedRef.current
+        || !latest.enabled
+        || latest.disabled
+        || document.hidden
+        || runtime.context.state !== "running"
+        || processedStateRef.current === latest.state
+      ) {
+        return;
+      }
+      updateGameAudio(runtime, latest.state);
+      processedStateRef.current = latest.state;
+    }, PRESENTATION_FRAME_PRIORITY.overlay + 100);
 
     return () => {
       cancelled = true;
+      unsubscribeFrame();
       window.removeEventListener("pointerdown", resumeCurrentRuntime, true);
       window.removeEventListener("keydown", resumeCurrentRuntime, true);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       disposeGameAudio(runtimeRef.current);
       runtimeRef.current = null;
+      processedStateRef.current = null;
     };
   }, [localPlayerId]);
 
   useEffect(() => {
     const runtime = runtimeRef.current;
-    const blocked = !enabled || disabled || document.hidden;
+    const latest = latestRef.current;
+    const blocked = !latest.enabled || latest.disabled || document.hidden;
     if (!runtime) {
       blockedRef.current = blocked;
       return;
     }
 
-    if (!enabled) {
+    if (!latest.enabled) {
       disposeGameAudio(runtime);
       runtimeRef.current = null;
+      processedStateRef.current = null;
       blockedRef.current = true;
       return;
     }
 
     if (blocked) {
-      resetGameAudioBaseline(runtime, state);
+      resetGameAudioBaseline(runtime, latest.state);
+      processedStateRef.current = latest.state;
       suspendGameAudio(runtime);
       blockedRef.current = true;
       return;
     }
 
     if (blockedRef.current) {
-      resetGameAudioBaseline(runtime, state);
+      resetGameAudioBaseline(runtime, latest.state);
+      processedStateRef.current = latest.state;
       blockedRef.current = false;
       void resumeGameAudio(runtime).then(() => {
         if (
@@ -139,12 +174,10 @@ export function GameAudioLayer({
         }
         resetGameAudioBaseline(runtime, latestRef.current.state);
         updateGameAudio(runtime, latestRef.current.state);
+        processedStateRef.current = latestRef.current.state;
       });
-      return;
     }
-
-    updateGameAudio(runtime, state);
-  }, [disabled, enabled, state]);
+  }, [disabled, enabled]);
 
   return null;
 }

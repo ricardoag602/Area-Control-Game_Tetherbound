@@ -26,6 +26,10 @@ import {
     scheduleFirstMatchAssetPreload,
 } from "./game/presentation/firstMatchAssets";
 import {
+    readAlwaysShowJoystickPreference,
+    writeAlwaysShowJoystickPreference,
+} from "./game/preferences/joystick";
+import {
     readTutorialPreference,
     writeTutorialPreference,
 } from "./game/tutorial/guidedSetup";
@@ -51,6 +55,9 @@ export function App() {
     );
     const [audioEnabled, setAudioEnabled] = useState(readAudioPreference);
     const [tutorialEnabled, setTutorialEnabled] = useState(readTutorialPreference);
+    const [alwaysShowJoystick, setAlwaysShowJoystick] = useState(
+        readAlwaysShowJoystickPreference,
+    );
 
     useEffect(() => {
         localStorage.setItem(LARGE_CONTROLS_KEY, String(largeControls));
@@ -67,6 +74,10 @@ export function App() {
     useEffect(() => {
         writeTutorialPreference(tutorialEnabled);
     }, [tutorialEnabled]);
+
+    useEffect(() => {
+        writeAlwaysShowJoystickPreference(alwaysShowJoystick);
+    }, [alwaysShowJoystick]);
 
     useEffect(() => {
         if (view !== "menu") return;
@@ -174,9 +185,11 @@ export function App() {
             <section className="view-stage">
                 {view === "menu" && (
                     <MainMenu
+                        alwaysShowJoystick={alwaysShowJoystick}
                         audioEnabled={audioEnabled}
                         largeControls={largeControls}
                         tutorialEnabled={tutorialEnabled}
+                        onAlwaysShowJoystickChange={setAlwaysShowJoystick}
                         onAudioEnabledChange={setAudioEnabled}
                         onLargeControlsChange={setLargeControls}
                         onTutorialEnabledChange={setTutorialEnabled}
@@ -228,6 +241,7 @@ export function App() {
                 )}
                 {view === "game" && gameMode === "bot" && (
                     <GameView
+                        alwaysShowJoystick={alwaysShowJoystick}
                         audioEnabled={audioEnabled}
                         tutorialEnabled={tutorialEnabled}
                         onLeave={() => setView("menu")}
@@ -235,6 +249,7 @@ export function App() {
                 )}
                 {view === "game" && gameMode === "multiplayer" && roomSession.room && roomSession.gameState && roomSession.playerId && (
                     <NetworkGameView state={roomSession.gameState} room={roomSession.room}
+                        alwaysShowJoystick={alwaysShowJoystick}
                         audioEnabled={audioEnabled}
                         tutorialEnabled={tutorialEnabled}
                         localPlayerId={roomSession.playerId} connection={roomSession.connection}
@@ -255,9 +270,11 @@ export function App() {
 }
 
 interface MainMenuProps {
+    alwaysShowJoystick: boolean;
     audioEnabled: boolean;
     largeControls: boolean;
     tutorialEnabled: boolean;
+    onAlwaysShowJoystickChange: (enabled: boolean) => void;
     onAudioEnabledChange: (enabled: boolean) => void;
     onLargeControlsChange: (enabled: boolean) => void;
     onTutorialEnabledChange: (enabled: boolean) => void;
@@ -269,10 +286,12 @@ interface MainMenuProps {
     localAddressOnly: boolean;
 }
 
-function MainMenu({
+export function MainMenu({
+    alwaysShowJoystick,
     audioEnabled,
     largeControls,
     tutorialEnabled,
+    onAlwaysShowJoystickChange,
     onAudioEnabledChange,
     onLargeControlsChange,
     onTutorialEnabledChange,
@@ -353,6 +372,19 @@ function MainMenu({
                         type="checkbox"
                         checked={largeControls}
                         onChange={(event) => onLargeControlsChange(event.target.checked)}
+                    />
+                    <span className="switch" aria-hidden="true" />
+                </label>
+
+                <label className="setting-card">
+                    <span className="setting-card__copy">
+                        <strong>Always show joystick</strong>
+                        <small>Keep the mobile movement control visible on screen</small>
+                    </span>
+                    <input
+                        type="checkbox"
+                        checked={alwaysShowJoystick}
+                        onChange={(event) => onAlwaysShowJoystickChange(event.target.checked)}
                     />
                     <span className="switch" aria-hidden="true" />
                 </label>

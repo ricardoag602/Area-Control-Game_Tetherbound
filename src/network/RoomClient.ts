@@ -50,6 +50,8 @@ const RETRY_DELAYS = [250, 500, 1_000, 2_000, 4_000];
 const REQUEST_TIMEOUT_MS = 8_000;
 const PLAYING_POLL_INTERVAL_MS = 125;
 const IDLE_POLL_INTERVAL_MS = 500;
+const LATENCY_PUBLISH_INTERVAL_MS = 750;
+const LATENCY_SIGNIFICANT_CHANGE_MS = 40;
 const MAX_SYNC_COMMANDS = 64;
 const MAX_INITIAL_CONNECTION_ATTEMPTS = 3;
 const MAX_RECONNECT_ATTEMPTS = 5;
@@ -120,6 +122,10 @@ export class RoomClient {
   private inputSequence = 0;
   private readonly pendingActions = new Set<string>();
   private lastConnectionError = SERVER_UNREACHABLE_MESSAGE;
+  private smoothedLatencyMs: number | null = null;
+  private lastLatencyPublishedAt = Number.NEGATIVE_INFINITY;
+  private updateBatchDepth = 0;
+  private updateBatchBaseline: RoomClientSnapshot | null = null;
 
   constructor(private readonly options: RoomClientOptions = {}) {}
 
@@ -225,6 +231,7 @@ export class RoomClient {
 
   setReady(ready: boolean) {
     this.enqueue({ type: "set_ready", ready });
+    this.requestSyncNow();
   }
 
   sendMovementCommand(command: MovementCommand) {
@@ -262,6 +269,7 @@ export class RoomClient {
 
   requestRematch() {
     this.enqueue({ type: "request_rematch" });
+    this.requestSyncNow();
   }
 
   leave() {
@@ -280,6 +288,7 @@ export class RoomClient {
     this.inputSequence = 0;
     this.lastMovementType = null;
     this.pendingActions.clear();
+    this.resetLatencyTracking();
     if (roomCode) this.removeSession(roomCode);
     this.update({
       connection: "idle",
@@ -319,6 +328,7 @@ export class RoomClient {
     this.inputSequence = 0;
     this.lastMovementType = null;
     this.pendingActions.clear();
+    this.resetLatencyTracking();
     this.shouldRun = true;
     this.lastConnectionError = SERVER_UNREACHABLE_MESSAGE;
     this.update({
@@ -373,25 +383,31 @@ export class RoomClient {
       const result = await this.post(endpoint, body, null, lifecycle);
       if (lifecycle !== this.lifecycle || !this.shouldRun) return;
 
-      const outcome = this.processMessages(result.envelope.messages);
-      if (!this.shouldRun || this.snapshot.connection === "offline") return;
-      if (!result.ok) {
-        throw new Error("Room request was rejected");
-      }
-      if (!outcome.welcomed || !this.snapshot.room || !this.sessionToken) {
-        this.lastConnectionError = SERVER_UNRESPONSIVE_MESSAGE;
-        throw new Error("Room request did not include a welcome message");
-      }
+      this.batchUpdates(() => {
+        const outcome = this.processMessages(result.envelope.messages);
+        if (!this.shouldRun || this.snapshot.connection === "offline") return;
+        if (!result.ok) {
+          this.handleRequestFailure();
+          return;
+        }
+        if (!outcome.welcomed || !this.snapshot.room || !this.sessionToken) {
+          this.lastConnectionError = SERVER_UNRESPONSIVE_MESSAGE;
+          this.handleRequestFailure();
+          return;
+        }
 
-      if (this.snapshot.latencyMs === null) {
-        this.updateLatency(performance.now() - startedAt);
-      }
-      this.retryAttempt = 0;
-      this.connectionAttempts = 0;
-      this.update({ connection: "connected", error: outcome.hadError ? this.snapshot.error : null });
-      connected = true;
+        if (this.smoothedLatencyMs === null) {
+          this.updateLatency(performance.now() - startedAt);
+        }
+        this.retryAttempt = 0;
+        this.connectionAttempts = 0;
+        this.update({ connection: "connected", error: outcome.hadError ? this.snapshot.error : null });
+        connected = true;
+      });
     } catch {
-      if (lifecycle === this.lifecycle && this.shouldRun) this.handleRequestFailure();
+      if (lifecycle === this.lifecycle && this.shouldRun) {
+        this.batchUpdates(() => this.handleRequestFailure());
+      }
     } finally {
       if (lifecycle === this.lifecycle) this.requestInFlight = false;
       if (connected && lifecycle === this.lifecycle && this.shouldRun) {
@@ -432,24 +448,30 @@ export class RoomClient {
       );
       if (lifecycle !== this.lifecycle || !this.shouldRun) return;
 
-      const outcome = this.processMessages(result.envelope.messages);
-      if (!this.shouldRun || this.snapshot.connection === "offline") {
-        this.inFlightCommands = [];
-        return;
-      }
-      if (!result.ok) {
-        throw new Error("Room synchronization was rejected");
-      }
+      this.batchUpdates(() => {
+        const outcome = this.processMessages(result.envelope.messages);
+        if (!this.shouldRun || this.snapshot.connection === "offline") {
+          this.inFlightCommands = [];
+          return;
+        }
+        if (!result.ok) {
+          this.restoreInFlightCommands();
+          this.handleRequestFailure();
+          return;
+        }
 
-      this.inFlightCommands = [];
-      this.retryAttempt = 0;
-      this.connectionAttempts = 0;
-      this.update({ connection: "connected", error: outcome.hadError ? this.snapshot.error : null });
-      synchronized = true;
+        this.inFlightCommands = [];
+        this.retryAttempt = 0;
+        this.connectionAttempts = 0;
+        this.update({ connection: "connected", error: outcome.hadError ? this.snapshot.error : null });
+        synchronized = true;
+      });
     } catch {
       if (lifecycle === this.lifecycle && this.shouldRun) {
-        this.restoreInFlightCommands();
-        this.handleRequestFailure();
+        this.batchUpdates(() => {
+          this.restoreInFlightCommands();
+          this.handleRequestFailure();
+        });
       }
     } finally {
       if (lifecycle === this.lifecycle) this.requestInFlight = false;
@@ -487,7 +509,7 @@ export class RoomClient {
       return;
     }
     if (message.type === "room_state") {
-      if (!this.snapshot.room || message.room.revision >= this.snapshot.room.revision) {
+      if (!this.snapshot.room || message.room.revision > this.snapshot.room.revision) {
         this.update({ room: message.room });
       }
       return;
@@ -500,7 +522,7 @@ export class RoomClient {
       if (acknowledgedInput !== undefined) {
         this.inputSequence = Math.max(this.inputSequence, acknowledgedInput);
       }
-      if (message.stateVersion >= this.snapshot.stateVersion) {
+      if (!this.snapshot.gameState || message.stateVersion > this.snapshot.stateVersion) {
         this.update({ gameState: message.state, stateVersion: message.stateVersion });
       }
       return;
@@ -529,6 +551,12 @@ export class RoomClient {
 
   private enqueue(command: SyncCommand) {
     if (!this.intent || !this.snapshot.room) return;
+    const previousIndex = this.pendingCommands.length - 1;
+    const previous = this.pendingCommands[previousIndex];
+    if (canCoalesceMovementInput(previous, command)) {
+      this.pendingCommands[previousIndex] = command;
+      return;
+    }
     this.pendingCommands.push(command);
   }
 
@@ -677,10 +705,27 @@ export class RoomClient {
 
   private updateLatency(roundTrip: number) {
     const measured = Math.max(0, roundTrip);
-    const latency = this.snapshot.latencyMs;
-    this.update({
-      latencyMs: Math.round(latency === null ? measured : latency * 0.7 + measured * 0.3),
-    });
+    const previousSmoothed = this.smoothedLatencyMs;
+    const smoothed = previousSmoothed === null
+      ? measured
+      : previousSmoothed * 0.7 + measured * 0.3;
+    this.smoothedLatencyMs = smoothed;
+
+    const now = performance.now();
+    const nextVisible = Math.round(smoothed);
+    const currentVisible = this.snapshot.latencyMs;
+    const publishDue = currentVisible === null ||
+      now - this.lastLatencyPublishedAt >= LATENCY_PUBLISH_INTERVAL_MS ||
+      Math.abs(nextVisible - currentVisible) >= LATENCY_SIGNIFICANT_CHANGE_MS;
+    if (!publishDue) return;
+
+    this.lastLatencyPublishedAt = now;
+    this.update({ latencyMs: nextVisible });
+  }
+
+  private resetLatencyTracking() {
+    this.smoothedLatencyMs = null;
+    this.lastLatencyPublishedAt = Number.NEGATIVE_INFINITY;
   }
 
   private currentName() {
@@ -688,7 +733,34 @@ export class RoomClient {
   }
 
   private update(patch: Partial<RoomClientSnapshot>) {
+    const changed = Object.entries(patch).some(([key, value]) =>
+      !Object.is(this.snapshot[key as keyof RoomClientSnapshot], value)
+    );
+    if (!changed) return false;
+
     this.snapshot = { ...this.snapshot, ...patch };
+    if (this.updateBatchDepth > 0) return true;
+    this.publish();
+    return true;
+  }
+
+  private batchUpdates<T>(operation: () => T): T {
+    const outermost = this.updateBatchDepth === 0;
+    if (outermost) this.updateBatchBaseline = this.snapshot;
+    this.updateBatchDepth += 1;
+    try {
+      return operation();
+    } finally {
+      this.updateBatchDepth -= 1;
+      if (outermost) {
+        const baseline = this.updateBatchBaseline;
+        this.updateBatchBaseline = null;
+        if (baseline && !sameSnapshot(baseline, this.snapshot)) this.publish();
+      }
+    }
+  }
+
+  private publish() {
     for (const listener of this.listeners) listener();
   }
 
@@ -747,6 +819,33 @@ export class RoomClient {
       // The room still closes when browser storage is unavailable.
     }
   }
+}
+
+function canCoalesceMovementInput(
+  previous: SyncCommand | undefined,
+  next: SyncCommand,
+) {
+  return previous?.type === "movement_input" &&
+    next.type === "movement_input" &&
+    isCoalescibleAnalogCommand(previous.command) &&
+    previous.command.type === next.command.type;
+}
+
+function isCoalescibleAnalogCommand(command: MovementCommand) {
+  return command.type === "walk_direction" ||
+    command.type === "charge_direction" ||
+    command.type === "tank_drive" ||
+    command.type === "tank_charge";
+}
+
+function sameSnapshot(a: RoomClientSnapshot, b: RoomClientSnapshot) {
+  return a.connection === b.connection &&
+    a.room === b.room &&
+    a.gameState === b.gameState &&
+    a.playerId === b.playerId &&
+    a.latencyMs === b.latencyMs &&
+    a.error === b.error &&
+    a.stateVersion === b.stateVersion;
 }
 
 function isRoomApiEnvelope(value: unknown): value is RoomApiEnvelope {

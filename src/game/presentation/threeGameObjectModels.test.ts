@@ -7,6 +7,7 @@ import {
   createThreeGameObjectInstance,
   createThreeGameObjectRuntime,
   disposeThreeGameObjectRuntime,
+  getThreeGameObjectReconciliationKey,
   getTetherNuggetOrientation,
   THREE_OBJECT_FOOTPRINTS,
   updateThreeGameObjectRuntime,
@@ -82,6 +83,37 @@ describe("createThreeGameObjectInstance", () => {
 });
 
 describe("ThreeGameObjectRuntime", () => {
+  it("reconciles static objects only when their visible topology changes", () => {
+    const state = objectState();
+    const first = getThreeGameObjectReconciliationKey(state);
+
+    expect(getThreeGameObjectReconciliationKey({
+      ...state,
+      elapsedMs: 500,
+    })).toBe(first);
+    expect(getThreeGameObjectReconciliationKey({
+      ...state,
+      salvage: state.salvage.map((deposit) => ({
+        ...deposit,
+        collected: true,
+      })),
+    })).not.toBe(first);
+
+    const shielded = {
+      ...state,
+      elapsedMs: 500,
+      anchors: state.anchors.map((item) => ({
+        ...item,
+        protectedUntilMs: 1_000,
+      })),
+    };
+    expect(getThreeGameObjectReconciliationKey(shielded)).not.toBe(first);
+    expect(getThreeGameObjectReconciliationKey({
+      ...shielded,
+      elapsedMs: 1_000,
+    })).toBe(first);
+  });
+
   it("matches sprite footprints and mirrors game Y into the Three.js world", () => {
     const asset = boxAsset(2, 1, 0.5);
     const assets = objectAssets(asset);

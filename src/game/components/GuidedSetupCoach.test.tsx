@@ -61,6 +61,33 @@ describe("GuidedSetupCoach", () => {
     expect(markup).toContain('aria-hidden="true"');
   });
 
+  it("teaches the floating touch joystick while preserving desktop controls", () => {
+    const markup = renderToStaticMarkup(
+      <GuidedSetupCoach
+        step="move"
+        completedStepIds={[]}
+        materialsCollected={0}
+      />,
+    );
+
+    expect(markup).toContain("Touch anywhere · drag to steer · release to stop");
+    expect(markup).toContain("W/S move · A/D turn");
+    expect(markup).not.toContain("Drag anywhere");
+  });
+
+  it("explains how the floating joystick aims a charged burst", () => {
+    const markup = renderToStaticMarkup(
+      <GuidedSetupCoach
+        step="boost"
+        completedStepIds={["move"]}
+        materialsCollected={0}
+      />,
+    );
+
+    expect(markup).toContain("Quick tap · hold nearby · drag to aim · release");
+    expect(markup).toContain("Tap W/S · hold again · release");
+  });
+
   it("shows live material progress until all three are collected", () => {
     const markup = renderToStaticMarkup(
       <GuidedSetupCoach

@@ -31,6 +31,7 @@ import {
   createThreeGameObjectRuntime,
   disposeThreeGameObjectAssets,
   disposeThreeGameObjectRuntime,
+  getThreeGameObjectReconciliationKey,
   loadThreeGameObjectAssets,
   updateThreeGameObjectIdleEffects,
   updateThreeGameObjectRuntime,
@@ -40,6 +41,10 @@ import {
   createThreeSceneLighting,
   updateThreeSceneLighting,
 } from "../presentation/threeSceneLighting";
+import {
+  PRESENTATION_FRAME_PRIORITY,
+  subscribePresentationFrame,
+} from "../presentation/presentationClock";
 import type { GameState, PlayerId, Vec2 } from "../types";
 
 interface ThreeAstronautLayerProps {
@@ -54,6 +59,7 @@ interface ThreeAstronautLayerProps {
 interface LatestFrame {
   state: GameState;
   terrainLightZones: readonly TerrainLightZone[];
+  objectReconciliationKey: string;
 }
 
 function ThreeAstronautLayer({
@@ -66,25 +72,33 @@ function ThreeAstronautLayer({
 }: ThreeAstronautLayerProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const terrainLightZones = collectTerrainLightZones(state);
+  const objectReconciliationKey = getThreeGameObjectReconciliationKey(state);
   const latestRef = useRef<LatestFrame>({
     state,
     terrainLightZones,
+    objectReconciliationKey,
   });
   const readyCallbackRef = useRef(onReadyChange);
   const objectReadyCallbackRef = useRef(onObjectReadyChange);
   const playerKey = state.activePlayerIds.join("|");
 
   useLayoutEffect(() => {
-    latestRef.current = { state, terrainLightZones };
+    latestRef.current = { state, terrainLightZones, objectReconciliationKey };
     readyCallbackRef.current = onReadyChange;
     objectReadyCallbackRef.current = onObjectReadyChange;
-  }, [onObjectReadyChange, onReadyChange, state, terrainLightZones]);
+  }, [
+    objectReconciliationKey,
+    onObjectReadyChange,
+    onReadyChange,
+    state,
+    terrainLightZones,
+  ]);
 
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
 
-    let animationFrame = 0;
+    let unsubscribeFrame: (() => void) | null = null;
     let cancelled = false;
     let contextLost = false;
     let loadFailureReported = false;
@@ -124,8 +138,7 @@ function ThreeAstronautLayer({
     viewCamera.up.set(0, 1, 0);
     const rigs = new Map<PlayerId, ThreeAstronautRig>();
     let objectRuntime: ThreeGameObjectRuntime | null = null;
-    let reconciledObjectState: GameState | null = null;
-    let reconciledObjectElapsedMs = -1;
+    let reconciledObjectKey: string | null = null;
 
     const initial = latestRef.current;
     const sceneLighting = createThreeSceneLighting(
@@ -242,8 +255,7 @@ function ThreeAstronautLayer({
           reduceMotion,
         );
         scene.add(objectRuntime.root);
-        reconciledObjectState = latestRef.current.state;
-        reconciledObjectElapsedMs = latestRef.current.state.elapsedMs;
+        reconciledObjectKey = latestRef.current.objectReconciliationKey;
         objectAssetsReady = true;
       } catch (error) {
         disposeThreeGameObjectAssets(assets);
@@ -264,7 +276,6 @@ function ThreeAstronautLayer({
         : Math.min(0.1, Math.max(0, (timeMs - previousFrameMs) / 1000));
       previousFrameMs = timeMs;
       if (document.hidden || contextLost) {
-        animationFrame = requestAnimationFrame(draw);
         return;
       }
       const latest = latestRef.current;
@@ -307,18 +318,14 @@ function ThreeAstronautLayer({
         );
       }
       if (objectRuntime) {
-        if (
-          reconciledObjectState !== latest.state
-          || reconciledObjectElapsedMs !== latest.state.elapsedMs
-        ) {
+        if (reconciledObjectKey !== latest.objectReconciliationKey) {
           updateThreeGameObjectRuntime(
             objectRuntime,
             latest.state,
             reduceMotion,
             timeMs,
           );
-          reconciledObjectState = latest.state;
-          reconciledObjectElapsedMs = latest.state.elapsedMs;
+          reconciledObjectKey = latest.objectReconciliationKey;
         } else {
           updateThreeGameObjectIdleEffects(objectRuntime, timeMs, reduceMotion);
         }
@@ -340,14 +347,16 @@ function ThreeAstronautLayer({
         objectRenderReady = true;
         objectReadyCallbackRef.current?.(true);
       }
-      if (!cancelled) animationFrame = requestAnimationFrame(draw);
     };
 
-    animationFrame = requestAnimationFrame(draw);
+    unsubscribeFrame = subscribePresentationFrame(
+      ({ timeMs }) => draw(timeMs),
+      PRESENTATION_FRAME_PRIORITY.scene,
+    );
 
     return () => {
       cancelled = true;
-      cancelAnimationFrame(animationFrame);
+      unsubscribeFrame?.();
       resizeObserver.disconnect();
       motionPreference.removeEventListener("change", handleMotionPreference);
       document.removeEventListener("visibilitychange", handleVisibilityChange);

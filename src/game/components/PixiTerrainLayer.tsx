@@ -12,12 +12,17 @@ import { WORLD } from "../constants";
 import type { CameraViewBox } from "../presentation/camera";
 import {
   collectTerrainLightZones,
+  getTerrainLightTopologyKey,
   TERRAIN_TEAM_COLORS,
 } from "../presentation/terrainLighting";
 import {
   ACTIVE_TERRAIN_THEME,
   type TerrainVisualTheme,
 } from "../presentation/terrainTheme";
+import {
+  PRESENTATION_FRAME_PRIORITY,
+  subscribePresentationFrame,
+} from "../presentation/presentationClock";
 import type { GameState } from "../types";
 
 const MAX_RENDER_RESOLUTION = 1.5;
@@ -57,26 +62,18 @@ export const PixiTerrainLayer = memo(function PixiTerrainLayer({
 }: PixiTerrainLayerProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<TerrainScene | null>(null);
+  const renderedCameraRef = useRef<CameraViewBox | null>(null);
   const initialRenderCallbackRef = useRef(onInitialRender);
   const latestStateRef = useRef(state);
   initialRenderCallbackRef.current = onInitialRender;
   latestStateRef.current = state;
-  const terrainLightingKey = [
-    ...state.activePlayerIds.map((playerId) => {
-      const position = state.players[playerId].basePosition;
-      return `b:${playerId}:${position.x}:${position.y}`;
-    }),
-    ...state.anchors.map((anchor) =>
-      `a:${anchor.id}:${anchor.owner}:${anchor.position.x}:${anchor.position.y}:${anchor.powered}`),
-  ].join("|");
+  const terrainLightingKey = getTerrainLightTopologyKey(state);
 
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
 
     let cancelled = false;
-    let cameraFrame = 0;
-    let renderedCamera: CameraViewBox | null = null;
     let resizeObserver: ResizeObserver | null = null;
     const app = new Application();
 
@@ -167,28 +164,16 @@ export const PixiTerrainLayer = memo(function PixiTerrainLayer({
       sceneRef.current = scene;
       updateTerrainLighting(scene, latestStateRef.current, theme);
       resizeAndPosition(scene, host, cameraRef.current);
-      renderedCamera = { ...cameraRef.current };
+      renderedCameraRef.current = { ...cameraRef.current };
 
       resizeObserver = new ResizeObserver(() => {
         const current = sceneRef.current;
         if (current) {
           resizeAndPosition(current, host, cameraRef.current);
-          renderedCamera = { ...cameraRef.current };
+          renderedCameraRef.current = { ...cameraRef.current };
         }
       });
       resizeObserver.observe(host);
-
-      const drawCamera = () => {
-        if (cancelled) return;
-        const current = sceneRef.current;
-        const camera = cameraRef.current;
-        if (current && !sameCamera(renderedCamera, camera)) {
-          positionAndRender(current, camera);
-          renderedCamera = { ...camera };
-        }
-        cameraFrame = requestAnimationFrame(drawCamera);
-      };
-      cameraFrame = requestAnimationFrame(drawCamera);
     };
 
     void settleTerrainInitialization(
@@ -203,14 +188,22 @@ export const PixiTerrainLayer = memo(function PixiTerrainLayer({
 
     return () => {
       cancelled = true;
-      cancelAnimationFrame(cameraFrame);
       resizeObserver?.disconnect();
       sceneRef.current = null;
+      renderedCameraRef.current = null;
       if (app.renderer) {
         app.destroy({ removeView: true }, { children: true });
       }
     };
   }, [cameraRef, onLoadError, theme]);
+
+  useEffect(() => subscribePresentationFrame(() => {
+    const scene = sceneRef.current;
+    const camera = cameraRef.current;
+    if (!scene || sameCamera(renderedCameraRef.current, camera)) return;
+    positionAndRender(scene, camera);
+    renderedCameraRef.current = { ...camera };
+  }, PRESENTATION_FRAME_PRIORITY.scene), [cameraRef]);
 
   useEffect(() => {
     const scene = sceneRef.current;

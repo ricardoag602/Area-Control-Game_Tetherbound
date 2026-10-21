@@ -3,7 +3,10 @@ import { WORLD } from "../constants";
 import {
   advanceSmoothedPosition,
   extrapolateMotionPosition,
+  FULL_SPEED_EXTRAPOLATION_MS,
   MAX_EXTRAPOLATION_MS,
+  sampleSmoothedPosition,
+  shouldSyncReactPositions,
   type MotionSnapshot,
 } from "./useSmoothedPositions";
 
@@ -21,7 +24,7 @@ describe("multiplayer position extrapolation", () => {
     expect(position.y).toBeCloseTo(99.5, 8);
   });
 
-  it("stops predicting at the conservative horizon", () => {
+  it("decelerates after the safe horizon and stops at the bounded cap", () => {
     const motion = {
       position: { x: 100, y: 100 },
       velocity: { x: 10, y: 0 },
@@ -30,14 +33,19 @@ describe("multiplayer position extrapolation", () => {
       burstDistanceRemaining: 0,
     };
 
-    const atHorizon = extrapolateMotionPosition(
+    const atSafeHorizon = extrapolateMotionPosition(
       motion,
-      MAX_EXTRAPOLATION_MS,
+      FULL_SPEED_EXTRAPOLATION_MS,
     );
+    const duringDecay = extrapolateMotionPosition(motion, 275);
+    const atCap = extrapolateMotionPosition(motion, MAX_EXTRAPOLATION_MS);
     const longAfterHorizon = extrapolateMotionPosition(motion, 5_000);
 
-    expect(longAfterHorizon).toEqual(atHorizon);
-    expect(atHorizon.x).toBeCloseTo(102, 8);
+    expect(atSafeHorizon.x).toBeCloseTo(102, 8);
+    expect(duringDecay.x).toBeGreaterThan(atSafeHorizon.x);
+    expect(duringDecay.x).toBeLessThan(atCap.x);
+    expect(longAfterHorizon).toEqual(atCap);
+    expect(atCap.x).toBeCloseTo(102.75, 8);
   });
 
   it("does not invent motion from an authoritative idle state", () => {
@@ -76,6 +84,50 @@ describe("multiplayer position extrapolation", () => {
       target: null,
       burstDistanceRemaining: 0,
     }, 200)).toEqual({ x: WORLD.width, y: 0 });
+  });
+
+  it("spreads an authoritative correction across the full snapshot window", () => {
+    const motion: MotionSnapshot = {
+      position: { x: 100, y: 100 },
+      velocity: { x: 0, y: 0 },
+      mode: "idle",
+      target: null,
+      burstDistanceRemaining: 0,
+    };
+
+    const start = sampleSmoothedPosition(
+      motion,
+      { x: 10, y: 0 },
+      0,
+      0,
+      120,
+    );
+    const firstFrame = sampleSmoothedPosition(
+      motion,
+      { x: 10, y: 0 },
+      16,
+      16,
+      120,
+    );
+    const halfway = sampleSmoothedPosition(
+      motion,
+      { x: 10, y: 0 },
+      60,
+      60,
+      120,
+    );
+    const finished = sampleSmoothedPosition(
+      motion,
+      { x: 10, y: 0 },
+      120,
+      120,
+      120,
+    );
+
+    expect(start.x).toBe(110);
+    expect(start.x - firstFrame.x).toBeLessThan(1);
+    expect(halfway.x).toBeCloseTo(105, 8);
+    expect(finished.x).toBe(100);
   });
 
   it("keeps 20 Hz snapshots moving uniformly on a 144 Hz render clock", () => {
@@ -144,5 +196,11 @@ describe("multiplayer position extrapolation", () => {
     const expectedDistance = speed * frameMs / 1_000;
     expect(Math.min(...frameDistances)).toBeCloseTo(expectedDistance, 7);
     expect(Math.max(...frameDistances)).toBeCloseTo(expectedDistance, 7);
+  });
+
+  it("publishes the live track when the SVG fallback is enabled mid-match", () => {
+    expect(shouldSyncReactPositions(true, true, false, false, true)).toBe(true);
+    expect(shouldSyncReactPositions(true, true, false, false, false)).toBe(false);
+    expect(shouldSyncReactPositions(false, true, true, true, false)).toBe(false);
   });
 });

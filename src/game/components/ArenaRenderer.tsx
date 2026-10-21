@@ -6,7 +6,9 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type PointerEvent,
+  type RefObject,
 } from "react";
 import { GAME_RULES, WORLD } from "../constants";
 import { normalizeOxygen } from "../presentation/oxygen";
@@ -20,17 +22,26 @@ import {
   getAstronautSpriteFrame,
 } from "../presentation/astronautSprites";
 import type { CameraViewBox } from "../presentation/camera";
+import {
+  PRESENTATION_FRAME_PRIORITY,
+  subscribePresentationFrame,
+} from "../presentation/presentationClock";
 import { DROPPED_MATERIAL_SPRITE } from "../presentation/objectSprites";
 import { MOVEMENT_RULES } from "../movement/movement";
 import { getEnvironmentModifiers } from "../simulation/environment";
 import {
-  getScreenTouchChargeInput,
   getTankChargeInput,
   isTouchBoostDoubleTap,
   isTouchBoostTap,
   usesDirectTouchCharge,
   type TouchBoostTap,
 } from "../input/touchCharge";
+import {
+  getTouchJoystickDirection,
+  getTouchJoystickThumbOffset,
+  TOUCH_JOYSTICK_RADIUS_PX,
+  TOUCH_JOYSTICK_THUMB_RADIUS_PX,
+} from "../input/touchJoystick";
 import {
   canArmBoostCharge,
   canPrepareTouchBoostCharge,
@@ -84,6 +95,7 @@ interface ArenaRendererProps {
   oxygenZoomMultiplier?: number;
   cameraMode?: "follow" | "overview";
   onOverviewSettled?: () => void;
+  alwaysShowTouchJoystick?: boolean;
   tutorialStep?: TutorialStepId | null;
   tutorialTarget?: Vec2 | null;
   compatibilityMode?: boolean;
@@ -109,6 +121,14 @@ interface ActiveGesture {
   latestClient: Vec2;
 }
 
+interface TouchJoystickPresentation {
+  origin: Vec2;
+  thumbOffset: Vec2;
+  radius: number;
+  thumbRadius: number;
+  active: boolean;
+}
+
 export function ArenaRenderer({
   state,
   localPlayerId,
@@ -118,19 +138,30 @@ export function ArenaRenderer({
   oxygenZoomMultiplier = 1,
   cameraMode = "follow",
   onOverviewSettled,
+  alwaysShowTouchJoystick = false,
   tutorialStep = null,
   tutorialTarget = null,
   compatibilityMode = false,
   onPresentationStateChange,
 }: ArenaRendererProps) {
-  const renderPositions = useSmoothedPositions(state, interpolatePositions);
-  const renderPositionsRef = useRef(renderPositions);
+  const { positions: renderPositions, positionsRef: renderPositionsRef } =
+    useSmoothedPositions(state, interpolatePositions, compatibilityMode);
   const localAstronaut = state.players[localPlayerId].astronaut;
   const localEnvironment = useMemo(
     () => getEnvironmentModifiers(state, localAstronaut.position),
     [state, localAstronaut.position],
   );
   const arenaRef = useRef<SVGSVGElement>(null);
+  const underlayRef = useRef<SVGSVGElement>(null);
+  const overlayRef = useRef<SVGSVGElement>(null);
+  const tutorialFollowerRef = useRef<SVGGElement>(null);
+  const tutorialCueRef = useRef<SVGGElement>(null);
+  const tutorialTargetArrowRef = useRef<SVGPathElement>(null);
+  const tutorialTargetContentRef = useRef<SVGGElement>(null);
+  const chargeFollowerRef = useRef<SVGGElement>(null);
+  const oxygenFollowerRef = useRef<SVGGElement>(null);
+  const cameraCenterRef = useRef(renderPositions[localPlayerId]);
+  const declarativeLocalPositionRef = useRef(renderPositions[localPlayerId]);
   const [terrainReady, setTerrainReady] = useState(false);
   const [threeAstronautsReady, setThreeAstronautsReady] = useState(false);
   const [threeObjectsReady, setThreeObjectsReady] = useState(false);
@@ -140,8 +171,9 @@ export function ArenaRenderer({
   const oxygenWasDepletedRef = useRef(
     localAstronaut.oxygen < GAME_RULES.oxygenMaximum,
   );
-  const camera = useFollowCamera(
+  const { camera, cameraRef } = useFollowCamera(
     arenaRef,
+    cameraCenterRef,
     renderPositions[localPlayerId],
     localAstronaut.movement,
     chargeIntentActive,
@@ -149,7 +181,6 @@ export function ArenaRenderer({
     cameraMode,
     onOverviewSettled,
   );
-  const cameraRef = useRef(camera);
   const commandRef = useRef(onMovementCommand);
   const localAstronautRef = useRef(localAstronaut);
   const gestureRef = useRef<ActiveGesture | null>(null);
@@ -157,12 +188,70 @@ export function ArenaRenderer({
   const lastTouchTapRef = useRef<TouchBoostTap | null>(null);
   const lastTouchChargeInputRef = useRef<TankInput | null>(null);
   const [touchChargePreview, setTouchChargePreview] = useState<TankInput | null>(null);
+  const [touchJoystick, setTouchJoystick] =
+    useState<TouchJoystickPresentation | null>(null);
+  const touchJoystickElementRef = useRef<HTMLDivElement>(null);
+  const syncImperativePresentation = useCallback(() => {
+    const liveCamera = cameraRef.current;
+    const viewBox = `${liveCamera.x} ${liveCamera.y} ${liveCamera.width} ${liveCamera.height}`;
+    setSvgViewBox(underlayRef.current, viewBox);
+    setSvgViewBox(arenaRef.current, viewBox);
+    setSvgViewBox(overlayRef.current, viewBox);
+
+    const livePosition = renderPositionsRef.current[localPlayerId];
+    const basePosition = declarativeLocalPositionRef.current;
+    const translation = `translate(${livePosition.x - basePosition.x} ${livePosition.y - basePosition.y})`;
+    if (tutorialStep === "move" || tutorialStep === "boost" || tutorialStep === "deploy") {
+      tutorialFollowerRef.current?.setAttribute("transform", translation);
+    } else {
+      tutorialFollowerRef.current?.removeAttribute("transform");
+    }
+
+    if (isTargetTutorialStep(tutorialStep) && tutorialTarget) {
+      const targetPresentation = calculateTutorialTargetPresentation(
+        tutorialTarget,
+        liveCamera,
+      );
+      setSvgTransform(
+        tutorialCueRef.current,
+        `translate(${targetPresentation.position.x} ${targetPresentation.position.y})`,
+      );
+      tutorialCueRef.current?.classList.toggle(
+        "world__tutorial-cue--offscreen",
+        targetPresentation.offscreen,
+      );
+      setSvgDisplay(tutorialTargetArrowRef.current, targetPresentation.offscreen);
+      setSvgDisplay(tutorialTargetContentRef.current, !targetPresentation.offscreen);
+      setSvgTransform(
+        tutorialTargetArrowRef.current,
+        `rotate(${targetPresentation.headingDegrees})`,
+      );
+    }
+    chargeFollowerRef.current?.setAttribute("transform", translation);
+    oxygenFollowerRef.current?.setAttribute("transform", translation);
+  }, [
+    cameraRef,
+    localPlayerId,
+    renderPositionsRef,
+    tutorialStep,
+    tutorialTarget,
+  ]);
+
   useLayoutEffect(() => {
-    renderPositionsRef.current = renderPositions;
-    cameraRef.current = camera;
+    cameraCenterRef.current = renderPositionsRef.current[localPlayerId];
+    declarativeLocalPositionRef.current = renderPositions[localPlayerId];
     commandRef.current = onMovementCommand;
     localAstronautRef.current = localAstronaut;
+    // React may have just moved the declarative SVG children to a new
+    // authoritative position. Reapply the ref-based offset before paint so a
+    // snapshot cannot produce a one-frame correction flash.
+    syncImperativePresentation();
   });
+
+  useEffect(() => subscribePresentationFrame(
+    syncImperativePresentation,
+    PRESENTATION_FRAME_PRIORITY.overlay,
+  ), [syncImperativePresentation]);
   const presentationState = getArenaPresentationState({
     terrainReady,
     astronautsReady: threeAstronautsReady,
@@ -194,6 +283,16 @@ export function ArenaRenderer({
     chargeTimerRef.current = null;
   }, []);
 
+  const settleTouchJoystick = useCallback(() => {
+    setTouchJoystickThumbOffset(touchJoystickElementRef.current, { x: 0, y: 0 });
+    setTouchJoystick((current) => {
+      if (!alwaysShowTouchJoystick) return null;
+      return current
+        ? { ...current, thumbOffset: { x: 0, y: 0 }, active: false }
+        : null;
+    });
+  }, [alwaysShowTouchJoystick]);
+
   const emitPointerCharge = useCallback((
     gesture: ActiveGesture,
     astronaut: AstronautState,
@@ -219,6 +318,7 @@ export function ArenaRenderer({
 
     setChargeIntentActive(false);
     gestureRef.current = null;
+    settleTouchJoystick();
     clearChargeTimer();
     lastTouchChargeInputRef.current = null;
     setTouchChargePreview(null);
@@ -226,7 +326,7 @@ export function ArenaRenderer({
       gesture.element.releasePointerCapture(gesture.pointerId);
     }
     if (sendStop) commandRef.current({ type: "stop" });
-  }, [clearChargeTimer]);
+  }, [clearChargeTimer, settleTouchJoystick]);
 
   const cancelGesture = useCallback(() => {
     lastTouchTapRef.current = null;
@@ -321,7 +421,9 @@ export function ArenaRenderer({
     const target = clientToWorld(element, event.clientX, event.clientY);
     const clientPoint = { x: event.clientX, y: event.clientY };
     const pressedAt = performance.now();
-    const localPosition = renderPositions[localPlayerId];
+    // Hit-test the astronaut where it is visibly rendered, not at the latest
+    // lower-frequency authoritative snapshot.
+    const localPosition = renderPositionsRef.current[localPlayerId];
     const directTouchCharge = usesDirectTouchCharge(event.pointerType);
     const astronautClient = worldToClient(element, localPosition);
     const hitRadius = element.closest(".app--large-controls")
@@ -358,9 +460,21 @@ export function ArenaRenderer({
       originClient: clientPoint,
       latestClient: clientPoint,
     };
+    if (directTouchCharge) {
+      setTouchJoystick(createTouchJoystickPresentation(
+        element,
+        clientPoint,
+        clientPoint,
+        true,
+      ));
+    }
 
     if (!canCharge) {
-      commandRef.current({ type: "walk", target });
+      commandRef.current(
+        directTouchCharge
+          ? { type: "stop" }
+          : { type: "walk", target },
+      );
       return;
     }
 
@@ -368,7 +482,7 @@ export function ArenaRenderer({
     // to the astronaut-to-finger vector using the shared tank-charge physics.
     commandRef.current(
       directTouchCharge
-        ? { type: "walk", target }
+        ? { type: "stop" }
         : { type: "tank_drive", throttle: 1, steering: 0 },
     );
     chargeTimerRef.current = window.setTimeout(() => {
@@ -387,14 +501,18 @@ export function ArenaRenderer({
       }
       if (touchActivation === "blocked") {
         gesture.mode = "walking";
-        commandRef.current({
-          type: "walk",
-          target: clientToWorld(
-            gesture.element,
-            gesture.latestClient.x,
-            gesture.latestClient.y,
-          ),
-        });
+        commandRef.current(
+          gesture.chargeControl === "direct"
+            ? touchJoystickWalkCommand(gesture)
+            : {
+                type: "walk",
+                target: clientToWorld(
+                  gesture.element,
+                  gesture.latestClient.x,
+                  gesture.latestClient.y,
+                ),
+              },
+        );
         return;
       }
       gesture.mode = "charging";
@@ -409,8 +527,15 @@ export function ArenaRenderer({
 
     event.preventDefault();
     const clientPoint = { x: event.clientX, y: event.clientY };
-    const target = clientToWorld(gesture.element, event.clientX, event.clientY);
     gesture.latestClient = clientPoint;
+    if (gesture.chargeControl === "direct") {
+      updateTouchJoystickThumb(
+        touchJoystickElementRef.current,
+        gesture.element,
+        gesture.originClient,
+        clientPoint,
+      );
+    }
 
     if (gesture.mode === "charge-candidate") {
       const gestureSlop = gesture.chargeControl === "direct"
@@ -419,7 +544,14 @@ export function ArenaRenderer({
       if (pointDistance(clientPoint, gesture.originClient) <= gestureSlop) return;
       clearChargeTimer();
       gesture.mode = "walking";
-      commandRef.current({ type: "walk", target });
+      commandRef.current(
+        gesture.chargeControl === "direct"
+          ? touchJoystickWalkCommand(gesture)
+          : {
+              type: "walk",
+              target: clientToWorld(gesture.element, event.clientX, event.clientY),
+            },
+      );
       return;
     }
 
@@ -430,7 +562,14 @@ export function ArenaRenderer({
 
     if (gesture.mode === "charge-primed") return;
 
-    commandRef.current({ type: "walk", target });
+    commandRef.current(
+      gesture.chargeControl === "direct"
+        ? touchJoystickWalkCommand(gesture)
+        : {
+            type: "walk",
+            target: clientToWorld(gesture.element, event.clientX, event.clientY),
+          },
+    );
   }
 
   function finishGesture(event: PointerEvent<SVGSVGElement>) {
@@ -466,6 +605,7 @@ export function ArenaRenderer({
       );
 
     gestureRef.current = null;
+    settleTouchJoystick();
     clearChargeTimer();
     lastTouchChargeInputRef.current = null;
     setChargeIntentActive(false);
@@ -513,27 +653,35 @@ export function ArenaRenderer({
         onLoadError={handlePresentationLoadError}
       />
       <svg
+        ref={underlayRef}
         className="world world--player-underlay"
         viewBox={`${camera.x} ${camera.y} ${camera.width} ${camera.height}`}
         aria-hidden="true"
       >
         <TetherCableLayer state={state} localPlayerId={localPlayerId} />
         {tutorialStep && (
-          <TutorialWorldCue
-            step={tutorialStep}
-            astronautPosition={renderPositions[localPlayerId]}
-            facing={localAstronaut.movement.facing}
-            target={tutorialTarget}
-            camera={camera}
-          />
+          <g ref={tutorialFollowerRef}>
+            <TutorialWorldCue
+              step={tutorialStep}
+              astronautPosition={renderPositions[localPlayerId]}
+              facing={localAstronaut.movement.facing}
+              target={tutorialTarget}
+              camera={camera}
+              cueRef={tutorialCueRef}
+              targetArrowRef={tutorialTargetArrowRef}
+              targetContentRef={tutorialTargetContentRef}
+            />
+          </g>
         )}
-        <ChargeFeedback
-          astronaut={localAstronaut}
-          position={renderPositions[localPlayerId]}
-          playerId={localPlayerId}
-          touchChargePreview={touchChargePreview}
-          turnRateMultiplier={localEnvironment.turnRateMultiplier}
-        />
+        <g ref={chargeFollowerRef}>
+          <ChargeFeedback
+            astronaut={localAstronaut}
+            position={renderPositions[localPlayerId]}
+            playerId={localPlayerId}
+            touchChargePreview={touchChargePreview}
+            turnRateMultiplier={localEnvironment.turnRateMultiplier}
+          />
+        </g>
       </svg>
       <svg
         ref={arenaRef}
@@ -542,7 +690,7 @@ export function ArenaRenderer({
         role="application"
         tabIndex={interactionDisabled ? -1 : 0}
         aria-roledescription="game arena"
-        aria-label="Tetherbound game arena. Keyboard controls stay active throughout the match. Use W and S or the up and down arrows to drive forward and reverse. Use A and D or the left and right arrows to turn. Tap W or S, then press and hold that same key to charge; release it to burst. Press T to deploy a tether and Escape to cancel keyboard movement. Drag to move with a pointer. On a touch screen, tap once, then press and hold nearby to charge toward your finger; release to burst."
+        aria-label="Tetherbound game arena. Keyboard controls stay active throughout the match. Use W and S or the up and down arrows to drive forward and reverse. Use A and D or the left and right arrows to turn. Tap W or S, then press and hold that same key to charge; release it to burst. Press T to deploy a tether and Escape to cancel keyboard movement. Drag to move with a mouse. On a touch screen, touch anywhere and drag the floating joystick to move, then release to stop. Tap once, then press and hold nearby to charge; drag the joystick to steer and release to burst."
         aria-keyshortcuts="W A S D T ArrowUp ArrowDown ArrowLeft ArrowRight"
         aria-disabled={interactionDisabled}
         onContextMenu={(event) => event.preventDefault()}
@@ -557,10 +705,13 @@ export function ArenaRenderer({
         <TetherNetworkLayer
           state={state}
           renderPositions={renderPositions}
+          renderPositionsRef={renderPositionsRef}
           localPlayerId={localPlayerId}
         />
 
-        <SalvageLayer deposits={state.salvage} />
+        {(compatibilityMode || !threePresentationReady) && (
+          <SalvageLayer deposits={state.salvage} />
+        )}
 
         {(compatibilityMode || !threePresentationReady) &&
           state.activePlayerIds.map((playerId) => (
@@ -583,18 +734,137 @@ export function ArenaRenderer({
         />
       )}
       <svg
+        ref={overlayRef}
         className="world world--player-overlay"
         viewBox={`${camera.x} ${camera.y} ${camera.width} ${camera.height}`}
         aria-hidden="true"
       >
-        <OxygenWorldIndicator
-          oxygen={localAstronaut.oxygen}
-          position={renderPositions[localPlayerId]}
-          refillSerial={oxygenRefillSerial}
-        />
+        <g ref={oxygenFollowerRef}>
+          <OxygenWorldIndicator
+            oxygen={localAstronaut.oxygen}
+            position={renderPositions[localPlayerId]}
+            refillSerial={oxygenRefillSerial}
+          />
+        </g>
       </svg>
+      <TouchJoystick
+        elementRef={touchJoystickElementRef}
+        presentation={touchJoystick?.active || alwaysShowTouchJoystick
+          ? touchJoystick
+          : null}
+        alwaysVisible={alwaysShowTouchJoystick}
+      />
     </div>
   );
+}
+
+function TouchJoystick({
+  elementRef,
+  presentation,
+  alwaysVisible,
+}: {
+  elementRef: RefObject<HTMLDivElement | null>;
+  presentation: TouchJoystickPresentation | null;
+  alwaysVisible: boolean;
+}) {
+  if (!presentation && !alwaysVisible) return null;
+
+  const style = {
+    ...(presentation
+      ? {
+          left: presentation.origin.x,
+          top: presentation.origin.y,
+          "--touch-joystick-radius": `${presentation.radius}px`,
+          "--touch-joystick-thumb-radius": `${presentation.thumbRadius}px`,
+          "--touch-joystick-thumb-x": `${presentation.thumbOffset.x}px`,
+          "--touch-joystick-thumb-y": `${presentation.thumbOffset.y}px`,
+        }
+      : {}),
+  } as CSSProperties;
+  const active = presentation?.active ?? false;
+
+  return (
+    <div
+      ref={elementRef}
+      className={`touch-joystick${active ? " touch-joystick--active" : " touch-joystick--idle"}${presentation ? "" : " touch-joystick--default"}`}
+      style={style}
+      aria-hidden="true"
+    >
+      <span className="touch-joystick__ring" />
+      <span className="touch-joystick__thumb" />
+    </div>
+  );
+}
+
+function updateTouchJoystickThumb(
+  joystick: HTMLDivElement | null,
+  arena: SVGSVGElement,
+  originClient: Vec2,
+  currentClient: Vec2,
+) {
+  if (!joystick) return;
+  const { radius, thumbRadius } = getTouchJoystickDimensions(arena);
+  setTouchJoystickThumbOffset(
+    joystick,
+    getTouchJoystickThumbOffset(
+      originClient,
+      currentClient,
+      radius,
+      thumbRadius,
+    ),
+  );
+}
+
+function setTouchJoystickThumbOffset(
+  joystick: HTMLDivElement | null,
+  offset: Vec2,
+) {
+  if (!joystick) return;
+  joystick.style.setProperty("--touch-joystick-thumb-x", `${offset.x}px`);
+  joystick.style.setProperty("--touch-joystick-thumb-y", `${offset.y}px`);
+}
+
+function getTouchJoystickDimensions(element: SVGSVGElement) {
+  const scale = element.closest(".app--large-controls") ? 1.18 : 1;
+  return {
+    radius: TOUCH_JOYSTICK_RADIUS_PX * scale,
+    thumbRadius: TOUCH_JOYSTICK_THUMB_RADIUS_PX * scale,
+  };
+}
+
+function createTouchJoystickPresentation(
+  element: SVGSVGElement,
+  originClient: Vec2,
+  currentClient: Vec2,
+  active: boolean,
+): TouchJoystickPresentation {
+  const { radius, thumbRadius } = getTouchJoystickDimensions(element);
+  const rect = element.getBoundingClientRect();
+  return {
+    origin: {
+      x: originClient.x - rect.left,
+      y: originClient.y - rect.top,
+    },
+    thumbOffset: getTouchJoystickThumbOffset(
+      originClient,
+      currentClient,
+      radius,
+      thumbRadius,
+    ),
+    radius,
+    thumbRadius,
+    active,
+  };
+}
+
+function touchJoystickWalkCommand(gesture: ActiveGesture): MovementCommand {
+  const direction = getTouchJoystickDirection(
+    gesture.originClient,
+    gesture.latestClient,
+  );
+  return direction
+    ? { type: "walk_direction", direction }
+    : { type: "stop" };
 }
 
 const SalvageLayer = memo(function SalvageLayer({
@@ -623,62 +893,97 @@ function TutorialWorldCue({
   facing,
   target,
   camera,
+  cueRef,
+  targetArrowRef,
+  targetContentRef,
 }: {
   step: TutorialStepId;
   astronautPosition: Vec2;
   facing: Vec2;
   target: Vec2 | null;
   camera: CameraViewBox;
+  cueRef: RefObject<SVGGElement | null>;
+  targetArrowRef: RefObject<SVGPathElement | null>;
+  targetContentRef: RefObject<SVGGElement | null>;
 }) {
-  const followsTarget = step === "salvage" || step === "bank" || step === "break";
+  const followsTarget = isTargetTutorialStep(step);
   if (followsTarget && !target) return null;
 
-  const targetCue = target ? clampTutorialTargetToCamera(target, camera) : null;
-  const position = targetCue?.position ?? astronautPosition;
-  const offscreen = targetCue?.offscreen ?? false;
+  const targetPresentation = followsTarget && target
+    ? calculateTutorialTargetPresentation(target, camera)
+    : null;
+  const position = targetPresentation?.position ?? astronautPosition;
+  const offscreen = targetPresentation?.offscreen ?? false;
   const heading = Math.atan2(facing.y, facing.x) * 180 / Math.PI;
-  const targetHeading = target
-    ? Math.atan2(target.y - position.y, target.x - position.x) * 180 / Math.PI
-    : 0;
 
   return (
     <g
+      ref={cueRef}
       className={`world__tutorial-cue world__tutorial-cue--${step}${offscreen ? " world__tutorial-cue--offscreen" : ""}`}
       transform={`translate(${position.x} ${position.y})`}
       aria-hidden="true"
     >
       <circle className="world__tutorial-cue-halo" r="8.5" />
       <circle className="world__tutorial-cue-ring" r="6.7" />
-      {offscreen && (
+      {followsTarget && (
         <path
+          ref={targetArrowRef}
           className="world__tutorial-cue-symbol world__tutorial-cue-symbol--filled"
           d="M-5-4 5 0-5 4-2 0Z"
-          transform={`rotate(${targetHeading})`}
+          transform={`rotate(${targetPresentation?.headingDegrees ?? 0})`}
+          display={offscreen ? undefined : "none"}
         />
       )}
-      {!offscreen && step === "move" && (
+      {step === "move" && (
         <path className="world__tutorial-cue-symbol" d="M0-12V-7M0 12V7M-12 0H-7M12 0H7M0-12l-2 2M0-12l2 2M0 12l-2-2M0 12l2-2M-12 0l2-2M-12 0l2 2M12 0l-2-2M12 0l-2 2" />
       )}
-      {!offscreen && step === "boost" && (
+      {step === "boost" && (
         <g transform={`rotate(${heading})`}>
           <path className="world__tutorial-cue-symbol" d="M-2.5 0H12M7-4l5 4-5 4" />
           <path className="world__tutorial-cue-trail" d="M-5-3H-11M-5 0H-14M-5 3H-11" />
         </g>
       )}
-      {!offscreen && step === "deploy" && (
+      {step === "deploy" && (
         <path className="world__tutorial-cue-symbol" d="M0-4V4M-4 0H4M-3.7-3.7 3.7 3.7M3.7-3.7-3.7 3.7" />
       )}
-      {!offscreen && step === "salvage" && (
-        <path className="world__tutorial-cue-symbol world__tutorial-cue-symbol--filled" d="m0-4.8 4.3 4.3L0 5.2-4.3-.5 0-4.8Z" />
-      )}
-      {!offscreen && step === "bank" && (
-        <path className="world__tutorial-cue-symbol" d="M-10 0H4M0-4l4 4-4 4M7-5v10" />
-      )}
-      {!offscreen && step === "break" && (
-        <path className="world__tutorial-cue-symbol" d="M-9-4h4l4 4-4 4h-4M9-4H5L1 0l4 4h4M-2-6 0-10M2 6 0 10" />
+      {followsTarget && (
+        <g
+          ref={targetContentRef}
+          display={offscreen ? "none" : undefined}
+        >
+          {step === "salvage" && (
+            <path className="world__tutorial-cue-symbol world__tutorial-cue-symbol--filled" d="m0-4.8 4.3 4.3L0 5.2-4.3-.5 0-4.8Z" />
+          )}
+          {step === "bank" && (
+            <path className="world__tutorial-cue-symbol" d="M-10 0H4M0-4l4 4-4 4M7-5v10" />
+          )}
+          {step === "break" && (
+            <path className="world__tutorial-cue-symbol" d="M-9-4h4l4 4-4 4h-4M9-4H5L1 0l4 4h4M-2-6 0-10M2 6 0 10" />
+          )}
+        </g>
       )}
     </g>
   );
+}
+
+function isTargetTutorialStep(
+  step: TutorialStepId | null,
+): step is Extract<TutorialStepId, "salvage" | "bank" | "break"> {
+  return step === "salvage" || step === "bank" || step === "break";
+}
+
+export function calculateTutorialTargetPresentation(
+  target: Vec2,
+  camera: CameraViewBox,
+): { position: Vec2; offscreen: boolean; headingDegrees: number } {
+  const cue = clampTutorialTargetToCamera(target, camera);
+  return {
+    ...cue,
+    headingDegrees: Math.atan2(
+      target.y - cue.position.y,
+      target.x - cue.position.x,
+    ) * 180 / Math.PI,
+  };
 }
 
 function clampTutorialTargetToCamera(
@@ -976,16 +1281,14 @@ function screenTouchChargeInput(
   gesture: ActiveGesture,
   astronaut: AstronautState,
 ): TankInput {
-  const touchPosition = clientToWorldUnclamped(
-    gesture.element,
-    gesture.latestClient.x,
-    gesture.latestClient.y,
+  const direction = getTouchJoystickDirection(
+    gesture.originClient,
+    gesture.latestClient,
   );
-  return getScreenTouchChargeInput(
+  return getTankChargeInput(
     astronaut.movement.facing,
-    astronaut.position,
-    touchPosition,
-    astronaut.movement.direction,
+    direction ?? astronaut.movement.direction,
+    direction !== null,
   );
 }
 
@@ -1013,4 +1316,28 @@ function clampWorldPoint(point: Vec2): Vec2 {
     x: Math.min(WORLD.width, Math.max(0, point.x)),
     y: Math.min(WORLD.height, Math.max(0, point.y)),
   };
+}
+
+function setSvgViewBox(element: SVGSVGElement | null, viewBox: string) {
+  if (element && element.getAttribute("viewBox") !== viewBox) {
+    element.setAttribute("viewBox", viewBox);
+  }
+}
+
+function setSvgTransform(
+  element: SVGElement | null,
+  transform: string,
+) {
+  if (element && element.getAttribute("transform") !== transform) {
+    element.setAttribute("transform", transform);
+  }
+}
+
+function setSvgDisplay(element: SVGElement | null, visible: boolean) {
+  if (!element) return;
+  if (visible) {
+    if (element.hasAttribute("display")) element.removeAttribute("display");
+  } else if (element.getAttribute("display") !== "none") {
+    element.setAttribute("display", "none");
+  }
 }

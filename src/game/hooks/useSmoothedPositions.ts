@@ -1,19 +1,25 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { WORLD } from "../constants";
 import { clampToWorld } from "../geometry";
+import {
+  PRESENTATION_FRAME_PRIORITY,
+  subscribePresentationFrame,
+} from "../presentation/presentationClock";
 import { PLAYER_IDS, type GameState, type MovementMode, type PlayerId, type Vec2 } from "../types";
 
-const CORRECTION_MS = 80;
+const MIN_CORRECTION_MS = 80;
+const MAX_CORRECTION_MS = 180;
 const BURST_CORRECTION_MS = 32;
 const SNAP_DISTANCE = 12;
-const CORRECTION_DECAY_AT_DURATION = 0.01;
 const POSITION_EPSILON = 0.0001;
+/** Predict at full authoritative velocity through an ordinary delayed poll. */
+export const FULL_SPEED_EXTRAPOLATION_MS = 200;
 /**
- * Keep prediction shorter than one ordinary network update. This is long
- * enough to bridge request latency without letting a stale snapshot drift far
- * from the authoritative simulation when a request is delayed.
+ * After the safe horizon, ease velocity to zero instead of hitting a visible
+ * plateau on one frame. The bounded tail bridges a slow request without
+ * allowing stale snapshots to drift indefinitely.
  */
-export const MAX_EXTRAPOLATION_MS = 200;
+export const MAX_EXTRAPOLATION_MS = 350;
 
 export interface MotionSnapshot {
   position: Vec2;
@@ -26,25 +32,39 @@ export interface MotionSnapshot {
 interface PositionTrack {
   displayed: Vec2;
   published: Vec2;
-  correction: Vec2;
+  correctionOrigin: Vec2;
+  correctionStartedAt: number;
   motion: MotionSnapshot;
   receivedAt: number;
   lastFrameAt: number;
   durationMs: number;
 }
 
-type RenderPositions = Record<PlayerId, Vec2>;
+export type RenderPositions = Record<PlayerId, Vec2>;
 
-export function useSmoothedPositions(state: GameState, enabled: boolean): RenderPositions {
+export interface SmoothedPositions {
+  /** Snapshot-cadence positions for React/SVG fallback rendering. */
+  readonly positions: RenderPositions;
+  /** Frame-cadence positions consumed by imperative renderers. */
+  readonly positionsRef: RefObject<RenderPositions>;
+}
+
+export function useSmoothedPositions(
+  state: GameState,
+  enabled: boolean,
+  publishFramesToReact = false,
+): SmoothedPositions {
   const canonical = canonicalPositions(state);
   const tracks = useRef<Record<PlayerId, PositionTrack>>(
     Object.fromEntries(
       PLAYER_IDS.map((playerId) => [playerId, createTrack(state, playerId)]),
     ) as Record<PlayerId, PositionTrack>,
   );
-  const [rendered, setRendered] = useState<RenderPositions>(canonical);
+  const positionsRef = useRef<RenderPositions>(canonical);
+  const [published, setPublished] = useState<RenderPositions>(canonical);
   const [reduceMotion, setReduceMotion] = useState(prefersReducedMotion);
   const smoothingActive = useRef(enabled);
+  const publishingFrames = useRef(publishFramesToReact);
 
   useEffect(() => {
     const media = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -54,7 +74,7 @@ export function useSmoothedPositions(state: GameState, enabled: boolean): Render
     return () => media.removeEventListener("change", updatePreference);
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const now = performance.now();
     let snapped = false;
 
@@ -68,43 +88,65 @@ export function useSmoothedPositions(state: GameState, enabled: boolean): Render
       const target = astronaut.position;
       const correctionDistance = distance(track.displayed, target);
       const shouldSnap = !enabled || correctionDistance > SNAP_DISTANCE;
+      const observedSnapshotInterval = track.receivedAt > 0
+        ? Math.max(0, now - track.receivedAt)
+        : MIN_CORRECTION_MS;
 
       track.motion = motionSnapshot(astronaut);
       track.receivedAt = now;
       track.lastFrameAt = now;
+      track.correctionStartedAt = now;
       track.durationMs = reduceMotion
         ? 0
         : astronaut.movement.mode === "burst"
           ? BURST_CORRECTION_MS
-          : CORRECTION_MS;
+          : clamp(
+              observedSnapshotInterval,
+              MIN_CORRECTION_MS,
+              MAX_CORRECTION_MS,
+            );
 
       if (shouldSnap) {
         track.displayed = { ...target };
-        track.correction = { x: 0, y: 0 };
+        track.correctionOrigin = { x: 0, y: 0 };
         snapped = true;
       } else {
-        // Store reconciliation as an offset rather than restarting an easing
-        // curve. Prediction can keep moving at its current velocity while the
-        // authoritative error decays smoothly over real elapsed time.
-        track.correction = {
+        // Spread reconciliation across roughly one observed snapshot interval.
+        // A timeline curve avoids the old 80 ms exponential correction, which
+        // removed most of the error on its first frame and caused a visible
+        // pulse at every authoritative update.
+        track.correctionOrigin = {
           x: track.displayed.x - target.x,
           y: track.displayed.y - target.y,
         };
       }
     }
 
+    copyCurrentPositions(tracks.current, positionsRef.current);
+
     const smoothing = enabled;
     const resumedSmoothing = smoothing && !smoothingActive.current;
+    const startedPublishingFrames = publishFramesToReact && !publishingFrames.current;
     smoothingActive.current = smoothing;
-    if (smoothing && (snapped || resumedSmoothing)) {
+    publishingFrames.current = publishFramesToReact;
+    if (shouldSyncReactPositions(
+      publishFramesToReact,
+      smoothing,
+      snapped,
+      resumedSmoothing,
+      startedPublishingFrames,
+    )) {
       markPublished(tracks.current);
-      setRendered(currentPositions(tracks.current));
+      setPublished(currentPositions(tracks.current));
+    } else if (!smoothing) {
+      setPublished(canonical);
     }
     // Reconcile only when authoritative motion changes. Other player fields
     // such as oxygen and inventory must not reset the prediction horizon.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     enabled,
+    publishFramesToReact,
     reduceMotion,
     state.players.player.astronaut.position.x,
     state.players.player.astronaut.position.y,
@@ -142,31 +184,45 @@ export function useSmoothedPositions(state: GameState, enabled: boolean): Render
 
   useEffect(() => {
     if (!enabled) return;
-    let frameId = 0;
-
-    const update = (now: number) => {
+    return subscribePresentationFrame(({ timeMs }) => {
       let changed = false;
       for (const playerId of PLAYER_IDS) {
         const track = tracks.current[playerId];
-        advanceTrack(track, now);
+        advanceTrack(track, timeMs);
         if (distance(track.displayed, track.published) > POSITION_EPSILON) {
           changed = true;
         }
       }
       if (changed) {
+        copyCurrentPositions(tracks.current, positionsRef.current);
         markPublished(tracks.current);
-        setRendered(currentPositions(tracks.current));
+        if (publishFramesToReact) {
+          setPublished(currentPositions(tracks.current));
+        }
       }
-      // Keep one render clock alive while smoothing is enabled. Authoritative
-      // snapshots only update refs, so they never cancel and restart this loop.
-      frameId = requestAnimationFrame(update);
-    };
+    }, PRESENTATION_FRAME_PRIORITY.positions);
+  }, [enabled, publishFramesToReact]);
 
-    frameId = requestAnimationFrame(update);
-    return () => cancelAnimationFrame(frameId);
-  }, [enabled]);
+  return {
+    positions: enabled && publishFramesToReact ? published : canonical,
+    positionsRef,
+  };
+}
 
-  return enabled ? rendered : canonical;
+/**
+ * The imperative renderer advances the shared tracks even while the SVG
+ * fallback is dormant. When that fallback is enabled later, publish the live
+ * track once so React cannot revive an older position and then remain idle.
+ */
+export function shouldSyncReactPositions(
+  publishFramesToReact: boolean,
+  smoothing: boolean,
+  snapped: boolean,
+  resumedSmoothing: boolean,
+  startedPublishingFrames: boolean,
+) {
+  return publishFramesToReact && smoothing &&
+    (snapped || resumedSmoothing || startedPublishingFrames);
 }
 
 function createTrack(state: GameState, playerId: PlayerId): PositionTrack {
@@ -174,11 +230,12 @@ function createTrack(state: GameState, playerId: PlayerId): PositionTrack {
   return {
     displayed: { ...astronaut.position },
     published: { ...astronaut.position },
-    correction: { x: 0, y: 0 },
+    correctionOrigin: { x: 0, y: 0 },
+    correctionStartedAt: 0,
     motion: motionSnapshot(astronaut),
     receivedAt: 0,
     lastFrameAt: 0,
-    durationMs: CORRECTION_MS,
+    durationMs: MIN_CORRECTION_MS,
   };
 }
 
@@ -189,18 +246,13 @@ function advanceTrack(track: PositionTrack, now: number) {
     return;
   }
   const safeNow = Math.max(track.lastFrameAt, now);
-  const frameDeltaMs = track.lastFrameAt > 0
-    ? safeNow - track.lastFrameAt
-    : 0;
-  const next = advanceSmoothedPosition(
+  track.displayed = sampleSmoothedPosition(
     track.motion,
-    track.correction,
+    track.correctionOrigin,
     safeNow - track.receivedAt,
-    frameDeltaMs,
+    safeNow - track.correctionStartedAt,
     track.durationMs,
   );
-  track.displayed = next.position;
-  track.correction = next.correction;
   track.lastFrameAt = safeNow;
 }
 
@@ -228,10 +280,19 @@ export function extrapolateMotionPosition(
 ): Vec2 {
   if (!shouldExtrapolate(motion)) return { ...motion.position };
 
-  const seconds = Math.min(
+  const safeElapsedMs = Math.min(
     MAX_EXTRAPOLATION_MS,
     Math.max(0, Number.isFinite(elapsedMs) ? elapsedMs : 0),
-  ) / 1_000;
+  );
+  const decayWindowMs = MAX_EXTRAPOLATION_MS - FULL_SPEED_EXTRAPOLATION_MS;
+  const decayAgeMs = Math.max(0, safeElapsedMs - FULL_SPEED_EXTRAPOLATION_MS);
+  // Integral of a linear velocity fade. Position and velocity are both
+  // continuous at the safe horizon, and velocity reaches zero at the cap.
+  const effectiveTravelMs = safeElapsedMs <= FULL_SPEED_EXTRAPOLATION_MS
+    ? safeElapsedMs
+    : FULL_SPEED_EXTRAPOLATION_MS + decayAgeMs -
+      decayAgeMs * decayAgeMs / (2 * decayWindowMs);
+  const seconds = effectiveTravelMs / 1_000;
   const speed = Math.hypot(motion.velocity.x, motion.velocity.y);
   let travelDistance = speed * seconds;
 
@@ -271,35 +332,54 @@ export function advanceSmoothedPosition(
   motion: MotionSnapshot,
   correction: Vec2,
   predictionAgeMs: number,
-  frameDeltaMs: number,
-  correctionDurationMs = CORRECTION_MS,
+  correctionAgeMs: number,
+  correctionDurationMs = MIN_CORRECTION_MS,
 ): { position: Vec2; correction: Vec2 } {
-  const prediction = extrapolateMotionPosition(motion, predictionAgeMs);
-  const safeFrameDelta = Math.max(
-    0,
-    Number.isFinite(frameDeltaMs) ? frameDeltaMs : 0,
+  const position = sampleSmoothedPosition(
+    motion,
+    correction,
+    predictionAgeMs,
+    correctionAgeMs,
+    correctionDurationMs,
   );
-  const safeDuration = Math.max(0, correctionDurationMs);
-  const decay = safeDuration === 0
-    ? 0
-    : Math.pow(CORRECTION_DECAY_AT_DURATION, safeFrameDelta / safeDuration);
-  const decayedCorrection = {
-    x: correction.x * decay,
-    y: correction.y * decay,
-  };
-  const position = clampToWorld({
-    x: prediction.x + decayedCorrection.x,
-    y: prediction.y + decayedCorrection.y,
-  }, WORLD.width, WORLD.height);
+  const prediction = extrapolateMotionPosition(motion, predictionAgeMs);
 
   return {
     position,
-    // Account for a world-edge clamp so the next frame remains continuous.
     correction: {
       x: position.x - prediction.x,
       y: position.y - prediction.y,
     },
   };
+}
+
+/**
+ * Samples a prediction plus an authoritative correction distributed across a
+ * snapshot-aware timeline. The smoothstep curve begins and ends gently, so a
+ * newly received snapshot cannot consume most of its correction in one frame.
+ */
+export function sampleSmoothedPosition(
+  motion: MotionSnapshot,
+  correctionOrigin: Vec2,
+  predictionAgeMs: number,
+  correctionAgeMs: number,
+  correctionDurationMs = MIN_CORRECTION_MS,
+): Vec2 {
+  const prediction = extrapolateMotionPosition(motion, predictionAgeMs);
+  const safeDuration = Math.max(0, correctionDurationMs);
+  const progress = safeDuration === 0
+    ? 1
+    : clamp(
+        Number.isFinite(correctionAgeMs) ? correctionAgeMs / safeDuration : 1,
+        0,
+        1,
+      );
+  const eased = progress * progress * (3 - 2 * progress);
+  const retainedCorrection = 1 - eased;
+  return clampToWorld({
+    x: prediction.x + correctionOrigin.x * retainedCorrection,
+    y: prediction.y + correctionOrigin.y * retainedCorrection,
+  }, WORLD.width, WORLD.height);
 }
 
 function shouldExtrapolate(motion: MotionSnapshot) {
@@ -321,14 +401,29 @@ function currentPositions(tracks: Record<PlayerId, PositionTrack>): RenderPositi
   ])) as RenderPositions;
 }
 
+function copyCurrentPositions(
+  tracks: Record<PlayerId, PositionTrack>,
+  positions: RenderPositions,
+) {
+  for (const playerId of PLAYER_IDS) {
+    positions[playerId].x = tracks[playerId].displayed.x;
+    positions[playerId].y = tracks[playerId].displayed.y;
+  }
+}
+
 function markPublished(tracks: Record<PlayerId, PositionTrack>) {
   for (const playerId of PLAYER_IDS) {
-    tracks[playerId].published = { ...tracks[playerId].displayed };
+    tracks[playerId].published.x = tracks[playerId].displayed.x;
+    tracks[playerId].published.y = tracks[playerId].displayed.y;
   }
 }
 
 function distance(a: Vec2, b: Vec2) {
   return Math.hypot(b.x - a.x, b.y - a.y);
+}
+
+function clamp(value: number, minimum: number, maximum: number) {
+  return Math.min(maximum, Math.max(minimum, value));
 }
 
 function prefersReducedMotion() {

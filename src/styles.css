@@ -1296,6 +1296,61 @@ button { -webkit-tap-highlight-color: transparent; }
   cursor: default;
 }
 
+.touch-joystick {
+  --touch-joystick-radius: calc(60px * var(--control-scale));
+  --touch-joystick-thumb-radius: calc(21px * var(--control-scale));
+  --touch-joystick-thumb-x: 0px;
+  --touch-joystick-thumb-y: 0px;
+  position: absolute;
+  z-index: 5;
+  left: calc(env(safe-area-inset-left) + 5.25rem);
+  top: calc(100% - env(safe-area-inset-bottom) - 6rem);
+  width: calc(var(--touch-joystick-radius) * 2);
+  height: calc(var(--touch-joystick-radius) * 2);
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  pointer-events: none;
+  opacity: .42;
+  contain: layout paint;
+  filter: drop-shadow(0 .35rem .8rem rgba(0, 0, 0, .32));
+}
+
+.touch-joystick--active { opacity: .78; }
+
+.touch-joystick__ring,
+.touch-joystick__thumb {
+  position: absolute;
+  display: block;
+  border-radius: 50%;
+}
+
+.touch-joystick__ring {
+  inset: 0;
+  border: 2px solid rgba(188, 238, 255, .48);
+  background:
+    radial-gradient(circle, rgba(102, 207, 236, .08) 0 23%, transparent 24%),
+    rgba(7, 22, 31, .22);
+  box-shadow:
+    inset 0 0 1.2rem rgba(77, 195, 226, .1),
+    0 0 0 1px rgba(5, 15, 22, .24);
+}
+
+.touch-joystick__thumb {
+  left: 50%;
+  top: 50%;
+  width: calc(var(--touch-joystick-thumb-radius) * 2);
+  height: calc(var(--touch-joystick-thumb-radius) * 2);
+  transform: translate(
+    calc(-50% + var(--touch-joystick-thumb-x)),
+    calc(-50% + var(--touch-joystick-thumb-y))
+  );
+  border: 1px solid rgba(220, 248, 255, .68);
+  background: rgba(114, 213, 239, .3);
+  box-shadow:
+    inset 0 0 .75rem rgba(225, 251, 255, .14),
+    0 .2rem .5rem rgba(0, 0, 0, .22);
+}
+
 .world:focus-visible {
   outline: 2px solid rgba(105, 221, 244, .85);
   outline-offset: -3px;

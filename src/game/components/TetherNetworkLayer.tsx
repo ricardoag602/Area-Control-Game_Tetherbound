@@ -1,5 +1,18 @@
-import { memo, useId, type ReactElement } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  type ReactElement,
+  type RefObject,
+} from "react";
 import { GAME_RULES } from "../constants";
+import {
+  PRESENTATION_FRAME_PRIORITY,
+  subscribePresentationFrame,
+} from "../presentation/presentationClock";
 import {
   getAnchorPowerState,
   getAnchorPresence,
@@ -13,6 +26,7 @@ import type { Anchor, GameState, PlayerId, Vec2 } from "../types";
 interface TetherNetworkLayerProps {
   state: GameState;
   renderPositions: Readonly<Record<PlayerId, Vec2>>;
+  renderPositionsRef: RefObject<Readonly<Record<PlayerId, Vec2>>>;
   localPlayerId: PlayerId;
 }
 
@@ -34,11 +48,16 @@ interface ZoneOverlap {
 export function TetherNetworkLayer({
   state,
   renderPositions,
+  renderPositionsRef,
   localPlayerId,
 }: TetherNetworkLayerProps) {
   return (
     <g className="world__tether-layer">
-      <InteractionFilaments state={state} renderPositions={renderPositions} />
+      <InteractionFilaments
+        state={state}
+        renderPositions={renderPositions}
+        renderPositionsRef={renderPositionsRef}
+      />
       <NetworkNodeLayer state={state} localPlayerId={localPlayerId} />
     </g>
   );
@@ -400,7 +419,11 @@ function AnchorProgressRing({
 function InteractionFilaments({
   state,
   renderPositions,
-}: Pick<TetherNetworkLayerProps, "state" | "renderPositions">) {
+  renderPositionsRef,
+}: Pick<
+  TetherNetworkLayerProps,
+  "state" | "renderPositions" | "renderPositionsRef"
+>) {
   const hasActiveInteraction = state.activePlayerIds.some(
     (playerId) => state.baseCollapseProgressMs[playerId] > 0,
   ) || state.anchors.some(
@@ -426,8 +449,10 @@ function InteractionFilaments({
       <InteractionFilament
         key={`${defenderId}-base-collapse`}
         kind="collapse"
-        start={renderPositions[attackerId]}
+        startPlayerId={attackerId}
+        fallbackStart={renderPositions[attackerId]}
         end={defenderBase}
+        renderPositionsRef={renderPositionsRef}
       />,
     ];
   });
@@ -447,8 +472,10 @@ function InteractionFilaments({
             <InteractionFilament
               key={`${anchor.id}-${attackerId}-overload`}
               kind="overload"
-              start={renderPositions[attackerId]}
+              startPlayerId={attackerId}
+              fallbackStart={renderPositions[attackerId]}
               end={anchor.position}
+              renderPositionsRef={renderPositionsRef}
             />,
           ));
         }
@@ -461,8 +488,10 @@ function InteractionFilaments({
             <InteractionFilament
               key={`${anchor.id}-repair`}
               kind="repair"
-              start={renderPositions[anchor.owner]}
+              startPlayerId={anchor.owner}
+              fallbackStart={renderPositions[anchor.owner]}
               end={anchor.position}
+              renderPositionsRef={renderPositionsRef}
             />,
           );
         }
@@ -475,30 +504,77 @@ function InteractionFilaments({
 
 function InteractionFilament({
   kind,
-  start,
+  startPlayerId,
+  fallbackStart,
   end,
+  renderPositionsRef,
 }: {
   kind: "overload" | "repair" | "collapse";
-  start: Vec2;
+  startPlayerId: PlayerId;
+  fallbackStart: Vec2;
   end: Vec2;
+  renderPositionsRef: RefObject<Readonly<Record<PlayerId, Vec2>>>;
 }) {
-  const dx = end.x - start.x;
-  const dy = end.y - start.y;
-  const length = Math.hypot(dx, dy) || 1;
-  const bend = Math.min(1.1, length * 0.16);
-  const control = {
-    x: (start.x + end.x) / 2 - dy / length * bend,
-    y: (start.y + end.y) / 2 + dx / length * bend,
-  };
-  const path = `M ${start.x} ${start.y} Q ${control.x} ${control.y} ${end.x} ${end.y}`;
+  const glowRef = useRef<SVGPathElement>(null);
+  const coreRef = useRef<SVGPathElement>(null);
+  const endX = end.x;
+  const endY = end.y;
+  const path = getInteractionFilamentPath(fallbackStart, end);
+  const syncPath = useCallback(() => {
+    const start = renderPositionsRef.current[startPlayerId];
+    const livePath = interactionFilamentPathFromCoordinates(
+      start.x,
+      start.y,
+      endX,
+      endY,
+    );
+    if (glowRef.current?.getAttribute("d") !== livePath) {
+      glowRef.current?.setAttribute("d", livePath);
+    }
+    if (coreRef.current?.getAttribute("d") !== livePath) {
+      coreRef.current?.setAttribute("d", livePath);
+    }
+  }, [
+    endX,
+    endY,
+    renderPositionsRef,
+    startPlayerId,
+  ]);
+
+  // React can replace the declarative path on an authoritative snapshot.
+  // Restore the current frame-cadence endpoint before that snapshot paints.
+  useLayoutEffect(syncPath, [syncPath]);
+  useEffect(() => subscribePresentationFrame(
+    syncPath,
+    PRESENTATION_FRAME_PRIORITY.scene,
+  ), [syncPath]);
 
   return (
     <g className={`world__interaction-filament world__interaction-filament--${kind}`}>
-      <path className="world__interaction-filament-glow" d={path} />
-      <path className="world__interaction-filament-core" d={path} />
+      <path ref={glowRef} className="world__interaction-filament-glow" d={path} />
+      <path ref={coreRef} className="world__interaction-filament-core" d={path} />
       <circle className="world__interaction-endpoint" cx={end.x} cy={end.y} r=".65" />
     </g>
   );
+}
+
+export function getInteractionFilamentPath(start: Vec2, end: Vec2) {
+  return interactionFilamentPathFromCoordinates(start.x, start.y, end.x, end.y);
+}
+
+function interactionFilamentPathFromCoordinates(
+  startX: number,
+  startY: number,
+  endX: number,
+  endY: number,
+) {
+  const dx = endX - startX;
+  const dy = endY - startY;
+  const length = Math.hypot(dx, dy) || 1;
+  const bend = Math.min(1.1, length * 0.16);
+  const controlX = (startX + endX) / 2 - dy / length * bend;
+  const controlY = (startY + endY) / 2 + dx / length * bend;
+  return `M ${startX} ${startY} Q ${controlX} ${controlY} ${endX} ${endY}`;
 }
 
 function collectPoweredNodes(
@@ -542,7 +618,7 @@ function collectZoneOverlaps(networks: readonly (readonly NetworkNode[])[]): Zon
   return overlaps;
 }
 
-function sameStaticNetworkProps(
+export function sameStaticNetworkProps(
   previous: Pick<TetherNetworkLayerProps, "state" | "localPlayerId">,
   next: Pick<TetherNetworkLayerProps, "state" | "localPlayerId">,
 ) {
@@ -552,9 +628,28 @@ function sameStaticNetworkProps(
   const nextState = next.state;
   if (
     previousState.matchPhase !== nextState.matchPhase ||
-    previousState.anchors !== nextState.anchors ||
+    previousState.anchors.length !== nextState.anchors.length ||
     previousState.activePlayerIds.length !== nextState.activePlayerIds.length
   ) return false;
+
+  for (let index = 0; index < previousState.anchors.length; index += 1) {
+    const previousAnchor = previousState.anchors[index];
+    const nextAnchor = nextState.anchors[index];
+    if (
+      previousAnchor.id !== nextAnchor.id ||
+      previousAnchor.owner !== nextAnchor.owner ||
+      previousAnchor.position.x !== nextAnchor.position.x ||
+      previousAnchor.position.y !== nextAnchor.position.y ||
+      previousAnchor.parentId !== nextAnchor.parentId ||
+      previousAnchor.powered !== nextAnchor.powered ||
+      previousAnchor.disruptedUntilMs !== nextAnchor.disruptedUntilMs ||
+      previousAnchor.protectedUntilMs !== nextAnchor.protectedUntilMs ||
+      previousAnchor.overloadProgress !== nextAnchor.overloadProgress ||
+      previousAnchor.repairProgress !== nextAnchor.repairProgress ||
+      getAnchorPowerState(previousAnchor, previousState.elapsedMs) !==
+        getAnchorPowerState(nextAnchor, nextState.elapsedMs)
+    ) return false;
+  }
 
   for (let index = 0; index < previousState.activePlayerIds.length; index += 1) {
     const playerId = previousState.activePlayerIds[index];
@@ -571,10 +666,5 @@ function sameStaticNetworkProps(
     ) return false;
   }
 
-  // Timed disruption/shield transitions can change presentation even when the
-  // immutable anchor collection itself is unchanged.
-  return previousState.anchors.every((anchor) =>
-    getAnchorPowerState(anchor, previousState.elapsedMs) ===
-      getAnchorPowerState(anchor, nextState.elapsedMs)
-  );
+  return true;
 }

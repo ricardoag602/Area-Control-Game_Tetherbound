@@ -26,7 +26,7 @@ export const GUIDED_SETUP_PRESENTATIONS: readonly StepPresentation[] = [
     label: "Move",
     title: "Move into the frontier",
     instruction: "Travel a few steps away from your starting point.",
-    touchHint: "Drag anywhere",
+    touchHint: "Touch anywhere · drag to steer · release to stop",
     keyboardHint: "W/S move · A/D turn",
   },
   {
@@ -34,7 +34,7 @@ export const GUIDED_SETUP_PRESENTATIONS: readonly StepPresentation[] = [
     label: "Burst",
     title: "Launch a charged burst",
     instruction: "Build power, then release to rocket forward.",
-    touchHint: "Tap · hold nearby · release",
+    touchHint: "Quick tap · hold nearby · drag to aim · release",
     keyboardHint: "Tap W/S · hold again · release",
   },
   {
@@ -50,7 +50,7 @@ export const GUIDED_SETUP_PRESENTATIONS: readonly StepPresentation[] = [
     label: "Collect 3",
     title: "Collect 3 gold materials",
     instruction: "Follow the gold markers until all 3 recipe slots are filled.",
-    touchHint: "Drag toward the gold signal",
+    touchHint: "Steer the joystick toward the gold signal",
     keyboardHint: "Drive over the gold signal",
   },
   {

@@ -16,6 +16,7 @@ describe("MatchScreen 3D readiness gate", () => {
   it("shows an accessible launch state instead of an initial gameplay frame", () => {
     const markup = renderToStaticMarkup(
       <MatchScreen
+        alwaysShowJoystick={false}
         audioEnabled={false}
         tutorialEnabled={false}
         state={createInitialGameState("match-presentation-gate")}
