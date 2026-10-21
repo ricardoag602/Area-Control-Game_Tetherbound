@@ -41,6 +41,36 @@ describe("terrain illumination", () => {
     ]);
   });
 
+  it("reuses zones while only fast-changing match state changes", () => {
+    const state = createInitialGameState("terrain-cache", 2);
+    state.anchors = [anchor("powered", "player", true)];
+    const first = collectTerrainLightZones(state);
+
+    const movementOnly = {
+      ...state,
+      elapsedMs: state.elapsedMs + 50,
+      players: {
+        ...state.players,
+        player: {
+          ...state.players.player,
+          astronaut: {
+            ...state.players.player.astronaut,
+            position: { x: 200, y: 200 },
+          },
+        },
+      },
+    };
+
+    expect(collectTerrainLightZones(movementOnly)).toBe(first);
+    expect(collectTerrainLightZones({
+      ...movementOnly,
+      anchors: movementOnly.anchors.map((item) => ({
+        ...item,
+        powered: false,
+      })),
+    })).not.toBe(first);
+  });
+
   it("matches the feathered reveal from daylight to dusk", () => {
     const zone: TerrainLightZone = {
       id: "base-player",

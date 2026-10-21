@@ -122,6 +122,42 @@ export interface ThreeGameObjectRuntime {
   readonly salvage: Map<string, ThreeGameObjectInstance>;
 }
 
+/**
+ * Captures only state that changes the membership, placement, or material state
+ * of the static Three.js objects. Movement and the match clock are deliberately
+ * excluded except when a timed anchor state crosses a visible boundary.
+ */
+export function getThreeGameObjectReconciliationKey(
+  state: Pick<GameState, "activePlayerIds" | "players" | "anchors" | "salvage" | "elapsedMs">,
+) {
+  const activePlayerIds = [...state.activePlayerIds].sort();
+  const activePlayers = new Set(activePlayerIds);
+  const bases = activePlayerIds.map((playerId) => {
+    const position = state.players[playerId].basePosition;
+    return [playerId, finiteCoordinate(position.x), finiteCoordinate(position.y)];
+  });
+  const anchors = state.anchors
+    .filter((anchor) => activePlayers.has(anchor.owner))
+    .map((anchor) => [
+      anchor.id,
+      anchor.owner,
+      finiteCoordinate(anchor.position.x),
+      finiteCoordinate(anchor.position.y),
+      getAnchorPowerState(anchor, state.elapsedMs),
+    ] as const)
+    .sort((left, right) => left[0].localeCompare(right[0]));
+  const salvage = state.salvage
+    .filter((deposit) => !deposit.collected)
+    .map((deposit) => [
+      deposit.id,
+      finiteCoordinate(deposit.position.x),
+      finiteCoordinate(deposit.position.y),
+    ] as const)
+    .sort((left, right) => left[0].localeCompare(right[0]));
+
+  return JSON.stringify([activePlayerIds, bases, anchors, salvage]);
+}
+
 export async function loadThreeGameObjectAssets(
   playerIds: readonly PlayerId[],
 ): Promise<ThreeGameObjectAssets> {
@@ -556,4 +592,8 @@ function disposeGlTf(asset: GLTF) {
   for (const geometry of geometries) geometry.dispose();
   for (const material of materials) material.dispose();
   for (const texture of textures) texture.dispose();
+}
+
+function finiteCoordinate(value: number): number | null {
+  return Number.isFinite(value) ? value : null;
 }

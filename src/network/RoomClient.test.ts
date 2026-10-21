@@ -264,7 +264,7 @@ describe("RoomClient Sites HTTP lifecycle", () => {
     client.setReady(true);
 
     api.reject();
-    await vi.advanceTimersByTimeAsync(500);
+    await vi.advanceTimersByTimeAsync(0);
     expect(client.getSnapshot().connection).toBe("reconnecting");
 
     api.respond([pongMessage(0)]);
@@ -348,6 +348,152 @@ describe("RoomClient Sites HTTP lifecycle", () => {
 
     expect(api.calls).toHaveLength(3);
     expect((bodyOf(api.calls[2]) as { commands: ClientMessage[] }).commands).toHaveLength(1);
+  });
+
+  it("publishes at most once for a sync envelope with state, room, and latency", async () => {
+    const api = createApi();
+    api.respond([welcomeMessage()]);
+    const client = createClient(api);
+
+    client.createRoom("Host", 2);
+    await flushPromises();
+    const listener = vi.fn();
+    client.subscribe(listener);
+
+    api.respond([
+      roomStateMessage("playing", 2),
+      gameStateMessage(),
+      pongMessage(0),
+    ]);
+    client.setReady(true);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(client.getSnapshot()).toMatchObject({
+      connection: "connected",
+      room: { phase: "playing", revision: 2 },
+      stateVersion: 7,
+    });
+  });
+
+  it("does not publish duplicate room or game versions and suppresses no-op updates", async () => {
+    const api = createApi();
+    api.respond([welcomeMessage(), gameStateMessage()]);
+    const client = createClient(api);
+
+    client.createRoom("Host", 2);
+    await flushPromises();
+    const originalRoom = client.getSnapshot().room;
+    const originalState = client.getSnapshot().gameState;
+    const listener = vi.fn();
+    client.subscribe(listener);
+
+    api.respond([
+      roomStateMessage("lobby", 1),
+      gameStateMessage(),
+      pongMessage(0),
+    ]);
+    client.setReady(true);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(listener).not.toHaveBeenCalled();
+    expect(client.getSnapshot().room).toBe(originalRoom);
+    expect(client.getSnapshot().gameState).toBe(originalState);
+  });
+
+  it("smooths every RTT sample while throttling visible latency publications", async () => {
+    const api = createApi();
+    api.respond([welcomeMessage({ room: roomStateMessage("playing", 2).room })]);
+    const client = createClient(api);
+
+    client.createRoom("Host", 2);
+    await flushPromises();
+    const listener = vi.fn();
+    client.subscribe(listener);
+
+    for (let poll = 1; poll <= 5; poll += 1) {
+      api.respond([pongMessage(poll * 125 - 20)]);
+      await vi.advanceTimersByTimeAsync(125);
+    }
+    expect(listener).not.toHaveBeenCalled();
+    expect(client.getSnapshot().latencyMs).toBe(0);
+
+    api.respond([pongMessage(6 * 125 - 20)]);
+    await vi.advanceTimersByTimeAsync(125);
+
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(client.getSnapshot().latencyMs).toBeGreaterThan(0);
+  });
+
+  it("coalesces only adjacent queued analog inputs while preserving command barriers", async () => {
+    const api = createApi();
+    api.respond([welcomeMessage({ room: roomStateMessage("playing", 2).room })]);
+    const client = createClient(api, { requestTimeoutMs: 5_000 });
+
+    client.createRoom("Host", 2);
+    await flushPromises();
+    const deferred = api.defer();
+    await vi.advanceTimersByTimeAsync(125);
+
+    client.sendMovementCommand({ type: "walk_direction", direction: { x: 1, y: 0 } });
+    client.sendMovementCommand({ type: "walk_direction", direction: { x: 0, y: 1 } });
+    await vi.advanceTimersByTimeAsync(50);
+    client.sendMovementCommand({ type: "charge_direction", direction: { x: 1, y: 0 } });
+    client.sendMovementCommand({ type: "charge_direction", direction: { x: 0, y: -1 } });
+    await vi.advanceTimersByTimeAsync(50);
+    client.sendMovementCommand({ type: "tank_drive", throttle: 1, steering: -1 });
+    client.sendMovementCommand({ type: "tank_drive", throttle: 1, steering: 1 });
+    client.sendMovementCommand({ type: "tank_charge", throttle: 1, steering: -1 });
+    client.sendMovementCommand({ type: "tank_charge", throttle: 1, steering: 1 });
+    await vi.advanceTimersByTimeAsync(50);
+    client.sendMovementCommand({ type: "stop" });
+    client.sendMovementCommand({ type: "release_direction", direction: { x: -1, y: 0 } });
+    client.deployAnchor();
+    client.setReady(true);
+    client.requestRematch();
+
+    api.respond([pongMessage(275)]);
+    deferred.resolve(apiResponse([pongMessage(125)]));
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(0);
+
+    const commands = (bodyOf(api.calls[2]) as { commands: ClientMessage[] }).commands;
+    expect(commands.slice(0, 6)).toEqual([
+      { type: "movement_input", seq: 2, command: { type: "walk_direction", direction: { x: 0, y: 1 } } },
+      { type: "movement_input", seq: 4, command: { type: "charge_direction", direction: { x: 0, y: -1 } } },
+      { type: "movement_input", seq: 6, command: { type: "tank_drive", throttle: 1, steering: 1 } },
+      { type: "movement_input", seq: 8, command: { type: "tank_charge", throttle: 1, steering: 1 } },
+      { type: "movement_input", seq: 9, command: { type: "stop" } },
+      { type: "movement_input", seq: 10, command: { type: "release_direction", direction: { x: -1, y: 0 } } },
+    ]);
+    expect(commands[6]).toMatchObject({ type: "deploy_anchor" });
+    expect(commands.slice(7)).toEqual([
+      { type: "set_ready", ready: true },
+      { type: "request_rematch" },
+    ]);
+  });
+
+  it("flushes ready and rematch commands immediately", async () => {
+    const api = createApi();
+    api.respond([welcomeMessage()]);
+    const client = createClient(api);
+
+    client.createRoom("Host", 2);
+    await flushPromises();
+
+    api.respond([pongMessage(0)]);
+    client.setReady(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect((bodyOf(api.calls[1]) as { commands: ClientMessage[] }).commands).toEqual([
+      { type: "set_ready", ready: true },
+    ]);
+
+    api.respond([pongMessage(0)]);
+    client.requestRematch();
+    await vi.advanceTimersByTimeAsync(0);
+    expect((bodyOf(api.calls[2]) as { commands: ClientMessage[] }).commands).toEqual([
+      { type: "request_rematch" },
+    ]);
   });
 
   it("resumes from tab-scoped sessionStorage through the join endpoint", async () => {

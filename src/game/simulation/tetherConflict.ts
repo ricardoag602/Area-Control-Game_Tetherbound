@@ -30,10 +30,7 @@ export function advanceTetherConflict(
   const safeDeltaSeconds = Number.isFinite(deltaSeconds)
     ? Math.max(0, deltaSeconds)
     : 0;
-  let anchors = resolveAnchorPower(
-    state.anchors.map((anchor) => normalizeAnchor(anchor, state.elapsedMs)),
-    state.elapsedMs,
-  );
+  let anchors = resolveAnchorPower(state.anchors, state.elapsedMs);
   const powerBeforeInteraction = new Map(
     anchors.map((anchor) => [anchor.id, anchor.powered]),
   );
@@ -47,7 +44,7 @@ export function advanceTetherConflict(
   const activePlayers = new Set(activePlayerIds);
   const creditedDisruptors = new Set<PlayerId>();
 
-  anchors = anchors.map((anchor) => {
+  anchors = mapAnchorsPreservingIdentity(anchors, (anchor) => {
     const presence = getAnchorPresence(
       interactionState,
       anchor,
@@ -72,33 +69,30 @@ export function advanceTetherConflict(
           );
 
       if (repairProgress >= 1) {
-        return {
-          ...anchor,
+        return updateAnchor(anchor, {
           disruptedUntilMs: null,
           protectedUntilMs:
             state.elapsedMs + GAME_RULES.anchorReactivationShieldMs,
           overloadProgress: 0,
           repairProgress: 0,
-        };
+        });
       }
 
-      return {
-        ...anchor,
+      return updateAnchor(anchor, {
         overloadProgress: 0,
         repairProgress,
-      };
+      });
     }
 
     if (!anchor.powered) {
-      return {
-        ...anchor,
+      return updateAnchor(anchor, {
         overloadProgress: decay(
           anchor.overloadProgress,
           GAME_RULES.anchorOverloadDecayPerSecond,
           safeDeltaSeconds,
         ),
         repairProgress: 0,
-      };
+      });
     }
 
     let overloadProgress = anchor.overloadProgress;
@@ -124,42 +118,48 @@ export function advanceTetherConflict(
           creditedDisruptors.add(attackerId);
         }
       }
-      return {
-        ...anchor,
+      return updateAnchor(anchor, {
         powered: false,
         disruptedUntilMs:
           state.elapsedMs + GAME_RULES.anchorDisruptionDurationMs,
         overloadProgress: 0,
         repairProgress: 0,
-      };
+      });
     }
 
-    return {
-      ...anchor,
+    return updateAnchor(anchor, {
       overloadProgress,
       repairProgress: 0,
-    };
+    });
   });
 
+  const resolvedAnchors = resolveAnchorPower(anchors, state.elapsedMs);
+  const tetherDisruptions = updateTetherDisruptions(
+    state.tetherDisruptions,
+    creditedDisruptors,
+  );
+  if (
+    resolvedAnchors === state.anchors &&
+    tetherDisruptions === state.tetherDisruptions
+  ) {
+    return state;
+  }
   return {
     ...state,
-    anchors: resolveAnchorPower(anchors, state.elapsedMs),
-    tetherDisruptions: Object.fromEntries(
-      PLAYER_IDS.map((playerId) => [
-        playerId,
-        Math.max(0, Math.floor(state.tetherDisruptions?.[playerId] ?? 0)) +
-          Number(creditedDisruptors.has(playerId)),
-      ]),
-    ) as Record<PlayerId, number>,
+    anchors: resolvedAnchors,
+    tetherDisruptions,
   };
 }
 
 /** Recomputes every descendant so a severed branch cannot remain safe. */
 export function resolveAnchorPower(
-  anchors: readonly Anchor[],
+  anchors: Anchor[],
   elapsedMs: number,
 ): Anchor[] {
-  const normalized = anchors.map((anchor) => normalizeAnchor(anchor, elapsedMs));
+  const normalized = mapAnchorsPreservingIdentity(
+    anchors,
+    (anchor) => normalizeAnchor(anchor, elapsedMs),
+  );
   const byId = new Map(normalized.map((anchor) => [anchor.id, anchor]));
   const memo = new Map<string, boolean>();
 
@@ -187,10 +187,10 @@ export function resolveAnchorPower(
     return powered;
   }
 
-  return normalized.map((anchor) => ({
-    ...anchor,
-    powered: isPowered(anchor, new Set()),
-  }));
+  return mapAnchorsPreservingIdentity(normalized, (anchor) => updateAnchor(
+    anchor,
+    { powered: isPowered(anchor, new Set()) },
+  ));
 }
 
 export function getAnchorPowerState(
@@ -317,15 +317,49 @@ function normalizeAnchor(anchor: Anchor, elapsedMs: number): Anchor {
       disruptionDeadline + GAME_RULES.anchorReactivationShieldMs > elapsedMs
     ? disruptionDeadline + GAME_RULES.anchorReactivationShieldMs
     : null;
-  return {
-    ...anchor,
+  return updateAnchor(anchor, {
     disruptedUntilMs,
     protectedUntilMs: existingProtection ?? recoveryProtection,
     overloadProgress: clamp01(anchor.overloadProgress ?? 0),
     repairProgress: disruptedUntilMs
       ? clamp01(anchor.repairProgress ?? 0)
       : 0,
-  };
+  });
+}
+
+function mapAnchorsPreservingIdentity(
+  anchors: Anchor[],
+  mapAnchor: (anchor: Anchor) => Anchor,
+) {
+  let changed = false;
+  const mapped = anchors.map((anchor) => {
+    const next = mapAnchor(anchor);
+    if (next !== anchor) changed = true;
+    return next;
+  });
+  return changed ? mapped : anchors;
+}
+
+function updateAnchor(anchor: Anchor, patch: Partial<Anchor>) {
+  for (const key of Object.keys(patch) as Array<keyof Anchor>) {
+    if (anchor[key] !== patch[key]) return { ...anchor, ...patch };
+  }
+  return anchor;
+}
+
+function updateTetherDisruptions(
+  current: Record<PlayerId, number>,
+  creditedDisruptors: ReadonlySet<PlayerId>,
+) {
+  let changed = false;
+  const next = {} as Record<PlayerId, number>;
+  for (const playerId of PLAYER_IDS) {
+    const value = Math.max(0, Math.floor(current?.[playerId] ?? 0)) +
+      Number(creditedDisruptors.has(playerId));
+    next[playerId] = value;
+    if (value !== current?.[playerId]) changed = true;
+  }
+  return changed ? next : current;
 }
 
 function isParentPowered(

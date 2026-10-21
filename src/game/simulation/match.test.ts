@@ -467,6 +467,20 @@ describe("Tetherbound simulation", () => {
     expect(next.players.rival.astronaut.carriedSalvage).toBe(1);
   });
 
+  it("preserves salvage identity when a simulation tick collects nothing", () => {
+    const state = createInitialGameState("salvage-identity");
+    state.salvage = [{
+      id: "far-away",
+      position: { x: 175, y: 175 },
+      collected: false,
+    }];
+
+    const next = advanceMatch(state, {}, 0.05);
+
+    expect(next.salvage).toBe(state.salvage);
+    expect(next.salvage[0]).toBe(state.salvage[0]);
+  });
+
   it("alternates exact-distance salvage ties between player slots", () => {
     const state = createInitialGameState();
     state.salvage = [

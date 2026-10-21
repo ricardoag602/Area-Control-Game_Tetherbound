@@ -17,6 +17,37 @@ import {
 } from "./tetherNetwork";
 
 describe("competitive tether conflict", () => {
+  it("preserves static anchor and disruption identity when conflict is unchanged", () => {
+    const state = conflictState([
+      anchor("root", "player", { x: 100, y: 100 }),
+    ]);
+    state.players.player.astronaut.position = { x: 20, y: 330 };
+    state.players.rival.astronaut.position = { x: 180, y: 20 };
+
+    const next = advanceTetherConflict(state, 0.05);
+
+    expect(next).toBe(state);
+    expect(next.anchors).toBe(state.anchors);
+    expect(next.anchors[0]).toBe(state.anchors[0]);
+    expect(next.tetherDisruptions).toBe(state.tetherDisruptions);
+  });
+
+  it("replaces only anchors whose conflict presentation changes", () => {
+    const state = conflictState([
+      anchor("target", "player", { x: 100, y: 100 }),
+      anchor("untouched", "player", { x: 140, y: 100 }),
+    ]);
+    state.players.player.astronaut.position = { x: 20, y: 330 };
+    state.players.rival.astronaut.position = { x: 100, y: 100 };
+
+    const next = advanceTetherConflict(state, 0.05);
+
+    expect(next.anchors).not.toBe(state.anchors);
+    expect(next.anchors[0]).not.toBe(state.anchors[0]);
+    expect(next.anchors[1]).toBe(state.anchors[1]);
+    expect(next.tetherDisruptions).toBe(state.tetherDisruptions);
+  });
+
   it("overloads one enemy anchor only after the full unopposed hold", () => {
     let state = conflictState([
       anchor("root", "player", { x: 100, y: 100 }),

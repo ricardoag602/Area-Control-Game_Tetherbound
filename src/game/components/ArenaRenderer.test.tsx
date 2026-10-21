@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { createInitialGameState } from "../state";
 import {
   ArenaRenderer,
+  calculateTutorialTargetPresentation,
   getArenaPresentationState,
 } from "./ArenaRenderer";
 
@@ -33,6 +34,29 @@ describe("getArenaPresentationState", () => {
 
     expect(getArenaPresentationState(failed)).toBe("failed");
     expect(getArenaPresentationState({ ...failed, compatibilityMode: true })).toBe("fallback");
+  });
+});
+
+describe("calculateTutorialTargetPresentation", () => {
+  const camera = { x: 100, y: 50, width: 80, height: 60 };
+
+  it("keeps a visible target at its world position", () => {
+    expect(calculateTutorialTargetPresentation({ x: 140, y: 80 }, camera)).toEqual({
+      position: { x: 140, y: 80 },
+      offscreen: false,
+      headingDegrees: 0,
+    });
+  });
+
+  it("clamps an offscreen target and points the cue toward its live position", () => {
+    const presentation = calculateTutorialTargetPresentation(
+      { x: 220, y: 20 },
+      camera,
+    );
+
+    expect(presentation.position).toEqual({ x: 170, y: 60 });
+    expect(presentation.offscreen).toBe(true);
+    expect(presentation.headingDegrees).toBeCloseTo(-38.66, 2);
   });
 });
 
