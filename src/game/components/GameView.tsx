@@ -7,17 +7,19 @@ import { PostMatchScene } from "./PostMatchScene";
 import type { ArenaPresentationState } from "./ArenaRenderer";
 
 interface GameViewProps {
+  alwaysShowJoystick: boolean;
   audioEnabled: boolean;
   tutorialEnabled: boolean;
   onLeave: () => void;
 }
 
-export function GameView({ audioEnabled, tutorialEnabled, onLeave }: GameViewProps) {
+export function GameView({ alwaysShowJoystick, audioEnabled, tutorialEnabled, onLeave }: GameViewProps) {
   const [matchNumber, setMatchNumber] = useState(0);
 
   return (
     <LocalMatch
       key={matchNumber}
+      alwaysShowJoystick={alwaysShowJoystick}
       audioEnabled={audioEnabled}
       tutorialEnabled={tutorialEnabled}
       onLeave={onLeave}
@@ -27,11 +29,13 @@ export function GameView({ audioEnabled, tutorialEnabled, onLeave }: GameViewPro
 }
 
 function LocalMatch({
+  alwaysShowJoystick,
   audioEnabled,
   tutorialEnabled,
   onLeave,
   onRestart,
 }: {
+  alwaysShowJoystick: boolean;
   audioEnabled: boolean;
   tutorialEnabled: boolean;
   onLeave: () => void;
@@ -68,6 +72,7 @@ function LocalMatch({
       localPlayerId="player"
       playerNames={{ rival: "Bot" }}
       statusText="Mechanics sandbox"
+      alwaysShowJoystick={alwaysShowJoystick}
       audioEnabled={audioEnabled}
       tutorialEnabled={tutorialEnabled}
       interpolatePositions={true}

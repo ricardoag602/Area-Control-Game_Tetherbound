@@ -103,4 +103,28 @@ describe("ArenaRenderer player layering", () => {
     expect(interactiveWorld).not.toContain("world__tutorial-cue");
     expect(interactiveWorld).not.toContain("world__charge-feedback");
   });
+
+  it("only keeps an idle touch joystick rendered when the preference is enabled", () => {
+    const state = createInitialGameState("persistent-touch-joystick");
+    const hiddenMarkup = renderToStaticMarkup(
+      <ArenaRenderer
+        state={state}
+        localPlayerId="player"
+        onMovementCommand={() => undefined}
+      />,
+    );
+    const visibleMarkup = renderToStaticMarkup(
+      <ArenaRenderer
+        state={state}
+        localPlayerId="player"
+        alwaysShowTouchJoystick
+        onMovementCommand={() => undefined}
+      />,
+    );
+
+    expect(hiddenMarkup).not.toContain("touch-joystick");
+    expect(visibleMarkup).toContain("touch-joystick touch-joystick--idle");
+    expect(visibleMarkup).toContain("touch-joystick--default");
+    expect(visibleMarkup).toContain("touch-joystick__thumb");
+  });
 });

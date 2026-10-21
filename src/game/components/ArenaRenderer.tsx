@@ -6,7 +6,9 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type PointerEvent,
+  type RefObject,
 } from "react";
 import { GAME_RULES, WORLD } from "../constants";
 import { normalizeOxygen } from "../presentation/oxygen";
@@ -24,13 +26,18 @@ import { DROPPED_MATERIAL_SPRITE } from "../presentation/objectSprites";
 import { MOVEMENT_RULES } from "../movement/movement";
 import { getEnvironmentModifiers } from "../simulation/environment";
 import {
-  getScreenTouchChargeInput,
   getTankChargeInput,
   isTouchBoostDoubleTap,
   isTouchBoostTap,
   usesDirectTouchCharge,
   type TouchBoostTap,
 } from "../input/touchCharge";
+import {
+  getTouchJoystickDirection,
+  getTouchJoystickThumbOffset,
+  TOUCH_JOYSTICK_RADIUS_PX,
+  TOUCH_JOYSTICK_THUMB_RADIUS_PX,
+} from "../input/touchJoystick";
 import {
   canArmBoostCharge,
   canPrepareTouchBoostCharge,
@@ -84,6 +91,7 @@ interface ArenaRendererProps {
   oxygenZoomMultiplier?: number;
   cameraMode?: "follow" | "overview";
   onOverviewSettled?: () => void;
+  alwaysShowTouchJoystick?: boolean;
   tutorialStep?: TutorialStepId | null;
   tutorialTarget?: Vec2 | null;
   compatibilityMode?: boolean;
@@ -109,6 +117,14 @@ interface ActiveGesture {
   latestClient: Vec2;
 }
 
+interface TouchJoystickPresentation {
+  origin: Vec2;
+  thumbOffset: Vec2;
+  radius: number;
+  thumbRadius: number;
+  active: boolean;
+}
+
 export function ArenaRenderer({
   state,
   localPlayerId,
@@ -118,6 +134,7 @@ export function ArenaRenderer({
   oxygenZoomMultiplier = 1,
   cameraMode = "follow",
   onOverviewSettled,
+  alwaysShowTouchJoystick = false,
   tutorialStep = null,
   tutorialTarget = null,
   compatibilityMode = false,
@@ -157,6 +174,9 @@ export function ArenaRenderer({
   const lastTouchTapRef = useRef<TouchBoostTap | null>(null);
   const lastTouchChargeInputRef = useRef<TankInput | null>(null);
   const [touchChargePreview, setTouchChargePreview] = useState<TankInput | null>(null);
+  const [touchJoystick, setTouchJoystick] =
+    useState<TouchJoystickPresentation | null>(null);
+  const touchJoystickElementRef = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     renderPositionsRef.current = renderPositions;
     cameraRef.current = camera;
@@ -194,6 +214,16 @@ export function ArenaRenderer({
     chargeTimerRef.current = null;
   }, []);
 
+  const settleTouchJoystick = useCallback(() => {
+    setTouchJoystickThumbOffset(touchJoystickElementRef.current, { x: 0, y: 0 });
+    setTouchJoystick((current) => {
+      if (!alwaysShowTouchJoystick) return null;
+      return current
+        ? { ...current, thumbOffset: { x: 0, y: 0 }, active: false }
+        : null;
+    });
+  }, [alwaysShowTouchJoystick]);
+
   const emitPointerCharge = useCallback((
     gesture: ActiveGesture,
     astronaut: AstronautState,
@@ -219,6 +249,7 @@ export function ArenaRenderer({
 
     setChargeIntentActive(false);
     gestureRef.current = null;
+    settleTouchJoystick();
     clearChargeTimer();
     lastTouchChargeInputRef.current = null;
     setTouchChargePreview(null);
@@ -226,7 +257,7 @@ export function ArenaRenderer({
       gesture.element.releasePointerCapture(gesture.pointerId);
     }
     if (sendStop) commandRef.current({ type: "stop" });
-  }, [clearChargeTimer]);
+  }, [clearChargeTimer, settleTouchJoystick]);
 
   const cancelGesture = useCallback(() => {
     lastTouchTapRef.current = null;
@@ -358,9 +389,21 @@ export function ArenaRenderer({
       originClient: clientPoint,
       latestClient: clientPoint,
     };
+    if (directTouchCharge) {
+      setTouchJoystick(createTouchJoystickPresentation(
+        element,
+        clientPoint,
+        clientPoint,
+        true,
+      ));
+    }
 
     if (!canCharge) {
-      commandRef.current({ type: "walk", target });
+      commandRef.current(
+        directTouchCharge
+          ? { type: "stop" }
+          : { type: "walk", target },
+      );
       return;
     }
 
@@ -368,7 +411,7 @@ export function ArenaRenderer({
     // to the astronaut-to-finger vector using the shared tank-charge physics.
     commandRef.current(
       directTouchCharge
-        ? { type: "walk", target }
+        ? { type: "stop" }
         : { type: "tank_drive", throttle: 1, steering: 0 },
     );
     chargeTimerRef.current = window.setTimeout(() => {
@@ -387,14 +430,18 @@ export function ArenaRenderer({
       }
       if (touchActivation === "blocked") {
         gesture.mode = "walking";
-        commandRef.current({
-          type: "walk",
-          target: clientToWorld(
-            gesture.element,
-            gesture.latestClient.x,
-            gesture.latestClient.y,
-          ),
-        });
+        commandRef.current(
+          gesture.chargeControl === "direct"
+            ? touchJoystickWalkCommand(gesture)
+            : {
+                type: "walk",
+                target: clientToWorld(
+                  gesture.element,
+                  gesture.latestClient.x,
+                  gesture.latestClient.y,
+                ),
+              },
+        );
         return;
       }
       gesture.mode = "charging";
@@ -409,8 +456,15 @@ export function ArenaRenderer({
 
     event.preventDefault();
     const clientPoint = { x: event.clientX, y: event.clientY };
-    const target = clientToWorld(gesture.element, event.clientX, event.clientY);
     gesture.latestClient = clientPoint;
+    if (gesture.chargeControl === "direct") {
+      updateTouchJoystickThumb(
+        touchJoystickElementRef.current,
+        gesture.element,
+        gesture.originClient,
+        clientPoint,
+      );
+    }
 
     if (gesture.mode === "charge-candidate") {
       const gestureSlop = gesture.chargeControl === "direct"
@@ -419,7 +473,14 @@ export function ArenaRenderer({
       if (pointDistance(clientPoint, gesture.originClient) <= gestureSlop) return;
       clearChargeTimer();
       gesture.mode = "walking";
-      commandRef.current({ type: "walk", target });
+      commandRef.current(
+        gesture.chargeControl === "direct"
+          ? touchJoystickWalkCommand(gesture)
+          : {
+              type: "walk",
+              target: clientToWorld(gesture.element, event.clientX, event.clientY),
+            },
+      );
       return;
     }
 
@@ -430,7 +491,14 @@ export function ArenaRenderer({
 
     if (gesture.mode === "charge-primed") return;
 
-    commandRef.current({ type: "walk", target });
+    commandRef.current(
+      gesture.chargeControl === "direct"
+        ? touchJoystickWalkCommand(gesture)
+        : {
+            type: "walk",
+            target: clientToWorld(gesture.element, event.clientX, event.clientY),
+          },
+    );
   }
 
   function finishGesture(event: PointerEvent<SVGSVGElement>) {
@@ -466,6 +534,7 @@ export function ArenaRenderer({
       );
 
     gestureRef.current = null;
+    settleTouchJoystick();
     clearChargeTimer();
     lastTouchChargeInputRef.current = null;
     setChargeIntentActive(false);
@@ -542,7 +611,7 @@ export function ArenaRenderer({
         role="application"
         tabIndex={interactionDisabled ? -1 : 0}
         aria-roledescription="game arena"
-        aria-label="Tetherbound game arena. Keyboard controls stay active throughout the match. Use W and S or the up and down arrows to drive forward and reverse. Use A and D or the left and right arrows to turn. Tap W or S, then press and hold that same key to charge; release it to burst. Press T to deploy a tether and Escape to cancel keyboard movement. Drag to move with a pointer. On a touch screen, tap once, then press and hold nearby to charge toward your finger; release to burst."
+        aria-label="Tetherbound game arena. Keyboard controls stay active throughout the match. Use W and S or the up and down arrows to drive forward and reverse. Use A and D or the left and right arrows to turn. Tap W or S, then press and hold that same key to charge; release it to burst. Press T to deploy a tether and Escape to cancel keyboard movement. Drag to move with a mouse. On a touch screen, touch anywhere and drag the floating joystick to move, then release to stop. Tap once, then press and hold nearby to charge; drag the joystick to steer and release to burst."
         aria-keyshortcuts="W A S D T ArrowUp ArrowDown ArrowLeft ArrowRight"
         aria-disabled={interactionDisabled}
         onContextMenu={(event) => event.preventDefault()}
@@ -593,8 +662,124 @@ export function ArenaRenderer({
           refillSerial={oxygenRefillSerial}
         />
       </svg>
+      <TouchJoystick
+        elementRef={touchJoystickElementRef}
+        presentation={touchJoystick?.active || alwaysShowTouchJoystick
+          ? touchJoystick
+          : null}
+        alwaysVisible={alwaysShowTouchJoystick}
+      />
     </div>
   );
+}
+
+function TouchJoystick({
+  elementRef,
+  presentation,
+  alwaysVisible,
+}: {
+  elementRef: RefObject<HTMLDivElement | null>;
+  presentation: TouchJoystickPresentation | null;
+  alwaysVisible: boolean;
+}) {
+  if (!presentation && !alwaysVisible) return null;
+
+  const style = {
+    ...(presentation
+      ? {
+          left: presentation.origin.x,
+          top: presentation.origin.y,
+          "--touch-joystick-radius": `${presentation.radius}px`,
+          "--touch-joystick-thumb-radius": `${presentation.thumbRadius}px`,
+          "--touch-joystick-thumb-x": `${presentation.thumbOffset.x}px`,
+          "--touch-joystick-thumb-y": `${presentation.thumbOffset.y}px`,
+        }
+      : {}),
+  } as CSSProperties;
+  const active = presentation?.active ?? false;
+
+  return (
+    <div
+      ref={elementRef}
+      className={`touch-joystick${active ? " touch-joystick--active" : " touch-joystick--idle"}${presentation ? "" : " touch-joystick--default"}`}
+      style={style}
+      aria-hidden="true"
+    >
+      <span className="touch-joystick__ring" />
+      <span className="touch-joystick__thumb" />
+    </div>
+  );
+}
+
+function updateTouchJoystickThumb(
+  joystick: HTMLDivElement | null,
+  arena: SVGSVGElement,
+  originClient: Vec2,
+  currentClient: Vec2,
+) {
+  if (!joystick) return;
+  const { radius, thumbRadius } = getTouchJoystickDimensions(arena);
+  setTouchJoystickThumbOffset(
+    joystick,
+    getTouchJoystickThumbOffset(
+      originClient,
+      currentClient,
+      radius,
+      thumbRadius,
+    ),
+  );
+}
+
+function setTouchJoystickThumbOffset(
+  joystick: HTMLDivElement | null,
+  offset: Vec2,
+) {
+  if (!joystick) return;
+  joystick.style.setProperty("--touch-joystick-thumb-x", `${offset.x}px`);
+  joystick.style.setProperty("--touch-joystick-thumb-y", `${offset.y}px`);
+}
+
+function getTouchJoystickDimensions(element: SVGSVGElement) {
+  const scale = element.closest(".app--large-controls") ? 1.18 : 1;
+  return {
+    radius: TOUCH_JOYSTICK_RADIUS_PX * scale,
+    thumbRadius: TOUCH_JOYSTICK_THUMB_RADIUS_PX * scale,
+  };
+}
+
+function createTouchJoystickPresentation(
+  element: SVGSVGElement,
+  originClient: Vec2,
+  currentClient: Vec2,
+  active: boolean,
+): TouchJoystickPresentation {
+  const { radius, thumbRadius } = getTouchJoystickDimensions(element);
+  const rect = element.getBoundingClientRect();
+  return {
+    origin: {
+      x: originClient.x - rect.left,
+      y: originClient.y - rect.top,
+    },
+    thumbOffset: getTouchJoystickThumbOffset(
+      originClient,
+      currentClient,
+      radius,
+      thumbRadius,
+    ),
+    radius,
+    thumbRadius,
+    active,
+  };
+}
+
+function touchJoystickWalkCommand(gesture: ActiveGesture): MovementCommand {
+  const direction = getTouchJoystickDirection(
+    gesture.originClient,
+    gesture.latestClient,
+  );
+  return direction
+    ? { type: "walk_direction", direction }
+    : { type: "stop" };
 }
 
 const SalvageLayer = memo(function SalvageLayer({
@@ -976,16 +1161,14 @@ function screenTouchChargeInput(
   gesture: ActiveGesture,
   astronaut: AstronautState,
 ): TankInput {
-  const touchPosition = clientToWorldUnclamped(
-    gesture.element,
-    gesture.latestClient.x,
-    gesture.latestClient.y,
+  const direction = getTouchJoystickDirection(
+    gesture.originClient,
+    gesture.latestClient,
   );
-  return getScreenTouchChargeInput(
+  return getTankChargeInput(
     astronaut.movement.facing,
-    astronaut.position,
-    touchPosition,
-    astronaut.movement.direction,
+    direction ?? astronaut.movement.direction,
+    direction !== null,
   );
 }
 

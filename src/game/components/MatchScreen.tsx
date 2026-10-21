@@ -44,6 +44,7 @@ import { TetherResources } from "./TetherResources";
 import { GameAudioLayer } from "./GameAudioLayer";
 
 interface MatchScreenProps {
+  alwaysShowJoystick: boolean;
   audioEnabled: boolean;
   tutorialEnabled: boolean;
   state: GameState;
@@ -75,7 +76,7 @@ export function scheduleMatchPresentationTimeout(
   return () => clearTimeout(timeout);
 }
 
-export function MatchScreen({ audioEnabled, tutorialEnabled, state, localPlayerId, playerNames = {}, statusText, latencyMs, controlsDisabled = false, reconnectPrompt, interpolatePositions = false, onMovementCommand, onDeploy, onLeave, onPresentationStateChange }: MatchScreenProps) {
+export function MatchScreen({ alwaysShowJoystick, audioEnabled, tutorialEnabled, state, localPlayerId, playerNames = {}, statusText, latencyMs, controlsDisabled = false, reconnectPrompt, interpolatePositions = false, onMovementCommand, onDeploy, onLeave, onPresentationStateChange }: MatchScreenProps) {
   const [presentationState, setPresentationState] = useState<ArenaPresentationState>("loading");
   const [presentationAttempt, setPresentationAttempt] = useState(0);
   const [compatibilityMode, setCompatibilityMode] = useState(false);
@@ -236,6 +237,7 @@ export function MatchScreen({ audioEnabled, tutorialEnabled, state, localPlayerI
       )}
       <div className="arena">
         <ArenaRenderer key={presentationAttempt} state={state} localPlayerId={localPlayerId} disabled={interactionDisabled}
+          alwaysShowTouchJoystick={alwaysShowJoystick}
           interpolatePositions={interpolatePositions}
           oxygenZoomMultiplier={oxygenPresentation.cameraZoomMultiplier}
           tutorialStep={tutorialStep}
