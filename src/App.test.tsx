@@ -24,17 +24,60 @@ describe("MainMenu joystick preference", () => {
   });
 });
 
-function renderMainMenu(alwaysShowJoystick: boolean) {
+describe("MainMenu play choices", () => {
+  it("offers two-, three-, and four-player bot matches", () => {
+    const markup = renderMainMenu(false);
+
+    expect(markup).toContain("2-Player Bot Match");
+    expect(markup).toContain("You + 1 bot");
+    expect(markup).toContain("3-Player Bot Match");
+    expect(markup).toContain("You + 2 bots");
+    expect(markup).toContain("4-Player Bot Match");
+    expect(markup).toContain("You + 3 bots");
+  });
+});
+
+describe("MainMenu guided setup recommendation", () => {
+  it("shows a dismissible recommendation before it is dismissed", () => {
+    const markup = renderMainMenu(false, false, true);
+
+    expect(markup).toContain("Recommended · first match");
+    expect(markup).toContain('aria-label="Dismiss guided setup recommendation"');
+  });
+
+  it("moves the guide toggle into game settings after dismissal", () => {
+    const markup = renderMainMenu(false, true, true);
+    const settings = markup.match(
+      /<div class="menu-settings"[\s\S]*?<\/div>/,
+    )?.[0];
+
+    expect(settings).toContain("Guided setup");
+    expect(settings).toContain("Show the first-match movement and objective guide");
+    expect(settings).toMatch(
+      /<strong>Guided setup<\/strong>[\s\S]*?<input type="checkbox" checked=""\/\>/,
+    );
+    expect(markup).not.toContain("Recommended · first match");
+    expect(markup).not.toContain("Dismiss guided setup recommendation");
+  });
+});
+
+function renderMainMenu(
+  alwaysShowJoystick: boolean,
+  tutorialRecommendationDismissed = false,
+  tutorialEnabled = false,
+) {
   return renderToStaticMarkup(
     <MainMenu
       alwaysShowJoystick={alwaysShowJoystick}
       audioEnabled={false}
       largeControls={false}
-      tutorialEnabled={false}
+      tutorialEnabled={tutorialEnabled}
+      tutorialRecommendationDismissed={tutorialRecommendationDismissed}
       onAlwaysShowJoystickChange={() => undefined}
       onAudioEnabledChange={() => undefined}
       onLargeControlsChange={() => undefined}
       onTutorialEnabledChange={() => undefined}
+      onTutorialRecommendationDismiss={() => undefined}
       onBotGame={() => undefined}
       onCreateRoom={() => undefined}
       onJoinRoom={() => undefined}

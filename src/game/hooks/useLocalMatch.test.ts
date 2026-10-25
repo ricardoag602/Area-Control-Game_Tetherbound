@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { consumeSimulationBacklog } from "./useLocalMatch";
+import {
+  advanceLocalBots,
+  consumeSimulationBacklog,
+  createLocalMatchState,
+} from "./useLocalMatch";
 
 describe("consumeSimulationBacklog", () => {
   it("preserves work beyond one catch-up batch", () => {
@@ -24,4 +28,25 @@ describe("consumeSimulationBacklog", () => {
     expect(result.stepCount).toBe(5);
     expect(result.remainingSeconds).toBeCloseTo(0.75, 8);
   });
+});
+
+describe("local bot rosters", () => {
+  it.each([
+    [3, ["rival", "player3"]],
+    [4, ["rival", "player3", "player4"]],
+  ] as const)(
+    "creates and advances every opponent in a %i-player match",
+    (playerLimit, opponentIds) => {
+      const match = createLocalMatchState(playerLimit);
+      const next = advanceLocalBots(match.game, match.bots);
+
+      expect(match.game.activePlayerIds).toHaveLength(playerLimit);
+      expect(Object.keys(match.bots)).toEqual(opponentIds);
+      expect(Object.keys(next.bots)).toEqual(opponentIds);
+      expect(Object.keys(next.commands)).toEqual(opponentIds);
+      for (const opponentId of opponentIds) {
+        expect(next.commands[opponentId]).toBeDefined();
+      }
+    },
+  );
 });

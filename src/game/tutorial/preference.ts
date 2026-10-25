@@ -1,4 +1,6 @@
 export const TUTORIAL_PREFERENCE_KEY = "tetherbound.tutorialEnabled";
+export const TUTORIAL_RECOMMENDATION_DISMISSED_KEY =
+  "tetherbound.tutorialRecommendationDismissed";
 
 export interface TutorialPreferenceStorage {
   getItem(key: string): string | null;
@@ -22,6 +24,32 @@ export function writeTutorialPreference(
 ): void {
   try {
     (storage ?? getBrowserStorage())?.setItem(TUTORIAL_PREFERENCE_KEY, String(enabled));
+  } catch {
+    // Storage may be unavailable in private browsing or embedded contexts.
+  }
+}
+
+export function readTutorialRecommendationDismissed(
+  storage?: TutorialPreferenceStorage | null,
+): boolean {
+  try {
+    return (storage ?? getBrowserStorage())?.getItem(
+      TUTORIAL_RECOMMENDATION_DISMISSED_KEY,
+    ) === "true";
+  } catch {
+    return false;
+  }
+}
+
+export function writeTutorialRecommendationDismissed(
+  dismissed: boolean,
+  storage?: TutorialPreferenceStorage | null,
+): void {
+  try {
+    (storage ?? getBrowserStorage())?.setItem(
+      TUTORIAL_RECOMMENDATION_DISMISSED_KEY,
+      String(dismissed),
+    );
   } catch {
     // Storage may be unavailable in private browsing or embedded contexts.
   }

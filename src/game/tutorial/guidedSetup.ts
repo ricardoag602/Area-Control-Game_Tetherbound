@@ -3,7 +3,10 @@ import type { GameState, PlayerId, Vec2 } from "../types";
 
 export {
   TUTORIAL_PREFERENCE_KEY,
+  TUTORIAL_RECOMMENDATION_DISMISSED_KEY,
+  readTutorialRecommendationDismissed,
   readTutorialPreference,
+  writeTutorialRecommendationDismissed,
   writeTutorialPreference,
   type TutorialPreferenceStorage,
 } from "./preference";

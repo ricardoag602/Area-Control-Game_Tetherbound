@@ -1,7 +1,12 @@
 import { useCallback, useState } from "react";
 import { useLocalMatch } from "../hooks/useLocalMatch";
 import { sampleScorableTerritory } from "../simulation/scoring";
-import type { GameState, MatchFinishReason, PlayerId } from "../types";
+import type {
+  GameState,
+  MatchFinishReason,
+  PlayerId,
+  PlayerLimit,
+} from "../types";
 import { MatchScreen } from "./MatchScreen";
 import { PostMatchScene } from "./PostMatchScene";
 import type { ArenaPresentationState } from "./ArenaRenderer";
@@ -10,18 +15,32 @@ interface GameViewProps {
   alwaysShowJoystick: boolean;
   audioEnabled: boolean;
   tutorialEnabled: boolean;
+  playerLimit: PlayerLimit;
   onLeave: () => void;
 }
 
-export function GameView({ alwaysShowJoystick, audioEnabled, tutorialEnabled, onLeave }: GameViewProps) {
+const LOCAL_BOT_NAMES: Partial<Record<PlayerId, string>> = {
+  rival: "Bot 1",
+  player3: "Bot 2",
+  player4: "Bot 3",
+};
+
+export function GameView({
+  alwaysShowJoystick,
+  audioEnabled,
+  tutorialEnabled,
+  playerLimit,
+  onLeave,
+}: GameViewProps) {
   const [matchNumber, setMatchNumber] = useState(0);
 
   return (
     <LocalMatch
-      key={matchNumber}
+      key={`${playerLimit}-${matchNumber}`}
       alwaysShowJoystick={alwaysShowJoystick}
       audioEnabled={audioEnabled}
       tutorialEnabled={tutorialEnabled}
+      playerLimit={playerLimit}
       onLeave={onLeave}
       onRestart={() => setMatchNumber((current) => current + 1)}
     />
@@ -32,18 +51,21 @@ function LocalMatch({
   alwaysShowJoystick,
   audioEnabled,
   tutorialEnabled,
+  playerLimit,
   onLeave,
   onRestart,
 }: {
   alwaysShowJoystick: boolean;
   audioEnabled: boolean;
   tutorialEnabled: boolean;
+  playerLimit: PlayerLimit;
   onLeave: () => void;
   onRestart: () => void;
 }) {
   const [presentationReady, setPresentationReady] = useState(false);
   const { state, sendMovementCommand, deploy } = useLocalMatch({
     paused: !presentationReady,
+    playerLimit,
   });
   const handlePresentationStateChange = useCallback(
     (presentationState: ArenaPresentationState) => {
@@ -59,7 +81,6 @@ function LocalMatch({
       <BotMatchResultView
         state={state}
         localPlayerId="player"
-        opponentName="Bot"
         onRestart={onRestart}
         onLeave={onLeave}
       />
@@ -70,8 +91,8 @@ function LocalMatch({
     <MatchScreen
       state={state}
       localPlayerId="player"
-      playerNames={{ rival: "Bot" }}
-      statusText="Mechanics sandbox"
+      playerNames={LOCAL_BOT_NAMES}
+      statusText={`${playerLimit}-player bot match`}
       alwaysShowJoystick={alwaysShowJoystick}
       audioEnabled={audioEnabled}
       tutorialEnabled={tutorialEnabled}
@@ -87,22 +108,24 @@ function LocalMatch({
 function BotMatchResultView({
   state,
   localPlayerId,
-  opponentName,
   onRestart,
   onLeave,
 }: {
   state: GameState;
   localPlayerId: PlayerId;
-  opponentName: string;
   onRestart: () => void;
   onLeave: () => void;
 }) {
-  const opponentId: PlayerId = localPlayerId === "player" ? "rival" : "player";
   const territory = sampleScorableTerritory(state).fractions;
   const winner = state.matchOutcome?.winner ?? fallbackWinner(state);
   const reason = state.matchOutcome?.reason ?? "regulation_score";
   const isDraw = winner === "draw";
   const didWin = winner === localPlayerId;
+  const winnerName = winner === "draw"
+    ? null
+    : winner === localPlayerId
+      ? "You"
+      : LOCAL_BOT_NAMES[winner] ?? "A bot";
   const result = isDraw ? "Draw" : didWin ? "Victory" : "Defeat";
   const decidedInOvertime =
     reason === "overtime_lead" || reason === "overtime_territory";
@@ -112,30 +135,33 @@ function BotMatchResultView({
       <header className="section-heading result-heading">
         <p className="eyebrow">{finishLabel(reason)}</p>
         <h2>{result}</h2>
-        <p>{describeFinish(reason, didWin, isDraw, opponentName)}</p>
+        <p>{describeFinish(reason, didWin, isDraw, winnerName)}</p>
       </header>
 
       <div className="result-scores" aria-label="Final scores">
-        <ResultScore
-          playerId={localPlayerId}
-          label="You"
-          score={state.scores[localPlayerId]}
-          territory={territory[localPlayerId] * 100}
-        />
-        <ResultScore
-          playerId={opponentId}
-          label={opponentName}
-          score={state.scores[opponentId]}
-          territory={territory[opponentId] * 100}
-        />
+        {state.activePlayerIds.map((playerId) => (
+          <ResultScore
+            key={playerId}
+            playerId={playerId}
+            label={playerId === localPlayerId
+              ? "You"
+              : LOCAL_BOT_NAMES[playerId] ?? "Bot"}
+            score={state.scores[playerId]}
+            territory={territory[playerId] * 100}
+          />
+        ))}
       </div>
 
       {decidedInOvertime && (
         <p className="result-overtime-score">
           <span>Overtime-only signal</span>
           <strong>
-            You {state.overtimeScores[localPlayerId].toFixed(1)} · {opponentName}{" "}
-            {state.overtimeScores[opponentId].toFixed(1)}
+            {state.activePlayerIds.map((playerId) => {
+              const name = playerId === localPlayerId
+                ? "You"
+                : LOCAL_BOT_NAMES[playerId] ?? "Bot";
+              return `${name} ${state.overtimeScores[playerId].toFixed(1)}`;
+            }).join(" · ")}
           </strong>
         </p>
       )}
@@ -181,8 +207,13 @@ function ResultScore({
 }
 
 function fallbackWinner(state: GameState): PlayerId | "draw" {
-  if (state.scores.player === state.scores.rival) return "draw";
-  return state.scores.player > state.scores.rival ? "player" : "rival";
+  const best = Math.max(
+    ...state.activePlayerIds.map((playerId) => state.scores[playerId]),
+  );
+  const leaders = state.activePlayerIds.filter(
+    (playerId) => Math.abs(state.scores[playerId] - best) <= 1e-9,
+  );
+  return leaders.length === 1 ? leaders[0] : "draw";
 }
 
 function finishLabel(reason: MatchFinishReason) {
@@ -198,7 +229,7 @@ function describeFinish(
   reason: MatchFinishReason,
   didWin: boolean,
   isDraw: boolean,
-  opponentName: string,
+  winnerName: string | null,
 ) {
   if (isDraw) {
     if (reason === "base_collapse") {
@@ -212,19 +243,19 @@ function describeFinish(
   switch (reason) {
     case "base_collapse":
       return didWin
-        ? `You held ${opponentName}'s exposed base until its network collapsed.`
-        : `${opponentName} held your exposed base until your network collapsed.`;
+        ? "You held an exposed base until its network collapsed."
+        : `${winnerName ?? "A bot"} completed a decisive base collapse.`;
     case "overtime_lead":
       return didWin
         ? "You established the decisive signal lead in overtime."
-        : `${opponentName} established the decisive signal lead in overtime.`;
+        : `${winnerName ?? "A bot"} established the decisive signal lead in overtime.`;
     case "overtime_territory":
       return didWin
         ? "You controlled more live territory when overtime expired."
-        : `${opponentName} controlled more live territory when overtime expired.`;
+        : `${winnerName ?? "A bot"} controlled more live territory when overtime expired.`;
     default:
       return didWin
         ? "Your network accumulated more signal during regulation."
-        : `${opponentName}'s network accumulated more signal during regulation.`;
+        : `${winnerName ?? "A bot"} accumulated the most signal during regulation.`;
   }
 }

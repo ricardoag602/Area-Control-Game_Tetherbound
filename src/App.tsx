@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { MenuNetworkBackground } from "./components/MenuNetworkBackground";
 import { GameView } from "./game/components/GameView";
 import { NetworkGameView } from "./network/components/NetworkGameView";
-import type { GameMode } from "./game/types";
+import { PLAYER_IDS, type GameMode, type PlayerLimit } from "./game/types";
 import { getRoomServerUrl, RoomClient } from "./network/RoomClient";
 import {
     createGameAddress,
@@ -30,7 +30,9 @@ import {
     writeAlwaysShowJoystickPreference,
 } from "./game/preferences/joystick";
 import {
+    readTutorialRecommendationDismissed,
     readTutorialPreference,
+    writeTutorialRecommendationDismissed,
     writeTutorialPreference,
 } from "./game/tutorial/guidedSetup";
 
@@ -45,6 +47,7 @@ export function App() {
     const [joinRoomCode, setJoinRoomCode] = useState(initialRoomCode);
     const [view, setView] = useState<View>(initialRoomCode ? "join-room" : "menu");
     const [gameMode, setGameMode] = useState<GameMode>("bot");
+    const [botPlayerLimit, setBotPlayerLimit] = useState<PlayerLimit>(2);
     const [roomClient] = useState(() => new RoomClient());
     const [gameAddress] = useState(() => createGameAddress(window.location.href));
     const [roomServerAddress] = useState(() => getRoomServerUrl());
@@ -55,6 +58,8 @@ export function App() {
     );
     const [audioEnabled, setAudioEnabled] = useState(readAudioPreference);
     const [tutorialEnabled, setTutorialEnabled] = useState(readTutorialPreference);
+    const [tutorialRecommendationDismissed, setTutorialRecommendationDismissed] =
+        useState(readTutorialRecommendationDismissed);
     const [alwaysShowJoystick, setAlwaysShowJoystick] = useState(
         readAlwaysShowJoystickPreference,
     );
@@ -74,6 +79,10 @@ export function App() {
     useEffect(() => {
         writeTutorialPreference(tutorialEnabled);
     }, [tutorialEnabled]);
+
+    useEffect(() => {
+        writeTutorialRecommendationDismissed(tutorialRecommendationDismissed);
+    }, [tutorialRecommendationDismissed]);
 
     useEffect(() => {
         writeAlwaysShowJoystickPreference(alwaysShowJoystick);
@@ -135,10 +144,11 @@ export function App() {
         view,
     ]);
 
-    function startBotGame() {
-        preloadThreeGameplayAssets(["player", "rival"]);
+    function startBotGame(playerLimit: PlayerLimit) {
+        preloadThreeGameplayAssets(PLAYER_IDS.slice(0, playerLimit));
         roomClient.leave();
         clearRoomFromUrl();
+        setBotPlayerLimit(playerLimit);
         setGameMode("bot");
         setView("game");
     }
@@ -189,10 +199,15 @@ export function App() {
                         audioEnabled={audioEnabled}
                         largeControls={largeControls}
                         tutorialEnabled={tutorialEnabled}
+                        tutorialRecommendationDismissed={tutorialRecommendationDismissed}
                         onAlwaysShowJoystickChange={setAlwaysShowJoystick}
                         onAudioEnabledChange={setAudioEnabled}
                         onLargeControlsChange={setLargeControls}
                         onTutorialEnabledChange={setTutorialEnabled}
+                        onTutorialRecommendationDismiss={() => {
+                            setTutorialEnabled(false);
+                            setTutorialRecommendationDismissed(true);
+                        }}
                         onBotGame={startBotGame}
                         onCreateRoom={() => setView("create-room")}
                         onJoinRoom={() => { setJoinRoomCode(""); setView("join-room"); }}
@@ -244,6 +259,7 @@ export function App() {
                         alwaysShowJoystick={alwaysShowJoystick}
                         audioEnabled={audioEnabled}
                         tutorialEnabled={tutorialEnabled}
+                        playerLimit={botPlayerLimit}
                         onLeave={() => setView("menu")}
                     />
                 )}
@@ -274,11 +290,13 @@ interface MainMenuProps {
     audioEnabled: boolean;
     largeControls: boolean;
     tutorialEnabled: boolean;
+    tutorialRecommendationDismissed: boolean;
     onAlwaysShowJoystickChange: (enabled: boolean) => void;
     onAudioEnabledChange: (enabled: boolean) => void;
     onLargeControlsChange: (enabled: boolean) => void;
     onTutorialEnabledChange: (enabled: boolean) => void;
-    onBotGame: () => void;
+    onTutorialRecommendationDismiss: () => void;
+    onBotGame: (playerLimit: PlayerLimit) => void;
     onCreateRoom: () => void;
     onJoinRoom: () => void;
     gameAddress: string;
@@ -291,10 +309,12 @@ export function MainMenu({
     audioEnabled,
     largeControls,
     tutorialEnabled,
+    tutorialRecommendationDismissed,
     onAlwaysShowJoystickChange,
     onAudioEnabledChange,
     onLargeControlsChange,
     onTutorialEnabledChange,
+    onTutorialRecommendationDismiss,
     onBotGame,
     onCreateRoom,
     onJoinRoom,
@@ -316,29 +336,49 @@ export function MainMenu({
                 <p className="tagline">How far from safety will you go for power?</p>
             </header>
 
-            <label className="setting-card setting-card--tutorial">
-                <span className="setting-card__tutorial-icon" aria-hidden="true">
-                    <i />
-                </span>
-                <span className="setting-card__copy">
-                    <span className="setting-card__title-row">
-                        <strong>Guided setup</strong>
-                        <em>Recommended · first match</em>
-                    </span>
-                    <small>Learn movement, collect 3 materials, build tethers, and disrupt rival networks at your own pace.</small>
-                </span>
-                <input
-                    type="checkbox"
-                    checked={tutorialEnabled}
-                    onChange={(event) => onTutorialEnabledChange(event.target.checked)}
-                />
-                <span className="switch" aria-hidden="true" />
-            </label>
+            {!tutorialRecommendationDismissed && (
+                <div className="setting-card setting-card--tutorial setting-card--recommendation">
+                    <label className="setting-card__recommendation-toggle">
+                        <span className="setting-card__tutorial-icon" aria-hidden="true">
+                            <i />
+                        </span>
+                        <span className="setting-card__copy">
+                            <span className="setting-card__title-row">
+                                <strong>Guided setup</strong>
+                                <em>Recommended · first match</em>
+                            </span>
+                            <small>Learn movement, collect 3 materials, build tethers, and disrupt rival networks at your own pace.</small>
+                        </span>
+                        <input
+                            type="checkbox"
+                            checked={tutorialEnabled}
+                            onChange={(event) => onTutorialEnabledChange(event.target.checked)}
+                        />
+                        <span className="switch" aria-hidden="true" />
+                    </label>
+                    <button
+                        className="setting-card__dismiss"
+                        type="button"
+                        aria-label="Dismiss guided setup recommendation"
+                        onClick={onTutorialRecommendationDismiss}
+                    >
+                        ×
+                    </button>
+                </div>
+            )}
 
             <div className="menu-actions">
-                <button className="button button--primary" onClick={onBotGame}>
-                    <span>Start Bot Game</span>
-                    <small>Test the frontier alone</small>
+                <button className="button button--primary" onClick={() => onBotGame(2)}>
+                    <span>2-Player Bot Match</span>
+                    <small>You + 1 bot</small>
+                </button>
+                <button className="button button--primary" onClick={() => onBotGame(3)}>
+                    <span>3-Player Bot Match</span>
+                    <small>You + 2 bots</small>
+                </button>
+                <button className="button button--primary" onClick={() => onBotGame(4)}>
+                    <span>4-Player Bot Match</span>
+                    <small>You + 3 bots</small>
                 </button>
                 <button className="button button--secondary" onClick={onCreateRoom}>
                     <span>Create Multiplayer Room</span>
@@ -363,6 +403,20 @@ export function MainMenu({
             </details>
 
             <div className="menu-settings" aria-label="Game settings">
+                {tutorialRecommendationDismissed && (
+                    <label className="setting-card">
+                        <span className="setting-card__copy">
+                            <strong>Guided setup</strong>
+                            <small>Show the first-match movement and objective guide</small>
+                        </span>
+                        <input
+                            type="checkbox"
+                            checked={tutorialEnabled}
+                            onChange={(event) => onTutorialEnabledChange(event.target.checked)}
+                        />
+                        <span className="switch" aria-hidden="true" />
+                    </label>
+                )}
                 <label className="setting-card">
                     <span className="setting-card__copy">
                         <strong>Large controls</strong>
