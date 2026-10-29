@@ -24,12 +24,15 @@ import {
   subscribePresentationFrame,
 } from "../presentation/presentationClock";
 import type { GameState } from "../types";
-
-const MAX_RENDER_RESOLUTION = 1.5;
+import {
+  getVideoRenderProfile,
+  type VideoMode,
+} from "../preferences/video";
 
 interface PixiTerrainLayerProps {
   state: GameState;
   cameraRef: RefObject<CameraViewBox>;
+  videoMode?: VideoMode;
   theme?: TerrainVisualTheme;
   onInitialRender?: () => void;
   onLoadError?: (error: unknown) => void;
@@ -46,6 +49,7 @@ interface TerrainScene {
   viewportWidth: number;
   viewportHeight: number;
   resolution: number;
+  maximumDevicePixelRatio: number;
 }
 
 /**
@@ -56,10 +60,12 @@ interface TerrainScene {
 export const PixiTerrainLayer = memo(function PixiTerrainLayer({
   state,
   cameraRef,
+  videoMode = "quality",
   theme = ACTIVE_TERRAIN_THEME,
   onInitialRender,
   onLoadError,
 }: PixiTerrainLayerProps) {
+  const videoProfile = getVideoRenderProfile(videoMode);
   const hostRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<TerrainScene | null>(null);
   const renderedCameraRef = useRef<CameraViewBox | null>(null);
@@ -83,11 +89,14 @@ export const PixiTerrainLayer = memo(function PixiTerrainLayer({
       await app.init({
         width,
         height,
-        antialias: true,
+        antialias: videoProfile.antialias,
         autoDensity: true,
         autoStart: false,
         backgroundColor: theme.backgroundColor,
-        resolution: Math.min(MAX_RENDER_RESOLUTION, window.devicePixelRatio || 1),
+        resolution: Math.min(
+          videoProfile.maximumDevicePixelRatio,
+          window.devicePixelRatio || 1,
+        ),
       });
       if (cancelled) {
         app.destroy({ removeView: true }, { children: true });
@@ -109,10 +118,12 @@ export const PixiTerrainLayer = memo(function PixiTerrainLayer({
       const daylightTerrain = terrainSprite(terrainTexture);
 
       const revealMask = new Graphics();
-      revealMask.filters = [new BlurFilter({
-        strength: theme.illumination.featherWorldUnits,
-        quality: 1,
-      })];
+      if (videoProfile.filteredTerrainLighting) {
+        revealMask.filters = [new BlurFilter({
+          strength: theme.illumination.featherWorldUnits,
+          quality: 1,
+        })];
+      }
 
       // The source map stays untouched. This translucent veil is the night
       // treatment, and the inverse mask punches natural, feathered light into it.
@@ -123,17 +134,21 @@ export const PixiTerrainLayer = memo(function PixiTerrainLayer({
 
       const teamTint = new Graphics();
       teamTint.blendMode = "screen";
-      teamTint.filters = [new BlurFilter({
-        strength: theme.illumination.teamTintBlurWorldUnits,
-        quality: 1,
-      })];
+      if (videoProfile.filteredTerrainLighting) {
+        teamTint.filters = [new BlurFilter({
+          strength: theme.illumination.teamTintBlurWorldUnits,
+          quality: 1,
+        })];
+      }
 
       const glow = new Graphics();
       glow.blendMode = "screen";
-      glow.filters = [new BlurFilter({
-        strength: theme.illumination.outerGlowBlurWorldUnits,
-        quality: 1,
-      })];
+      if (videoProfile.filteredTerrainLighting) {
+        glow.filters = [new BlurFilter({
+          strength: theme.illumination.outerGlowBlurWorldUnits,
+          quality: 1,
+        })];
+      }
       const glowCore = new Graphics();
       glowCore.blendMode = "screen";
       const pads = new Graphics();
@@ -159,7 +174,11 @@ export const PixiTerrainLayer = memo(function PixiTerrainLayer({
         pads,
         viewportWidth: width,
         viewportHeight: height,
-        resolution: Math.min(MAX_RENDER_RESOLUTION, window.devicePixelRatio || 1),
+        resolution: Math.min(
+          videoProfile.maximumDevicePixelRatio,
+          window.devicePixelRatio || 1,
+        ),
+        maximumDevicePixelRatio: videoProfile.maximumDevicePixelRatio,
       };
       sceneRef.current = scene;
       updateTerrainLighting(scene, latestStateRef.current, theme);
@@ -195,7 +214,7 @@ export const PixiTerrainLayer = memo(function PixiTerrainLayer({
         app.destroy({ removeView: true }, { children: true });
       }
     };
-  }, [cameraRef, onLoadError, theme]);
+  }, [cameraRef, onLoadError, theme, videoMode, videoProfile]);
 
   useEffect(() => subscribePresentationFrame(() => {
     const scene = sceneRef.current;
@@ -315,7 +334,10 @@ function resizeAndPosition(
 ) {
   const width = Math.max(1, host.clientWidth);
   const height = Math.max(1, host.clientHeight);
-  const resolution = Math.min(MAX_RENDER_RESOLUTION, window.devicePixelRatio || 1);
+  const resolution = Math.min(
+    scene.maximumDevicePixelRatio,
+    window.devicePixelRatio || 1,
+  );
   if (
     scene.viewportWidth !== width
     || scene.viewportHeight !== height

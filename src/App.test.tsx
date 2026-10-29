@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { MainMenu, OfflineBotChoices } from "./App";
+import type { VideoMode } from "./game/preferences/video";
 
 describe("MainMenu joystick preference", () => {
   it("offers the always-visible mobile joystick setting", () => {
@@ -57,10 +58,12 @@ describe("MainMenu guided setup recommendation", () => {
 
   it("moves the guide toggle into game settings after dismissal", () => {
     const markup = renderMainMenu(false, true, true);
-    const settings = markup.match(
-      /<div class="menu-settings"[\s\S]*?<\/div>/,
-    )?.[0];
+    const gameplayStart = markup.indexOf('id="settings-panel-gameplay"');
+    const audioStart = markup.indexOf('id="settings-panel-audio"');
+    const settings = markup.slice(gameplayStart, audioStart);
 
+    expect(gameplayStart).toBeGreaterThan(-1);
+    expect(audioStart).toBeGreaterThan(gameplayStart);
     expect(settings).toContain("Guided setup");
     expect(settings).toContain("Show the first-match movement and objective guide");
     expect(settings).toMatch(
@@ -68,6 +71,44 @@ describe("MainMenu guided setup recommendation", () => {
     );
     expect(markup).not.toContain("Recommended · first match");
     expect(markup).not.toContain("Dismiss guided setup recommendation");
+  });
+});
+
+describe("MainMenu settings tabs", () => {
+  it("organizes gameplay, audio, and video controls into accessible tabs", () => {
+    const markup = renderMainMenu(false);
+
+    expect(markup).toContain('role="tablist"');
+    expect(markup).toContain('aria-label="Settings sections"');
+    expect(markup).toMatch(
+      /id="settings-tab-gameplay"[^>]*role="tab"[^>]*aria-selected="true"/,
+    );
+    expect(markup).toMatch(
+      /id="settings-tab-audio"[^>]*role="tab"[^>]*aria-selected="false"/,
+    );
+    expect(markup).toMatch(
+      /id="settings-tab-video"[^>]*role="tab"[^>]*aria-selected="false"/,
+    );
+    expect(markup).toMatch(
+      /id="settings-panel-audio"[^>]*role="tabpanel"[^>]*hidden=""/,
+    );
+    expect(markup).toMatch(
+      /id="settings-panel-video"[^>]*role="tabpanel"[^>]*hidden=""/,
+    );
+  });
+
+  it("offers persistent quality and performance video presets", () => {
+    const markup = renderMainMenu(false, false, false, 1, 1, "performance");
+
+    expect(markup).toContain("Sharper rendering, antialiasing, full lighting");
+    expect(markup).toContain("Lower render resolution with lighter blur and particle effects");
+    expect(markup).toMatch(
+      /type="radio" name="video-mode" value="quality"/,
+    );
+    expect(markup).toMatch(
+      /type="radio" name="video-mode" checked="" value="performance"/,
+    );
+    expect(markup).toContain("Selected");
   });
 });
 
@@ -98,6 +139,7 @@ function renderMainMenu(
   tutorialEnabled = false,
   musicVolume = 1,
   sfxVolume = 1,
+  videoMode: VideoMode = "quality",
 ) {
   return renderToStaticMarkup(
     <MainMenu
@@ -108,6 +150,7 @@ function renderMainMenu(
       sfxVolume={sfxVolume}
       tutorialEnabled={tutorialEnabled}
       tutorialRecommendationDismissed={tutorialRecommendationDismissed}
+      videoMode={videoMode}
       onAlwaysShowJoystickChange={() => undefined}
       onAudioEnabledChange={() => undefined}
       onLargeControlsChange={() => undefined}
@@ -115,6 +158,7 @@ function renderMainMenu(
       onSfxVolumeChange={() => undefined}
       onTutorialEnabledChange={() => undefined}
       onTutorialRecommendationDismiss={() => undefined}
+      onVideoModeChange={() => undefined}
       onBotGame={() => undefined}
       onCreateRoom={() => undefined}
       onJoinRoom={() => undefined}

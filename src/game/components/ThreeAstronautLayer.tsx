@@ -46,11 +46,16 @@ import {
   subscribePresentationFrame,
 } from "../presentation/presentationClock";
 import type { GameState, PlayerId, Vec2 } from "../types";
+import {
+  getVideoRenderProfile,
+  type VideoMode,
+} from "../preferences/video";
 
 interface ThreeAstronautLayerProps {
   state: GameState;
   renderPositionsRef: RefObject<Readonly<Record<PlayerId, Vec2>>>;
   cameraRef: RefObject<CameraViewBox>;
+  videoMode?: VideoMode;
   onReadyChange?: (ready: boolean) => void;
   onObjectReadyChange?: (ready: boolean) => void;
   onLoadError?: (error: unknown) => void;
@@ -66,10 +71,12 @@ function ThreeAstronautLayer({
   state,
   renderPositionsRef,
   cameraRef,
+  videoMode = "quality",
   onReadyChange,
   onObjectReadyChange,
   onLoadError,
 }: ThreeAstronautLayerProps) {
+  const videoProfile = getVideoRenderProfile(videoMode);
   const hostRef = useRef<HTMLDivElement>(null);
   const terrainLightZones = collectTerrainLightZones(state);
   const objectReconciliationKey = getThreeGameObjectReconciliationKey(state);
@@ -155,12 +162,15 @@ function ThreeAstronautLayer({
     try {
       renderer = new THREE.WebGLRenderer({
         alpha: true,
-        antialias: true,
+        antialias: videoProfile.antialias,
         powerPreference: "high-performance",
         premultipliedAlpha: true,
       });
       renderer.setClearColor(0x000000, 0);
-      renderer.setPixelRatio(Math.min(1.5, window.devicePixelRatio || 1));
+      renderer.setPixelRatio(Math.min(
+        videoProfile.maximumDevicePixelRatio,
+        window.devicePixelRatio || 1,
+      ));
       renderer.shadowMap.enabled = false;
       renderer.outputColorSpace = THREE.SRGBColorSpace;
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -170,10 +180,16 @@ function ThreeAstronautLayer({
       renderer.domElement.addEventListener("webglcontextlost", handleContextLost);
       renderer.domElement.addEventListener("webglcontextrestored", handleContextRestored);
       host.appendChild(renderer.domElement);
-      boostSmokeRuntime = createThreeBoostChargeSmoke(latestRef.current.state.activePlayerIds);
-      scene.add(boostSmokeRuntime.mesh);
-      interactionEffectsRuntime = createThreeInteractionEffects(latestRef.current.state);
-      scene.add(interactionEffectsRuntime.mesh);
+      if (videoProfile.particleEffects) {
+        boostSmokeRuntime = createThreeBoostChargeSmoke(
+          latestRef.current.state.activePlayerIds,
+        );
+        scene.add(boostSmokeRuntime.mesh);
+        interactionEffectsRuntime = createThreeInteractionEffects(
+          latestRef.current.state,
+        );
+        scene.add(interactionEffectsRuntime.mesh);
+      }
     } catch (error) {
       console.error("Unable to initialize 3D astronaut renderer", error);
       reportLoadFailure(error);
@@ -252,7 +268,7 @@ function ThreeAstronautLayer({
         objectRuntime = createThreeGameObjectRuntime(
           assets,
           latestRef.current.state,
-          reduceMotion,
+          reduceMotion || !videoProfile.idleObjectEffects,
         );
         scene.add(objectRuntime.root);
         reconciledObjectKey = latestRef.current.objectReconciliationKey;
@@ -322,11 +338,11 @@ function ThreeAstronautLayer({
           updateThreeGameObjectRuntime(
             objectRuntime,
             latest.state,
-            reduceMotion,
+            reduceMotion || !videoProfile.idleObjectEffects,
             timeMs,
           );
           reconciledObjectKey = latest.objectReconciliationKey;
-        } else {
+        } else if (videoProfile.idleObjectEffects) {
           updateThreeGameObjectIdleEffects(objectRuntime, timeMs, reduceMotion);
         }
       }
@@ -412,7 +428,14 @@ function ThreeAstronautLayer({
       loadFailureReported = true;
       onLoadError?.(error);
     }
-  }, [cameraRef, onLoadError, playerKey, renderPositionsRef]);
+  }, [
+    cameraRef,
+    onLoadError,
+    playerKey,
+    renderPositionsRef,
+    videoMode,
+    videoProfile,
+  ]);
 
   return <div ref={hostRef} className="three-astronaut-layer" aria-hidden="true" />;
 }

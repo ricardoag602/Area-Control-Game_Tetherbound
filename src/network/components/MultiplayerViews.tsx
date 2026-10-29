@@ -5,6 +5,7 @@ import { PLAYER_IDS, type GameState, type MatchFinishReason, type PlayerId, type
 import type { ConnectionStatus } from "../RoomClient";
 import { isValidRoomCode, normalizeRoomCode } from "../connectionInfo";
 import type { PublicRoomSummary, RoomSnapshot, RoomVisibility } from "../protocol";
+import type { VideoMode } from "../../game/preferences/video";
 
 interface CreateRoomViewProps {
   connection: ConnectionStatus;
@@ -401,6 +402,7 @@ interface MatchResultViewProps {
   localPlayerId: PlayerId;
   connection: ConnectionStatus;
   error: string | null;
+  videoMode?: VideoMode;
   onRetry: () => void;
   onRequestRematch: () => void;
   onLeave: () => void;
@@ -412,6 +414,7 @@ export function MatchResultView({
   localPlayerId,
   connection,
   error,
+  videoMode = "quality",
   onRetry,
   onRequestRematch,
   onLeave,
@@ -436,7 +439,11 @@ export function MatchResultView({
   const connectionLabel = getConnectionLabel(connection);
 
   return (
-    <PostMatchScene state={state} localPlayerId={localPlayerId}>
+    <PostMatchScene
+      state={state}
+      localPlayerId={localPlayerId}
+      videoMode={videoMode}
+    >
       <header className="section-heading result-heading">
         <p className="eyebrow">{finishLabel(finishReason)}</p>
         <h2>{result}</h2>

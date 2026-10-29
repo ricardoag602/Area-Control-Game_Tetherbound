@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { MenuNetworkBackground } from "./components/MenuNetworkBackground";
 import { GAME_RULES } from "./game/constants";
 import { AppMusicLayer } from "./game/components/AppMusicLayer";
@@ -44,6 +44,11 @@ import {
     writeAlwaysShowJoystickPreference,
 } from "./game/preferences/joystick";
 import {
+    readVideoModePreference,
+    writeVideoModePreference,
+    type VideoMode,
+} from "./game/preferences/video";
+import {
     readTutorialRecommendationDismissed,
     readTutorialPreference,
     writeTutorialRecommendationDismissed,
@@ -53,6 +58,28 @@ import {
 type View = "menu" | "create-room" | "join-room" | "lobby" | "game" | "result";
 
 const LARGE_CONTROLS_KEY = "tetherbound.largeControls";
+type SettingsTab = "gameplay" | "audio" | "video";
+const SETTINGS_TABS = [
+    { id: "gameplay", label: "Gameplay" },
+    { id: "audio", label: "Audio" },
+    { id: "video", label: "Video" },
+] as const satisfies readonly { id: SettingsTab; label: string }[];
+
+function readLargeControlsPreference() {
+    try {
+        return localStorage.getItem(LARGE_CONTROLS_KEY) === "true";
+    } catch {
+        return false;
+    }
+}
+
+function writeLargeControlsPreference(enabled: boolean) {
+    try {
+        localStorage.setItem(LARGE_CONTROLS_KEY, String(enabled));
+    } catch {
+        // The live in-memory choice still applies when storage is unavailable.
+    }
+}
 
 export function App() {
     const [initialRoomCode] = useState(
@@ -70,9 +97,7 @@ export function App() {
     const [roomServerAddress] = useState(() => getRoomServerUrl());
     const roomSession = useRoomClient(roomClient);
     const resumeAttempted = useRef(false);
-    const [largeControls, setLargeControls] = useState(
-        () => localStorage.getItem(LARGE_CONTROLS_KEY) === "true",
-    );
+    const [largeControls, setLargeControls] = useState(readLargeControlsPreference);
     const [audioEnabled, setAudioEnabled] = useState(readAudioPreference);
     const [musicVolume, setMusicVolume] = useState(readMusicVolumePreference);
     const [sfxVolume, setSfxVolume] = useState(readSfxVolumePreference);
@@ -82,9 +107,10 @@ export function App() {
     const [alwaysShowJoystick, setAlwaysShowJoystick] = useState(
         readAlwaysShowJoystickPreference,
     );
+    const [videoMode, setVideoMode] = useState(readVideoModePreference);
 
     useEffect(() => {
-        localStorage.setItem(LARGE_CONTROLS_KEY, String(largeControls));
+        writeLargeControlsPreference(largeControls);
     }, [largeControls]);
 
     useEffect(() => {
@@ -122,6 +148,10 @@ export function App() {
     useEffect(() => {
         writeAlwaysShowJoystickPreference(alwaysShowJoystick);
     }, [alwaysShowJoystick]);
+
+    useEffect(() => {
+        writeVideoModePreference(videoMode);
+    }, [videoMode]);
 
     useEffect(() => {
         if (view !== "menu") return;
@@ -243,7 +273,10 @@ export function App() {
     })();
 
     return (
-        <main className={largeControls ? "app app--large-controls" : "app"}>
+        <main
+            className={largeControls ? "app app--large-controls" : "app"}
+            data-video-mode={videoMode}
+        >
             <AppMusicLayer
                 enabled={audioEnabled}
                 presentation={musicPresentation}
@@ -265,6 +298,7 @@ export function App() {
                         sfxVolume={sfxVolume}
                         tutorialEnabled={tutorialEnabled}
                         tutorialRecommendationDismissed={tutorialRecommendationDismissed}
+                        videoMode={videoMode}
                         onAlwaysShowJoystickChange={setAlwaysShowJoystick}
                         onAudioEnabledChange={setAudioEnabled}
                         onLargeControlsChange={setLargeControls}
@@ -275,6 +309,7 @@ export function App() {
                             setTutorialEnabled(false);
                             setTutorialRecommendationDismissed(true);
                         }}
+                        onVideoModeChange={setVideoMode}
                         onBotGame={startBotGame}
                         onCreateRoom={() => setView("create-room")}
                         onJoinRoom={() => { setJoinRoomCode(""); setView("join-room"); }}
@@ -327,6 +362,7 @@ export function App() {
                         audioEnabled={audioEnabled}
                         sfxVolume={sfxVolume}
                         tutorialEnabled={tutorialEnabled}
+                        videoMode={videoMode}
                         playerLimit={botPlayerLimit}
                         onMusicStateChange={setLocalMusicState}
                         onLeave={() => setView("menu")}
@@ -338,6 +374,7 @@ export function App() {
                         audioEnabled={audioEnabled}
                         sfxVolume={sfxVolume}
                         tutorialEnabled={tutorialEnabled}
+                        videoMode={videoMode}
                         localPlayerId={roomSession.playerId} connection={roomSession.connection}
                         latencyMs={roomSession.latencyMs} error={roomSession.error}
                         onMovementCommand={(command) => roomClient.sendMovementCommand(command)}
@@ -347,6 +384,7 @@ export function App() {
                 {view === "result" && roomSession.room && roomSession.gameState && roomSession.playerId && (
                     <MatchResultView state={roomSession.gameState} room={roomSession.room}
                         localPlayerId={roomSession.playerId} connection={roomSession.connection}
+                        videoMode={videoMode}
                         error={roomSession.error} onRetry={() => roomClient.retry()}
                         onRequestRematch={() => roomClient.requestRematch()} onLeave={leaveMultiplayer} />
                 )}
@@ -363,6 +401,7 @@ interface MainMenuProps {
     sfxVolume: number;
     tutorialEnabled: boolean;
     tutorialRecommendationDismissed: boolean;
+    videoMode: VideoMode;
     onAlwaysShowJoystickChange: (enabled: boolean) => void;
     onAudioEnabledChange: (enabled: boolean) => void;
     onLargeControlsChange: (enabled: boolean) => void;
@@ -370,6 +409,7 @@ interface MainMenuProps {
     onSfxVolumeChange: (volume: number) => void;
     onTutorialEnabledChange: (enabled: boolean) => void;
     onTutorialRecommendationDismiss: () => void;
+    onVideoModeChange: (mode: VideoMode) => void;
     onBotGame: (playerLimit: PlayerLimit) => void;
     onCreateRoom: () => void;
     onJoinRoom: () => void;
@@ -386,6 +426,7 @@ export function MainMenu({
     sfxVolume,
     tutorialEnabled,
     tutorialRecommendationDismissed,
+    videoMode,
     onAlwaysShowJoystickChange,
     onAudioEnabledChange,
     onLargeControlsChange,
@@ -393,6 +434,7 @@ export function MainMenu({
     onSfxVolumeChange,
     onTutorialEnabledChange,
     onTutorialRecommendationDismiss,
+    onVideoModeChange,
     onBotGame,
     onCreateRoom,
     onJoinRoom,
@@ -401,6 +443,35 @@ export function MainMenu({
     localAddressOnly,
 }: MainMenuProps) {
     const [offlineOptionsOpen, setOfflineOptionsOpen] = useState(false);
+    const [settingsTab, setSettingsTab] = useState<SettingsTab>("gameplay");
+
+    function selectSettingsTab(tab: SettingsTab) {
+        setSettingsTab(tab);
+    }
+
+    function moveSettingsFocus(
+        event: KeyboardEvent<HTMLButtonElement>,
+        currentTab: SettingsTab,
+    ) {
+        const currentIndex = SETTINGS_TABS.findIndex(({ id }) => id === currentTab);
+        let nextIndex = currentIndex;
+        if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+            nextIndex = (currentIndex + 1) % SETTINGS_TABS.length;
+        } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+            nextIndex = (currentIndex - 1 + SETTINGS_TABS.length) % SETTINGS_TABS.length;
+        } else if (event.key === "Home") {
+            nextIndex = 0;
+        } else if (event.key === "End") {
+            nextIndex = SETTINGS_TABS.length - 1;
+        } else {
+            return;
+        }
+
+        event.preventDefault();
+        const nextTab = SETTINGS_TABS[nextIndex].id;
+        setSettingsTab(nextTab);
+        document.getElementById(`settings-tab-${nextTab}`)?.focus();
+    }
 
     return (
         <div className="screen screen--menu">
@@ -480,79 +551,201 @@ export function MainMenu({
                 )}
             </details>
 
-            <div className="menu-settings" aria-label="Game settings">
-                {tutorialRecommendationDismissed && (
+            <section className="settings-panel" aria-labelledby="settings-heading">
+                <div className="settings-panel__heading">
+                    <div>
+                        <p className="eyebrow">Mission controls</p>
+                        <h2 id="settings-heading">Settings</h2>
+                    </div>
+                    <span className="settings-panel__saved">Saved automatically</span>
+                </div>
+
+                <div className="settings-tabs" role="tablist" aria-label="Settings sections">
+                    {SETTINGS_TABS.map((tab) => (
+                        <button
+                            id={`settings-tab-${tab.id}`}
+                            key={tab.id}
+                            className="settings-tabs__tab"
+                            type="button"
+                            role="tab"
+                            aria-selected={settingsTab === tab.id}
+                            aria-controls={`settings-panel-${tab.id}`}
+                            tabIndex={settingsTab === tab.id ? 0 : -1}
+                            onClick={() => selectSettingsTab(tab.id)}
+                            onKeyDown={(event) => moveSettingsFocus(event, tab.id)}
+                        >
+                            {tab.label}
+                        </button>
+                    ))}
+                </div>
+
+                <div
+                    className="menu-settings settings-panel__content"
+                    id="settings-panel-gameplay"
+                    role="tabpanel"
+                    aria-labelledby="settings-tab-gameplay"
+                    hidden={settingsTab !== "gameplay"}
+                >
+                    {tutorialRecommendationDismissed && (
+                        <label className="setting-card">
+                            <span className="setting-card__copy">
+                                <strong>Guided setup</strong>
+                                <small>Show the first-match movement and objective guide</small>
+                            </span>
+                            <input
+                                type="checkbox"
+                                checked={tutorialEnabled}
+                                onChange={(event) => onTutorialEnabledChange(event.target.checked)}
+                            />
+                            <span className="switch" aria-hidden="true" />
+                        </label>
+                    )}
                     <label className="setting-card">
                         <span className="setting-card__copy">
-                            <strong>Guided setup</strong>
-                            <small>Show the first-match movement and objective guide</small>
+                            <strong>Large controls</strong>
+                            <small>Increase buttons and interaction targets</small>
                         </span>
                         <input
                             type="checkbox"
-                            checked={tutorialEnabled}
-                            onChange={(event) => onTutorialEnabledChange(event.target.checked)}
+                            checked={largeControls}
+                            onChange={(event) => onLargeControlsChange(event.target.checked)}
                         />
                         <span className="switch" aria-hidden="true" />
                     </label>
-                )}
-                <label className="setting-card">
-                    <span className="setting-card__copy">
-                        <strong>Large controls</strong>
-                        <small>Increase buttons and interaction targets</small>
-                    </span>
-                    <input
-                        type="checkbox"
-                        checked={largeControls}
-                        onChange={(event) => onLargeControlsChange(event.target.checked)}
+
+                    <label className="setting-card">
+                        <span className="setting-card__copy">
+                            <strong>Always show joystick</strong>
+                            <small>Keep the mobile movement control visible on screen</small>
+                        </span>
+                        <input
+                            type="checkbox"
+                            checked={alwaysShowJoystick}
+                            onChange={(event) => onAlwaysShowJoystickChange(event.target.checked)}
+                        />
+                        <span className="switch" aria-hidden="true" />
+                    </label>
+                </div>
+
+                <div
+                    className="menu-settings settings-panel__content"
+                    id="settings-panel-audio"
+                    role="tabpanel"
+                    aria-labelledby="settings-tab-audio"
+                    hidden={settingsTab !== "audio"}
+                >
+                    <label className="setting-card setting-card--wide">
+                        <span className="setting-card__copy">
+                            <strong>Audio</strong>
+                            <small>Master switch for music and sound effects</small>
+                        </span>
+                        <input
+                            type="checkbox"
+                            checked={audioEnabled}
+                            onChange={(event) => onAudioEnabledChange(event.target.checked)}
+                        />
+                        <span className="switch" aria-hidden="true" />
+                    </label>
+
+                    <VolumeControl
+                        id="music-volume"
+                        label="Music volume"
+                        description="Ambient score and match music"
+                        value={musicVolume}
+                        onChange={onMusicVolumeChange}
                     />
-                    <span className="switch" aria-hidden="true" />
-                </label>
 
-                <label className="setting-card">
-                    <span className="setting-card__copy">
-                        <strong>Always show joystick</strong>
-                        <small>Keep the mobile movement control visible on screen</small>
-                    </span>
-                    <input
-                        type="checkbox"
-                        checked={alwaysShowJoystick}
-                        onChange={(event) => onAlwaysShowJoystickChange(event.target.checked)}
+                    <VolumeControl
+                        id="sfx-volume"
+                        label="SFX volume"
+                        description="Footsteps, movement, tethers, and world effects"
+                        value={sfxVolume}
+                        onChange={onSfxVolumeChange}
                     />
-                    <span className="switch" aria-hidden="true" />
-                </label>
+                </div>
 
-                <label className="setting-card">
-                    <span className="setting-card__copy">
-                        <strong>Audio</strong>
-                        <small>Master switch for music and sound effects</small>
-                    </span>
-                    <input
-                        type="checkbox"
-                        checked={audioEnabled}
-                        onChange={(event) => onAudioEnabledChange(event.target.checked)}
-                    />
-                    <span className="switch" aria-hidden="true" />
-                </label>
-
-                <VolumeControl
-                    id="music-volume"
-                    label="Music volume"
-                    description="Ambient score and match music"
-                    value={musicVolume}
-                    onChange={onMusicVolumeChange}
-                />
-
-                <VolumeControl
-                    id="sfx-volume"
-                    label="SFX volume"
-                    description="Footsteps, movement, tethers, and world effects"
-                    value={sfxVolume}
-                    onChange={onSfxVolumeChange}
-                />
-            </div>
+                <div
+                    className="menu-settings settings-panel__content settings-panel__content--video"
+                    id="settings-panel-video"
+                    role="tabpanel"
+                    aria-labelledby="settings-tab-video"
+                    hidden={settingsTab !== "video"}
+                >
+                    <p
+                        className="settings-panel__description"
+                        id="settings-video-description"
+                    >
+                        Choose richer effects or reserve more headroom for mobile devices and busy 3–4 player matches.
+                    </p>
+                    <fieldset
+                        className="video-mode-options"
+                        aria-describedby="settings-video-description"
+                    >
+                        <legend className="sr-only">Video mode</legend>
+                        <VideoModeOption
+                            mode="quality"
+                            currentMode={videoMode}
+                            title="Quality"
+                            description="Sharper rendering, antialiasing, full lighting, and complete visual effects."
+                            detail="Best visuals"
+                            onChange={onVideoModeChange}
+                        />
+                        <VideoModeOption
+                            mode="performance"
+                            currentMode={videoMode}
+                            title="Performance"
+                            description="Lower render resolution with lighter blur and particle effects for steadier play."
+                            detail="Smoother play"
+                            onChange={onVideoModeChange}
+                        />
+                    </fieldset>
+                </div>
+            </section>
 
             <footer className="credits">Created by <span>Ricardo Guerrero</span></footer>
         </div>
+    );
+}
+
+function VideoModeOption({
+    mode,
+    currentMode,
+    title,
+    description,
+    detail,
+    onChange,
+}: {
+    mode: VideoMode;
+    currentMode: VideoMode;
+    title: string;
+    description: string;
+    detail: string;
+    onChange: (mode: VideoMode) => void;
+}) {
+    const selected = mode === currentMode;
+    return (
+        <label className="video-mode-card">
+            <input
+                type="radio"
+                name="video-mode"
+                value={mode}
+                checked={selected}
+                onChange={() => onChange(mode)}
+            />
+            <span className="video-mode-card__surface">
+                <span className="video-mode-card__indicator" aria-hidden="true" />
+                <span className="video-mode-card__copy">
+                    <span className="video-mode-card__title-row">
+                        <strong>{title}</strong>
+                        <em>{detail}</em>
+                    </span>
+                    <small>{description}</small>
+                </span>
+                <span className="video-mode-card__selected" aria-hidden={!selected}>
+                    {selected ? "Selected" : ""}
+                </span>
+            </span>
+        </label>
     );
 }
 

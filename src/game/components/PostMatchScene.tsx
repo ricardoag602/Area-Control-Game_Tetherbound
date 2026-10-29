@@ -6,6 +6,7 @@ import {
   type ReactNode,
 } from "react";
 import type { GameState, PlayerId } from "../types";
+import type { VideoMode } from "../preferences/video";
 import { ArenaRenderer } from "./ArenaRenderer";
 
 export const POST_MATCH_RESULTS_HOLD_MS = 1_000;
@@ -13,12 +14,14 @@ export const POST_MATCH_RESULTS_HOLD_MS = 1_000;
 interface PostMatchSceneProps {
   state: GameState;
   localPlayerId: PlayerId;
+  videoMode?: VideoMode;
   children: ReactNode;
 }
 
 export function PostMatchScene({
   state,
   localPlayerId,
+  videoMode = "quality",
   children,
 }: PostMatchSceneProps) {
   const [overviewSettled, setOverviewSettled] = useState(false);
@@ -47,11 +50,15 @@ export function PostMatchScene({
   }, [showResults]);
 
   return (
-    <div className="screen screen--game screen--post-match">
+    <div
+      className="screen screen--game screen--post-match"
+      data-video-mode={videoMode}
+    >
       <div className="post-match-map" aria-label="Final map overview">
         <ArenaRenderer
           state={state}
           localPlayerId={localPlayerId}
+          videoMode={videoMode}
           disabled
           cameraMode="overview"
           onOverviewSettled={settleOverview}

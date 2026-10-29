@@ -58,6 +58,7 @@ import type {
   Vec2,
 } from "../types";
 import type { TutorialStepId } from "../tutorial/guidedSetup";
+import type { VideoMode } from "../preferences/video";
 import { useFollowCamera } from "../hooks/useFollowCamera";
 import { useSmoothedPositions } from "../hooks/useSmoothedPositions";
 import { PixiTerrainLayer } from "./PixiTerrainLayer";
@@ -99,6 +100,7 @@ interface ArenaRendererProps {
   tutorialStep?: TutorialStepId | null;
   tutorialTarget?: Vec2 | null;
   compatibilityMode?: boolean;
+  videoMode?: VideoMode;
   onPresentationStateChange?: (state: ArenaPresentationState) => void;
 }
 
@@ -142,6 +144,7 @@ export function ArenaRenderer({
   tutorialStep = null,
   tutorialTarget = null,
   compatibilityMode = false,
+  videoMode = "quality",
   onPresentationStateChange,
 }: ArenaRendererProps) {
   const { positions: renderPositions, positionsRef: renderPositionsRef } =
@@ -649,6 +652,7 @@ export function ArenaRenderer({
       <PixiTerrainLayer
         state={state}
         cameraRef={cameraRef}
+        videoMode={videoMode}
         onInitialRender={handleTerrainReady}
         onLoadError={handlePresentationLoadError}
       />
@@ -728,6 +732,7 @@ export function ArenaRenderer({
           state={state}
           renderPositionsRef={renderPositionsRef}
           cameraRef={cameraRef}
+          videoMode={videoMode}
           onReadyChange={setThreeAstronautsReady}
           onObjectReadyChange={setThreeObjectsReady}
           onLoadError={handlePresentationLoadError}

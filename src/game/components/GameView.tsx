@@ -11,12 +11,14 @@ import type {
 import { MatchScreen } from "./MatchScreen";
 import { PostMatchScene } from "./PostMatchScene";
 import type { ArenaPresentationState } from "./ArenaRenderer";
+import type { VideoMode } from "../preferences/video";
 
 interface GameViewProps {
   alwaysShowJoystick: boolean;
   audioEnabled: boolean;
   sfxVolume: number;
   tutorialEnabled: boolean;
+  videoMode?: VideoMode;
   playerLimit: PlayerLimit;
   onMusicStateChange: (
     state: Pick<GameState, "matchPhase" | "remainingMs">,
@@ -35,6 +37,7 @@ export function GameView({
   audioEnabled,
   sfxVolume,
   tutorialEnabled,
+  videoMode = "quality",
   playerLimit,
   onMusicStateChange,
   onLeave,
@@ -48,6 +51,7 @@ export function GameView({
       audioEnabled={audioEnabled}
       sfxVolume={sfxVolume}
       tutorialEnabled={tutorialEnabled}
+      videoMode={videoMode}
       playerLimit={playerLimit}
       onMusicStateChange={onMusicStateChange}
       onLeave={onLeave}
@@ -67,6 +71,7 @@ function LocalMatch({
   audioEnabled,
   sfxVolume,
   tutorialEnabled,
+  videoMode,
   playerLimit,
   onMusicStateChange,
   onLeave,
@@ -76,6 +81,7 @@ function LocalMatch({
   audioEnabled: boolean;
   sfxVolume: number;
   tutorialEnabled: boolean;
+  videoMode: VideoMode;
   playerLimit: PlayerLimit;
   onMusicStateChange: (
     state: Pick<GameState, "matchPhase" | "remainingMs">,
@@ -109,6 +115,7 @@ function LocalMatch({
       <BotMatchResultView
         state={state}
         localPlayerId="player"
+        videoMode={videoMode}
         onRestart={onRestart}
         onLeave={onLeave}
       />
@@ -125,6 +132,7 @@ function LocalMatch({
       audioEnabled={audioEnabled}
       sfxVolume={sfxVolume}
       tutorialEnabled={tutorialEnabled}
+      videoMode={videoMode}
       interpolatePositions={true}
       onPresentationStateChange={handlePresentationStateChange}
       onMovementCommand={sendMovementCommand}
@@ -137,11 +145,13 @@ function LocalMatch({
 function BotMatchResultView({
   state,
   localPlayerId,
+  videoMode,
   onRestart,
   onLeave,
 }: {
   state: GameState;
   localPlayerId: PlayerId;
+  videoMode: VideoMode;
   onRestart: () => void;
   onLeave: () => void;
 }) {
@@ -160,7 +170,11 @@ function BotMatchResultView({
     reason === "overtime_lead" || reason === "overtime_territory";
 
   return (
-    <PostMatchScene state={state} localPlayerId={localPlayerId}>
+    <PostMatchScene
+      state={state}
+      localPlayerId={localPlayerId}
+      videoMode={videoMode}
+    >
       <header className="section-heading result-heading">
         <p className="eyebrow">{finishLabel(reason)}</p>
         <h2>{result}</h2>

@@ -19,6 +19,7 @@ import { calculateSupplyDropToast } from "../presentation/supplyDrop";
 import { useDeployShortcut } from "../input/useDeployShortcut";
 import { sampleScorableTerritory } from "../simulation/scoring";
 import type { GameState, MovementCommand, PlayerId } from "../types";
+import type { VideoMode } from "../preferences/video";
 import {
   getTerritoryTopologyKey,
   sampleTerritoryGrid,
@@ -56,6 +57,7 @@ interface MatchScreenProps {
   controlsDisabled?: boolean;
   reconnectPrompt?: { message: string; onRetry: () => void };
   interpolatePositions?: boolean;
+  videoMode?: VideoMode;
   onMovementCommand: (command: MovementCommand) => void;
   onDeploy: () => void;
   onLeave: () => void;
@@ -77,7 +79,7 @@ export function scheduleMatchPresentationTimeout(
   return () => clearTimeout(timeout);
 }
 
-export function MatchScreen({ alwaysShowJoystick, audioEnabled, sfxVolume, tutorialEnabled, state, localPlayerId, playerNames = {}, statusText, latencyMs, controlsDisabled = false, reconnectPrompt, interpolatePositions = false, onMovementCommand, onDeploy, onLeave, onPresentationStateChange }: MatchScreenProps) {
+export function MatchScreen({ alwaysShowJoystick, audioEnabled, sfxVolume, tutorialEnabled, state, localPlayerId, playerNames = {}, statusText, latencyMs, controlsDisabled = false, reconnectPrompt, interpolatePositions = false, videoMode = "quality", onMovementCommand, onDeploy, onLeave, onPresentationStateChange }: MatchScreenProps) {
   const [presentationState, setPresentationState] = useState<ArenaPresentationState>("loading");
   const [presentationAttempt, setPresentationAttempt] = useState(0);
   const [compatibilityMode, setCompatibilityMode] = useState(false);
@@ -207,6 +209,7 @@ export function MatchScreen({ alwaysShowJoystick, audioEnabled, sfxVolume, tutor
   return (
     <div
       className={`screen screen--game screen--active-match screen--presentation-${presentationState}${hideMatchProgress ? " screen--final-countdown" : ""}`}
+      data-video-mode={videoMode}
     >
       <div
         className="match-presentation-content"
@@ -241,6 +244,7 @@ export function MatchScreen({ alwaysShowJoystick, audioEnabled, sfxVolume, tutor
         <ArenaRenderer key={presentationAttempt} state={state} localPlayerId={localPlayerId} disabled={interactionDisabled}
           alwaysShowTouchJoystick={alwaysShowJoystick}
           interpolatePositions={interpolatePositions}
+          videoMode={videoMode}
           oxygenZoomMultiplier={oxygenPresentation.cameraZoomMultiplier}
           tutorialStep={tutorialStep}
           tutorialTarget={tutorialTarget}
