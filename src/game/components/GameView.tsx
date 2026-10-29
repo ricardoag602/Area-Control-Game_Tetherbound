@@ -1,4 +1,5 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { GAME_RULES } from "../constants";
 import { useLocalMatch } from "../hooks/useLocalMatch";
 import { sampleScorableTerritory } from "../simulation/scoring";
 import type {
@@ -16,6 +17,9 @@ interface GameViewProps {
   audioEnabled: boolean;
   tutorialEnabled: boolean;
   playerLimit: PlayerLimit;
+  onMusicStateChange: (
+    state: Pick<GameState, "matchPhase" | "remainingMs">,
+  ) => void;
   onLeave: () => void;
 }
 
@@ -30,6 +34,7 @@ export function GameView({
   audioEnabled,
   tutorialEnabled,
   playerLimit,
+  onMusicStateChange,
   onLeave,
 }: GameViewProps) {
   const [matchNumber, setMatchNumber] = useState(0);
@@ -41,8 +46,15 @@ export function GameView({
       audioEnabled={audioEnabled}
       tutorialEnabled={tutorialEnabled}
       playerLimit={playerLimit}
+      onMusicStateChange={onMusicStateChange}
       onLeave={onLeave}
-      onRestart={() => setMatchNumber((current) => current + 1)}
+      onRestart={() => {
+        onMusicStateChange({
+          matchPhase: "setup",
+          remainingMs: GAME_RULES.matchDurationMs,
+        });
+        setMatchNumber((current) => current + 1);
+      }}
     />
   );
 }
@@ -52,6 +64,7 @@ function LocalMatch({
   audioEnabled,
   tutorialEnabled,
   playerLimit,
+  onMusicStateChange,
   onLeave,
   onRestart,
 }: {
@@ -59,6 +72,9 @@ function LocalMatch({
   audioEnabled: boolean;
   tutorialEnabled: boolean;
   playerLimit: PlayerLimit;
+  onMusicStateChange: (
+    state: Pick<GameState, "matchPhase" | "remainingMs">,
+  ) => void;
   onLeave: () => void;
   onRestart: () => void;
 }) {
@@ -67,6 +83,13 @@ function LocalMatch({
     paused: !presentationReady,
     playerLimit,
   });
+  const musicSecond = Math.ceil(state.remainingMs / 1_000);
+  useEffect(() => {
+    onMusicStateChange({
+      matchPhase: state.matchPhase,
+      remainingMs: Math.max(0, musicSecond * 1_000),
+    });
+  }, [musicSecond, onMusicStateChange, state.matchPhase]);
   const handlePresentationStateChange = useCallback(
     (presentationState: ArenaPresentationState) => {
       setPresentationReady(

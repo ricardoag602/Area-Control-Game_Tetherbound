@@ -10,11 +10,6 @@ import {
 } from "../presentation/interactionEvents";
 import type { GameState, MovementMode, PlayerId, Vec2 } from "../types";
 import { sampleWorld, type BiomeId } from "../world/map";
-import {
-  createGameMusicRuntime,
-  updateGameMusic,
-  type GameMusicRuntime,
-} from "./gameMusic";
 
 export const AUDIO_PREFERENCE_KEY = "tetherbound.audioEnabled";
 
@@ -125,7 +120,6 @@ export interface GameAudioRuntime {
   readonly effectsBus: GainNode;
   readonly remoteEffectsBus: RemoteEffectsBus;
   readonly ambienceBus: GainNode;
-  readonly music: GameMusicRuntime;
   readonly noiseBuffer: AudioBuffer;
   readonly footstepBuffers: Partial<Record<FootstepSampleId, AudioBuffer>>;
   readonly motionBed: MotionBed;
@@ -449,7 +443,6 @@ export function createGameAudioRuntime(
     const ambienceBus = context.createGain();
     ambienceBus.gain.value = 0.78;
     ambienceBus.connect(masterInput);
-    const music = createGameMusicRuntime(context, masterInput, activeSources);
     const noiseBuffer = createNoiseBuffer(context, 2.4, 0x4b1d5eed);
     const motionBed = createMotionBed(
       context,
@@ -487,7 +480,6 @@ export function createGameAudioRuntime(
       effectsBus,
       remoteEffectsBus,
       ambienceBus,
-      music,
       noiseBuffer,
       footstepBuffers: {},
       motionBed,
@@ -533,7 +525,6 @@ export function updateGameAudio(runtime: GameAudioRuntime, state: GameState) {
 
   updateMotionBed(runtime, movement.mode, movement.chargeSeconds, blend, now);
   updateNetworkHum(runtime, state, position, now);
-  updateGameMusic(runtime.music, runtime.context, state);
   updateRemotePlayerAudio(
     runtime,
     state,

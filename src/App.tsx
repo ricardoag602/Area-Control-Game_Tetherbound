@@ -1,8 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import { MenuNetworkBackground } from "./components/MenuNetworkBackground";
+import { GAME_RULES } from "./game/constants";
+import { AppMusicLayer } from "./game/components/AppMusicLayer";
 import { GameView } from "./game/components/GameView";
 import { NetworkGameView } from "./network/components/NetworkGameView";
-import { PLAYER_IDS, type GameMode, type PlayerLimit } from "./game/types";
+import {
+    PLAYER_IDS,
+    type GameMode,
+    type GameState,
+    type PlayerLimit,
+} from "./game/types";
+import type { GameMusicPresentation } from "./game/audio/gameMusic";
 import { getRoomServerUrl, RoomClient } from "./network/RoomClient";
 import {
     createGameAddress,
@@ -48,6 +56,9 @@ export function App() {
     const [view, setView] = useState<View>(initialRoomCode ? "join-room" : "menu");
     const [gameMode, setGameMode] = useState<GameMode>("bot");
     const [botPlayerLimit, setBotPlayerLimit] = useState<PlayerLimit>(2);
+    const [localMusicState, setLocalMusicState] = useState<
+        Pick<GameState, "matchPhase" | "remainingMs">
+    >({ matchPhase: "setup", remainingMs: GAME_RULES.matchDurationMs });
     const [roomClient] = useState(() => new RoomClient());
     const [gameAddress] = useState(() => createGameAddress(window.location.href));
     const [roomServerAddress] = useState(() => getRoomServerUrl());
@@ -148,6 +159,10 @@ export function App() {
         preloadThreeGameplayAssets(PLAYER_IDS.slice(0, playerLimit));
         roomClient.leave();
         clearRoomFromUrl();
+        setLocalMusicState({
+            matchPhase: "setup",
+            remainingMs: GAME_RULES.matchDurationMs,
+        });
         setBotPlayerLimit(playerLimit);
         setGameMode("bot");
         setView("game");
@@ -187,9 +202,28 @@ export function App() {
         ? createInvitationLink(window.location.href, roomSession.room.code)
         : "";
     const localAddressOnly = isLoopbackHostname(window.location.hostname);
+    const musicPresentation: GameMusicPresentation = (() => {
+        if (view === "result") return { scene: "finished" };
+        if (view !== "game") return { scene: "menu" };
+
+        const match = gameMode === "multiplayer"
+            ? roomSession.gameState
+            : localMusicState;
+        if (!match) return { scene: "menu" };
+        if (match.matchPhase === "finished") return { scene: "finished" };
+        return {
+            scene: "gameplay",
+            matchPhase: match.matchPhase,
+            remainingMs: match.remainingMs,
+        };
+    })();
 
     return (
         <main className={largeControls ? "app app--large-controls" : "app"}>
+            <AppMusicLayer
+                enabled={audioEnabled}
+                presentation={musicPresentation}
+            />
             {view === "menu" && <MenuNetworkBackground />}
             <div className="space-noise" aria-hidden="true" />
             <section className="view-stage">
@@ -260,6 +294,7 @@ export function App() {
                         audioEnabled={audioEnabled}
                         tutorialEnabled={tutorialEnabled}
                         playerLimit={botPlayerLimit}
+                        onMusicStateChange={setLocalMusicState}
                         onLeave={() => setView("menu")}
                     />
                 )}
