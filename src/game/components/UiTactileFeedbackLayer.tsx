@@ -20,7 +20,7 @@ const INTERACTIVE_SELECTOR = [
 ].join(",");
 
 const TACTILE_DISABLED_SELECTOR = '[data-tactile-feedback="off"]';
-const CLICK_MIX_SCALE = 0.7;
+const CLICK_MIX_SCALE = 0.7 * 0.9;
 
 /** Returns true when a click should receive shared tactile UI feedback. */
 export function isTactileFeedbackTarget(target: EventTarget | null) {

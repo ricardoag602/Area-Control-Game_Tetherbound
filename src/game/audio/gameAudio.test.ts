@@ -203,8 +203,8 @@ describe("audio volume preferences", () => {
 });
 
 describe("jump-boost mix", () => {
-  it("uses the requested thirty-percent quieter SFX master level", () => {
-    expect(GAME_AUDIO_RULES.masterGain).toBeCloseTo(0.72 * 0.7, 10);
+  it("reduces the current SFX master by another ten percent", () => {
+    expect(GAME_AUDIO_RULES.masterGain).toBeCloseTo(0.72 * 0.7 * 0.9, 10);
   });
 
   it("keeps the procedural white-noise layers below their original gain", () => {

@@ -13,7 +13,7 @@ describe("background music composition", () => {
     expect(GAME_MUSIC_RULES.bpm).toBe(172);
     expect(GAME_MUSIC_RULES.stepsPerBeat).toBe(4);
     expect(GAME_MUSIC_RULES.loopSteps).toBe(128);
-    expect(GAME_MUSIC_RULES.outputGain).toBeCloseTo(0.48 * 1.3, 10);
+    expect(GAME_MUSIC_RULES.outputGain).toBeCloseTo(0.48 * 1.3 * 1.3, 10);
     expect(GAME_MUSIC_RULES.outputGain).toBeGreaterThan(0);
     expect(GAME_MUSIC_RULES.outputGain).toBeLessThan(1);
   });

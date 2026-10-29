@@ -22,7 +22,7 @@ export const GAME_AUDIO_RULES = {
   maximumContinuousSnapshotGapMs: 320,
   audibleWorldDistance: 92,
   fullVolumeWorldDistance: 10,
-  masterGain: 0.72 * 0.7,
+  masterGain: 0.72 * 0.7 * 0.9,
   jumpBoostWhiteNoiseGainScale: 0.84,
   remoteBitDepth: 6,
   remoteLowpassFrequency: 2_700,
