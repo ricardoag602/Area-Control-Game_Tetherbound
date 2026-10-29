@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { MenuNetworkBackground } from "./components/MenuNetworkBackground";
 import { GAME_RULES } from "./game/constants";
 import { AppMusicLayer } from "./game/components/AppMusicLayer";
+import { UiTactileFeedbackLayer } from "./game/components/UiTactileFeedbackLayer";
 import { GameView } from "./game/components/GameView";
 import { NetworkGameView } from "./network/components/NetworkGameView";
 import {
@@ -247,6 +248,10 @@ export function App() {
                 enabled={audioEnabled}
                 presentation={musicPresentation}
                 volume={musicVolume}
+            />
+            <UiTactileFeedbackLayer
+                enabled={audioEnabled}
+                volume={sfxVolume}
             />
             {view === "menu" && <MenuNetworkBackground />}
             <div className="space-noise" aria-hidden="true" />

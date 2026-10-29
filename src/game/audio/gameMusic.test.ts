@@ -13,8 +13,24 @@ describe("background music composition", () => {
     expect(GAME_MUSIC_RULES.bpm).toBe(172);
     expect(GAME_MUSIC_RULES.stepsPerBeat).toBe(4);
     expect(GAME_MUSIC_RULES.loopSteps).toBe(128);
+    expect(GAME_MUSIC_RULES.outputGain).toBeCloseTo(0.48 * 1.3, 10);
     expect(GAME_MUSIC_RULES.outputGain).toBeGreaterThan(0);
     expect(GAME_MUSIC_RULES.outputGain).toBeLessThan(1);
+  });
+
+  it("adds only a subtle gameplay high-shelf lift", () => {
+    const menu = getMusicArrangement({ scene: "menu" });
+    const gameplay = getMusicArrangement({
+      scene: "gameplay",
+      matchPhase: "regulation",
+      remainingMs: 120_000,
+    });
+    const finished = getMusicArrangement({ scene: "finished" });
+
+    expect(menu.highShelfGainDb).toBe(0);
+    expect(finished.highShelfGainDb).toBe(0);
+    expect(gameplay.highShelfGainDb).toBeGreaterThan(0);
+    expect(gameplay.highShelfGainDb).toBeLessThanOrEqual(1.25);
   });
 
   it("keeps percussion out of the menu arrangement and brings it into gameplay", () => {

@@ -370,6 +370,7 @@ export function MatchScreen({ alwaysShowJoystick, audioEnabled, sfxVolume, tutor
           deployReady={!deployDisabled}
         />
         <button className={`deploy-button${tutorialStep === "deploy" ? " deploy-button--tutorial" : ""}`} disabled={deployDisabled} onClick={onDeploy}
+          data-tactile-feedback="off"
           aria-label="Deploy tether" aria-keyshortcuts="T" title="Deploy tether (T)">
           <span className="deploy-button__icon" aria-hidden="true" />
           <span className="deploy-button__label">Deploy</span>

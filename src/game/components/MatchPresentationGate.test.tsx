@@ -37,6 +37,9 @@ describe("MatchScreen 3D readiness gate", () => {
     expect(markup).toContain("Preparing the frontier…");
     expect(markup).toContain("Loading the terrain, astronauts, and tether equipment before launch.");
     expect(markup).toContain("world-stage--loading");
+    expect(markup).toMatch(
+      /<button[^>]*data-tactile-feedback="off"[^>]*aria-label="Deploy tether"/,
+    );
     expect(markup).not.toContain("Use compatibility graphics");
   });
 

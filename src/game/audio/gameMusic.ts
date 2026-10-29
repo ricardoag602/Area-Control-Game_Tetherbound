@@ -6,7 +6,7 @@ export const GAME_MUSIC_RULES = {
   stepsPerBeat: 4,
   loopSteps: 128,
   scheduleAheadSeconds: 0.6,
-  outputGain: 0.48,
+  outputGain: 0.48 * 1.3,
 } as const;
 
 const STEP_SECONDS = 60 / GAME_MUSIC_RULES.bpm / GAME_MUSIC_RULES.stepsPerBeat;
@@ -30,6 +30,7 @@ export interface GameMusicArrangement {
   readonly arpeggioGain: number;
   readonly percussionGain: number;
   readonly brightnessHz: number;
+  readonly highShelfGainDb: number;
   readonly reverbGain: number;
 }
 
@@ -68,6 +69,7 @@ export interface GameMusicRuntime {
   readonly resolutionGain: GainNode;
   readonly harmonicFilter: BiquadFilterNode;
   readonly bassFilter: BiquadFilterNode;
+  readonly highShelf: BiquadFilterNode;
   readonly reverbReturn: GainNode;
   readonly output: GainNode;
   readonly noiseBuffer: AudioBuffer;
@@ -119,6 +121,7 @@ export function getMusicArrangement(
       arpeggioGain: 0,
       percussionGain: 0,
       brightnessHz: 1_000,
+      highShelfGainDb: 0,
       reverbGain: 0.48,
     };
   }
@@ -131,6 +134,7 @@ export function getMusicArrangement(
       arpeggioGain: 0.5,
       percussionGain: 0,
       brightnessHz: 1_650,
+      highShelfGainDb: 0,
       reverbGain: 0.36,
     };
   }
@@ -144,6 +148,7 @@ export function getMusicArrangement(
     arpeggioGain: 0.58 + energy * 0.42,
     percussionGain: 0.48 + energy * 0.42,
     brightnessHz: 1_900 + energy * 3_900,
+    highShelfGainDb: 0.9 + energy * 0.3,
     reverbGain: 0.3 + energy * 0.18,
   };
 }
@@ -200,6 +205,10 @@ export function createGameMusicRuntime(
   bassFilter.type = "lowpass";
   bassFilter.frequency.value = 820;
   bassFilter.Q.value = 1.8;
+  const highShelf = context.createBiquadFilter();
+  highShelf.type = "highshelf";
+  highShelf.frequency.value = 4_600;
+  highShelf.gain.value = 0;
 
   const harmonicGain = context.createGain();
   harmonicGain.gain.value = 0;
@@ -239,7 +248,7 @@ export function createGameMusicRuntime(
   const output = context.createGain();
   output.gain.value = 0;
 
-  input.connect(output);
+  input.connect(highShelf).connect(output);
   harmonicInput.connect(harmonicFilter).connect(harmonicGain).connect(input);
   bassInput.connect(bassFilter).connect(bassGain).connect(input);
   arpeggioInput.connect(arpeggioGain).connect(input);
@@ -272,6 +281,7 @@ export function createGameMusicRuntime(
     resolutionGain,
     harmonicFilter,
     bassFilter,
+    highShelf,
     reverbReturn,
     output,
     noiseBuffer: createNoiseBuffer(context, 1.4, 0x2f6e3a91),
@@ -286,6 +296,7 @@ export function createGameMusicRuntime(
       reverbInput,
       harmonicFilter,
       bassFilter,
+      highShelf,
       harmonicGain,
       bassGain,
       arpeggioGain,
@@ -410,6 +421,7 @@ function applyArrangement(
   );
   setTarget(runtime.resolutionGain.gain, ENVELOPE_FLOOR, now, 0.18);
   setTarget(runtime.harmonicFilter.frequency, arrangement.brightnessHz, now, 0.8);
+  setTarget(runtime.highShelf.gain, arrangement.highShelfGainDb, now, 0.7);
   setTarget(
     runtime.bassFilter.frequency,
     620 + arrangement.energy * 1_250,
@@ -425,6 +437,7 @@ function fadeLoopStems(runtime: GameMusicRuntime, now: number) {
   setTarget(runtime.bassGain.gain, ENVELOPE_FLOOR, now, 0.18);
   setTarget(runtime.arpeggioGain.gain, ENVELOPE_FLOOR, now, 0.22);
   setTarget(runtime.harmonicGain.gain, ENVELOPE_FLOOR, now, 0.42);
+  setTarget(runtime.highShelf.gain, 0, now, 0.32);
   setTarget(runtime.resolutionGain.gain, 1, now, 0.025);
   setTarget(runtime.reverbReturn.gain, 0.52, now, 0.45);
   setTarget(runtime.output.gain, GAME_MUSIC_RULES.outputGain, now, 0.08);
