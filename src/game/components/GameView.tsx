@@ -15,6 +15,7 @@ import type { ArenaPresentationState } from "./ArenaRenderer";
 interface GameViewProps {
   alwaysShowJoystick: boolean;
   audioEnabled: boolean;
+  sfxVolume: number;
   tutorialEnabled: boolean;
   playerLimit: PlayerLimit;
   onMusicStateChange: (
@@ -32,6 +33,7 @@ const LOCAL_BOT_NAMES: Partial<Record<PlayerId, string>> = {
 export function GameView({
   alwaysShowJoystick,
   audioEnabled,
+  sfxVolume,
   tutorialEnabled,
   playerLimit,
   onMusicStateChange,
@@ -44,6 +46,7 @@ export function GameView({
       key={`${playerLimit}-${matchNumber}`}
       alwaysShowJoystick={alwaysShowJoystick}
       audioEnabled={audioEnabled}
+      sfxVolume={sfxVolume}
       tutorialEnabled={tutorialEnabled}
       playerLimit={playerLimit}
       onMusicStateChange={onMusicStateChange}
@@ -62,6 +65,7 @@ export function GameView({
 function LocalMatch({
   alwaysShowJoystick,
   audioEnabled,
+  sfxVolume,
   tutorialEnabled,
   playerLimit,
   onMusicStateChange,
@@ -70,6 +74,7 @@ function LocalMatch({
 }: {
   alwaysShowJoystick: boolean;
   audioEnabled: boolean;
+  sfxVolume: number;
   tutorialEnabled: boolean;
   playerLimit: PlayerLimit;
   onMusicStateChange: (
@@ -118,6 +123,7 @@ function LocalMatch({
       statusText={`${playerLimit}-player bot match`}
       alwaysShowJoystick={alwaysShowJoystick}
       audioEnabled={audioEnabled}
+      sfxVolume={sfxVolume}
       tutorialEnabled={tutorialEnabled}
       interpolatePositions={true}
       onPresentationStateChange={handlePresentationStateChange}

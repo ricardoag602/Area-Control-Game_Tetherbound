@@ -12,6 +12,8 @@ import type { GameState, MovementMode, PlayerId, Vec2 } from "../types";
 import { sampleWorld, type BiomeId } from "../world/map";
 
 export const AUDIO_PREFERENCE_KEY = "tetherbound.audioEnabled";
+export const MUSIC_VOLUME_PREFERENCE_KEY = "tetherbound.musicVolume";
+export const SFX_VOLUME_PREFERENCE_KEY = "tetherbound.sfxVolume";
 
 export const GAME_AUDIO_RULES = {
   biomeBlendRadius: 12,
@@ -259,6 +261,23 @@ const FLIGHT_FILTER_FREQUENCIES = {
 export function readAudioPreference(storage: Pick<Storage, "getItem"> | null = safeStorage()) {
   const value = storage?.getItem(AUDIO_PREFERENCE_KEY);
   return value === null || value === undefined ? true : value !== "false";
+}
+
+export function normalizeAudioVolume(value: number) {
+  if (!Number.isFinite(value)) return 1;
+  return Math.min(1, Math.max(0, value));
+}
+
+export function readMusicVolumePreference(
+  storage: Pick<Storage, "getItem"> | null = safeStorage(),
+) {
+  return readVolumePreference(MUSIC_VOLUME_PREFERENCE_KEY, storage);
+}
+
+export function readSfxVolumePreference(
+  storage: Pick<Storage, "getItem"> | null = safeStorage(),
+) {
+  return readVolumePreference(SFX_VOLUME_PREFERENCE_KEY, storage);
 }
 
 export function calculateBiomeAudioBlend(position: Vec2): BiomeAudioBlend {
@@ -658,6 +677,19 @@ export function resetGameAudioBaseline(
   const now = runtime.context.currentTime;
   setParam(runtime.motionBed.chargeGain.gain, 0, now, 0.025);
   setParam(runtime.motionBed.flightGain.gain, 0, now, 0.025);
+}
+
+export function setGameAudioVolume(
+  runtime: GameAudioRuntime | null,
+  volume: number,
+) {
+  if (!runtime || runtime.disposed) return;
+  setGainWithExactSilence(
+    runtime.masterGain.gain,
+    GAME_AUDIO_RULES.masterGain * normalizeAudioVolume(volume),
+    runtime.context.currentTime,
+    0.035,
+  );
 }
 
 export async function resumeGameAudio(runtime: GameAudioRuntime | null) {
@@ -1860,6 +1892,16 @@ function safeStorage() {
   } catch {
     return null;
   }
+}
+
+function readVolumePreference(
+  key: string,
+  storage: Pick<Storage, "getItem"> | null,
+) {
+  const stored = storage?.getItem(key);
+  if (stored === null || stored === undefined || stored.trim() === "") return 1;
+  const parsed = Number(stored);
+  return Number.isFinite(parsed) ? normalizeAudioVolume(parsed) : 1;
 }
 
 function distance(left: Vec2, right: Vec2) {

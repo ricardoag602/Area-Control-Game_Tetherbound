@@ -6,15 +6,19 @@ import {
   type GameMusicPresentation,
   type GameMusicRuntime,
 } from "../audio/gameMusic";
+import { normalizeAudioVolume } from "../audio/gameAudio";
 
 interface AppMusicLayerProps {
   enabled: boolean;
   presentation: GameMusicPresentation;
+  volume: number;
 }
 
 interface AppMusicRuntime {
   readonly context: AudioContext;
   readonly music: GameMusicRuntime;
+  readonly volumeGain: GainNode;
+  appliedVolume: number;
 }
 
 interface AudioContextWindow extends Window {
@@ -26,14 +30,14 @@ interface AudioContextWindow extends Window {
  * the view switch lets the ambient menu arrangement flow into the match and
  * gives the final cadence time to ring after the match screen unmounts.
  */
-export function AppMusicLayer({ enabled, presentation }: AppMusicLayerProps) {
+export function AppMusicLayer({ enabled, presentation, volume }: AppMusicLayerProps) {
   const runtimeRef = useRef<AppMusicRuntime | null>(null);
-  const latestRef = useRef({ enabled, presentation });
+  const latestRef = useRef({ enabled, presentation, volume });
   const disposeCurrentRef = useRef<() => void>(() => undefined);
 
   useLayoutEffect(() => {
-    latestRef.current = { enabled, presentation };
-  }, [enabled, presentation]);
+    latestRef.current = { enabled, presentation, volume };
+  }, [enabled, presentation, volume]);
 
   useEffect(() => {
     let disposed = false;
@@ -43,6 +47,7 @@ export function AppMusicLayer({ enabled, presentation }: AppMusicLayerProps) {
       if (!current) return;
       runtimeRef.current = null;
       disposeGameMusicRuntime(current.music);
+      current.volumeGain.disconnect();
       if (current.context.state !== "closed") {
         void current.context.close().catch(() => undefined);
       }
@@ -60,6 +65,7 @@ export function AppMusicLayer({ enabled, presentation }: AppMusicLayerProps) {
       ) {
         return;
       }
+      setMusicRuntimeVolume(current, latest.volume);
       updateGameMusic(current.music, current.context, latest.presentation);
     };
 
@@ -74,12 +80,21 @@ export function AppMusicLayer({ enabled, presentation }: AppMusicLayerProps) {
         try {
           const context = new ContextClass({ latencyHint: "playback" });
           const activeSources = new Set<AudioScheduledSourceNode>();
+          const initialVolume = normalizeAudioVolume(latest.volume);
+          const volumeGain = context.createGain();
+          volumeGain.gain.value = initialVolume;
+          volumeGain.connect(context.destination);
           const music = createGameMusicRuntime(
             context,
-            context.destination,
+            volumeGain,
             activeSources,
           );
-          current = { context, music };
+          current = {
+            context,
+            music,
+            volumeGain,
+            appliedVolume: initialVolume,
+          };
           runtimeRef.current = current;
         } catch (error) {
           console.warn("Unable to initialize soundtrack", error);
@@ -98,6 +113,7 @@ export function AppMusicLayer({ enabled, presentation }: AppMusicLayerProps) {
         ) {
           return;
         }
+        setMusicRuntimeVolume(resumed, latestRef.current.volume);
         updateGameMusic(
           resumed.music,
           resumed.context,
@@ -150,7 +166,21 @@ export function AppMusicLayer({ enabled, presentation }: AppMusicLayerProps) {
     if (!enabled) disposeCurrentRef.current();
   }, [enabled]);
 
+  useEffect(() => {
+    const current = runtimeRef.current;
+    if (current) setMusicRuntimeVolume(current, volume);
+  }, [volume]);
+
   return null;
+}
+
+function setMusicRuntimeVolume(runtime: AppMusicRuntime, volume: number) {
+  const normalized = normalizeAudioVolume(volume);
+  if (Math.abs(normalized - runtime.appliedVolume) <= 0.0001) return;
+  const now = runtime.context.currentTime;
+  runtime.volumeGain.gain.cancelScheduledValues(now);
+  runtime.volumeGain.gain.setTargetAtTime(normalized, now, 0.035);
+  runtime.appliedVolume = normalized;
 }
 
 function audioContextConstructor() {

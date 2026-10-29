@@ -6,12 +6,17 @@ import {
   AUDIO_PREFERENCE_KEY,
   FOOTSTEP_ASSET_URLS,
   GAME_AUDIO_RULES,
+  MUSIC_VOLUME_PREFERENCE_KEY,
+  SFX_VOLUME_PREFERENCE_KEY,
   calculateBiomeAudioBlend,
   calculateProximityAudioMix,
   collectRemoteMovementCues,
   createBitcrusherCurve,
   getFootstepTriggerIndices,
+  normalizeAudioVolume,
   readAudioPreference,
+  readMusicVolumePreference,
+  readSfxVolumePreference,
   type PlayerAudioSnapshot,
 } from "./gameAudio";
 
@@ -152,6 +157,48 @@ describe("audio preference", () => {
     };
 
     expect(readAudioPreference(storage)).toBe(false);
+  });
+});
+
+describe("audio volume preferences", () => {
+  it("defaults both independent volume controls to full volume", () => {
+    expect(readMusicVolumePreference(null)).toBe(1);
+    expect(readSfxVolumePreference(null)).toBe(1);
+    expect(readMusicVolumePreference({ getItem: () => null })).toBe(1);
+    expect(readSfxVolumePreference({ getItem: () => null })).toBe(1);
+  });
+
+  it("reads separately persisted decimal values", () => {
+    const storage = {
+      getItem: (key: string) => {
+        if (key === MUSIC_VOLUME_PREFERENCE_KEY) return "0.35";
+        if (key === SFX_VOLUME_PREFERENCE_KEY) return "0.8";
+        return null;
+      },
+    };
+
+    expect(readMusicVolumePreference(storage)).toBeCloseTo(0.35, 10);
+    expect(readSfxVolumePreference(storage)).toBeCloseTo(0.8, 10);
+  });
+
+  it("falls back to full volume for malformed stored values", () => {
+    const malformed = { getItem: () => "not-a-number" };
+
+    expect(readMusicVolumePreference(malformed)).toBe(1);
+    expect(readSfxVolumePreference(malformed)).toBe(1);
+    expect(normalizeAudioVolume(Number.NaN)).toBe(1);
+  });
+
+  it("clamps both stored and direct values to the zero-to-one range", () => {
+    const storage = {
+      getItem: (key: string) => key === MUSIC_VOLUME_PREFERENCE_KEY ? "-0.4" : "1.8",
+    };
+
+    expect(readMusicVolumePreference(storage)).toBe(0);
+    expect(readSfxVolumePreference(storage)).toBe(1);
+    expect(normalizeAudioVolume(-2)).toBe(0);
+    expect(normalizeAudioVolume(0.625)).toBe(0.625);
+    expect(normalizeAudioVolume(3)).toBe(1);
   });
 });
 

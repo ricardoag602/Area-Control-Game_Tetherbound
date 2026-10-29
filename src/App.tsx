@@ -27,7 +27,12 @@ import {
 import { useRoomClient } from "./network/useRoomClient";
 import {
     AUDIO_PREFERENCE_KEY,
+    MUSIC_VOLUME_PREFERENCE_KEY,
+    SFX_VOLUME_PREFERENCE_KEY,
+    normalizeAudioVolume,
     readAudioPreference,
+    readMusicVolumePreference,
+    readSfxVolumePreference,
 } from "./game/audio/gameAudio";
 import {
     preloadThreeGameplayAssets,
@@ -68,6 +73,8 @@ export function App() {
         () => localStorage.getItem(LARGE_CONTROLS_KEY) === "true",
     );
     const [audioEnabled, setAudioEnabled] = useState(readAudioPreference);
+    const [musicVolume, setMusicVolume] = useState(readMusicVolumePreference);
+    const [sfxVolume, setSfxVolume] = useState(readSfxVolumePreference);
     const [tutorialEnabled, setTutorialEnabled] = useState(readTutorialPreference);
     const [tutorialRecommendationDismissed, setTutorialRecommendationDismissed] =
         useState(readTutorialRecommendationDismissed);
@@ -86,6 +93,22 @@ export function App() {
             // Audio still follows the in-memory preference when storage is blocked.
         }
     }, [audioEnabled]);
+
+    useEffect(() => {
+        try {
+            localStorage.setItem(MUSIC_VOLUME_PREFERENCE_KEY, String(musicVolume));
+        } catch {
+            // Volume still follows the in-memory preference when storage is blocked.
+        }
+    }, [musicVolume]);
+
+    useEffect(() => {
+        try {
+            localStorage.setItem(SFX_VOLUME_PREFERENCE_KEY, String(sfxVolume));
+        } catch {
+            // Volume still follows the in-memory preference when storage is blocked.
+        }
+    }, [sfxVolume]);
 
     useEffect(() => {
         writeTutorialPreference(tutorialEnabled);
@@ -223,6 +246,7 @@ export function App() {
             <AppMusicLayer
                 enabled={audioEnabled}
                 presentation={musicPresentation}
+                volume={musicVolume}
             />
             {view === "menu" && <MenuNetworkBackground />}
             <div className="space-noise" aria-hidden="true" />
@@ -232,11 +256,15 @@ export function App() {
                         alwaysShowJoystick={alwaysShowJoystick}
                         audioEnabled={audioEnabled}
                         largeControls={largeControls}
+                        musicVolume={musicVolume}
+                        sfxVolume={sfxVolume}
                         tutorialEnabled={tutorialEnabled}
                         tutorialRecommendationDismissed={tutorialRecommendationDismissed}
                         onAlwaysShowJoystickChange={setAlwaysShowJoystick}
                         onAudioEnabledChange={setAudioEnabled}
                         onLargeControlsChange={setLargeControls}
+                        onMusicVolumeChange={setMusicVolume}
+                        onSfxVolumeChange={setSfxVolume}
                         onTutorialEnabledChange={setTutorialEnabled}
                         onTutorialRecommendationDismiss={() => {
                             setTutorialEnabled(false);
@@ -292,6 +320,7 @@ export function App() {
                     <GameView
                         alwaysShowJoystick={alwaysShowJoystick}
                         audioEnabled={audioEnabled}
+                        sfxVolume={sfxVolume}
                         tutorialEnabled={tutorialEnabled}
                         playerLimit={botPlayerLimit}
                         onMusicStateChange={setLocalMusicState}
@@ -302,6 +331,7 @@ export function App() {
                     <NetworkGameView state={roomSession.gameState} room={roomSession.room}
                         alwaysShowJoystick={alwaysShowJoystick}
                         audioEnabled={audioEnabled}
+                        sfxVolume={sfxVolume}
                         tutorialEnabled={tutorialEnabled}
                         localPlayerId={roomSession.playerId} connection={roomSession.connection}
                         latencyMs={roomSession.latencyMs} error={roomSession.error}
@@ -324,11 +354,15 @@ interface MainMenuProps {
     alwaysShowJoystick: boolean;
     audioEnabled: boolean;
     largeControls: boolean;
+    musicVolume: number;
+    sfxVolume: number;
     tutorialEnabled: boolean;
     tutorialRecommendationDismissed: boolean;
     onAlwaysShowJoystickChange: (enabled: boolean) => void;
     onAudioEnabledChange: (enabled: boolean) => void;
     onLargeControlsChange: (enabled: boolean) => void;
+    onMusicVolumeChange: (volume: number) => void;
+    onSfxVolumeChange: (volume: number) => void;
     onTutorialEnabledChange: (enabled: boolean) => void;
     onTutorialRecommendationDismiss: () => void;
     onBotGame: (playerLimit: PlayerLimit) => void;
@@ -343,11 +377,15 @@ export function MainMenu({
     alwaysShowJoystick,
     audioEnabled,
     largeControls,
+    musicVolume,
+    sfxVolume,
     tutorialEnabled,
     tutorialRecommendationDismissed,
     onAlwaysShowJoystickChange,
     onAudioEnabledChange,
     onLargeControlsChange,
+    onMusicVolumeChange,
+    onSfxVolumeChange,
     onTutorialEnabledChange,
     onTutorialRecommendationDismiss,
     onBotGame,
@@ -481,7 +519,7 @@ export function MainMenu({
                 <label className="setting-card">
                     <span className="setting-card__copy">
                         <strong>Audio</strong>
-                        <small>Music, biome footsteps, movement, and world effects</small>
+                        <small>Master switch for music and sound effects</small>
                     </span>
                     <input
                         type="checkbox"
@@ -490,10 +528,64 @@ export function MainMenu({
                     />
                     <span className="switch" aria-hidden="true" />
                 </label>
+
+                <VolumeControl
+                    id="music-volume"
+                    label="Music volume"
+                    description="Ambient score and match music"
+                    value={musicVolume}
+                    onChange={onMusicVolumeChange}
+                />
+
+                <VolumeControl
+                    id="sfx-volume"
+                    label="SFX volume"
+                    description="Footsteps, movement, tethers, and world effects"
+                    value={sfxVolume}
+                    onChange={onSfxVolumeChange}
+                />
             </div>
 
             <footer className="credits">Created by <span>Ricardo Guerrero</span></footer>
         </div>
+    );
+}
+
+function VolumeControl({
+    id,
+    label,
+    description,
+    value,
+    onChange,
+}: {
+    id: string;
+    label: string;
+    description: string;
+    value: number;
+    onChange: (volume: number) => void;
+}) {
+    const percent = Math.round(normalizeAudioVolume(value) * 100);
+    return (
+        <label className="volume-card" htmlFor={id}>
+            <span className="volume-card__header">
+                <span className="setting-card__copy">
+                    <strong>{label}</strong>
+                    <small>{description}</small>
+                </span>
+                <output htmlFor={id}>{percent}%</output>
+            </span>
+            <input
+                id={id}
+                type="range"
+                min="0"
+                max="100"
+                step="5"
+                value={percent}
+                aria-label={label}
+                aria-valuetext={`${percent}%`}
+                onChange={(event) => onChange(Number(event.target.value) / 100)}
+            />
+        </label>
     );
 }
 

@@ -18,6 +18,7 @@ describe("MatchScreen 3D readiness gate", () => {
       <MatchScreen
         alwaysShowJoystick={false}
         audioEnabled={false}
+        sfxVolume={1}
         tutorialEnabled={false}
         state={createInitialGameState("match-presentation-gate")}
         localPlayerId="player"

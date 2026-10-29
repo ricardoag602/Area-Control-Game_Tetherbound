@@ -6,6 +6,7 @@ import type { RoomSnapshot } from "../protocol";
 interface NetworkGameViewProps {
   alwaysShowJoystick: boolean;
   audioEnabled: boolean;
+  sfxVolume: number;
   tutorialEnabled: boolean;
   state: GameState;
   room: RoomSnapshot;
@@ -19,7 +20,7 @@ interface NetworkGameViewProps {
   onLeave: () => void;
 }
 
-export function NetworkGameView({ alwaysShowJoystick, audioEnabled, tutorialEnabled, state, room, localPlayerId, connection, error, latencyMs, onMovementCommand, onDeploy, onRetry, onLeave }: NetworkGameViewProps) {
+export function NetworkGameView({ alwaysShowJoystick, audioEnabled, sfxVolume, tutorialEnabled, state, room, localPlayerId, connection, error, latencyMs, onMovementCommand, onDeploy, onRetry, onLeave }: NetworkGameViewProps) {
   const opponents = room.players.filter((player) => player.id !== localPlayerId);
   const disconnectedOpponent = opponents.find((player) => !player.connected);
   const controlsDisabled = connection !== "connected" || Boolean(disconnectedOpponent);
@@ -36,6 +37,7 @@ export function NetworkGameView({ alwaysShowJoystick, audioEnabled, tutorialEnab
   return <MatchScreen state={state} localPlayerId={localPlayerId} playerNames={playerNames}
     alwaysShowJoystick={alwaysShowJoystick}
     audioEnabled={audioEnabled}
+    sfxVolume={sfxVolume}
     tutorialEnabled={tutorialEnabled}
     statusText={statusText} latencyMs={latencyMs} controlsDisabled={controlsDisabled}
     reconnectPrompt={connection === "offline"

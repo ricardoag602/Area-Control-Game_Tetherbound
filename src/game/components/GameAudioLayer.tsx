@@ -4,6 +4,7 @@ import {
   disposeGameAudio,
   resetGameAudioBaseline,
   resumeGameAudio,
+  setGameAudioVolume,
   suspendGameAudio,
   updateGameAudio,
   type GameAudioRuntime,
@@ -18,12 +19,14 @@ interface GameAudioLayerProps {
   state: GameState;
   localPlayerId: PlayerId;
   enabled: boolean;
+  volume: number;
   disabled?: boolean;
 }
 
 interface LatestAudioFrame {
   state: GameState;
   enabled: boolean;
+  volume: number;
   disabled: boolean;
 }
 
@@ -36,15 +39,16 @@ export function GameAudioLayer({
   state,
   localPlayerId,
   enabled,
+  volume,
   disabled = false,
 }: GameAudioLayerProps) {
   const runtimeRef = useRef<GameAudioRuntime | null>(null);
-  const latestRef = useRef<LatestAudioFrame>({ state, enabled, disabled });
+  const latestRef = useRef<LatestAudioFrame>({ state, enabled, volume, disabled });
   const blockedRef = useRef(disabled || !enabled);
   const processedStateRef = useRef<GameState | null>(null);
   useLayoutEffect(() => {
-    latestRef.current = { state, enabled, disabled };
-  }, [disabled, enabled, state]);
+    latestRef.current = { state, enabled, volume, disabled };
+  }, [disabled, enabled, state, volume]);
 
   useEffect(() => {
     let cancelled = false;
@@ -58,6 +62,7 @@ export function GameAudioLayer({
         runtime = createGameAudioRuntime(latest.state, localPlayerId);
         if (!runtime) return;
         runtimeRef.current = runtime;
+        setGameAudioVolume(runtime, latest.volume);
         updateGameAudio(runtime, latest.state);
         processedStateRef.current = latest.state;
       } else if (runtime.context.state === "running" && !blockedRef.current) {
@@ -142,6 +147,7 @@ export function GameAudioLayer({
       blockedRef.current = blocked;
       return;
     }
+    setGameAudioVolume(runtime, latest.volume);
 
     if (!latest.enabled) {
       disposeGameAudio(runtime);
@@ -177,7 +183,7 @@ export function GameAudioLayer({
         processedStateRef.current = latestRef.current.state;
       });
     }
-  }, [disabled, enabled]);
+  }, [disabled, enabled, volume]);
 
   return null;
 }

@@ -441,6 +441,87 @@ button { -webkit-tap-highlight-color: transparent; }
 .setting-card small { margin-top: .2rem; color: #8294a6; }
 .setting-card input { position: absolute; opacity: 0; pointer-events: none; }
 
+.volume-card {
+  display: grid;
+  gap: .75rem;
+  padding: 1rem;
+  border: 1px solid rgba(139, 191, 214, .18);
+  border-radius: 1rem;
+  background: rgba(7, 18, 29, .68);
+}
+
+.volume-card__header {
+  display: flex;
+  align-items: flex-start;
+  gap: .75rem;
+}
+
+.volume-card strong, .volume-card small { display: block; }
+.volume-card small { margin-top: .2rem; color: #8294a6; }
+.volume-card output {
+  min-width: 3.2rem;
+  padding: .24rem .46rem;
+  border: 1px solid rgba(101, 221, 246, .26);
+  border-radius: 999px;
+  color: #a8f2ff;
+  background: rgba(15, 100, 125, .2);
+  font-size: .72rem;
+  font-weight: 850;
+  text-align: center;
+}
+
+.volume-card input[type="range"] {
+  width: 100%;
+  height: 1.5rem;
+  margin: 0;
+  appearance: none;
+  border: 0;
+  outline: none;
+  background: transparent;
+  cursor: pointer;
+  accent-color: #50dff9;
+}
+
+.volume-card input[type="range"]::-webkit-slider-runnable-track {
+  height: .38rem;
+  border: 1px solid rgba(128, 222, 242, .16);
+  border-radius: 999px;
+  background: linear-gradient(90deg, #166f8c, #263c4d);
+}
+
+.volume-card input[type="range"]::-webkit-slider-thumb {
+  width: 1.15rem;
+  height: 1.15rem;
+  margin-top: -.43rem;
+  appearance: none;
+  border: 2px solid #dffbff;
+  border-radius: 50%;
+  background: #45cce9;
+  box-shadow: 0 0 .75rem rgba(80, 223, 249, .52);
+}
+
+.volume-card input[type="range"]::-moz-range-track {
+  height: .38rem;
+  border: 1px solid rgba(128, 222, 242, .16);
+  border-radius: 999px;
+  background: linear-gradient(90deg, #166f8c, #263c4d);
+}
+
+.volume-card input[type="range"]::-moz-range-thumb {
+  width: 1rem;
+  height: 1rem;
+  border: 2px solid #dffbff;
+  border-radius: 50%;
+  background: #45cce9;
+  box-shadow: 0 0 .75rem rgba(80, 223, 249, .52);
+}
+
+.volume-card input[type="range"]:focus-visible {
+  border-radius: .7rem;
+  outline: 2px solid #a8f2ff;
+  outline-offset: 3px;
+}
+
 .setting-card--tutorial {
   border-color: rgba(105, 224, 250, .34);
   background:
@@ -579,7 +660,9 @@ button { -webkit-tap-highlight-color: transparent; }
     gap: .65rem;
     padding: .8rem;
   }
-  .menu-settings > .setting-card:not(.setting-card--tutorial) small { font-size: .65rem; }
+  .menu-settings > .volume-card { padding: .8rem; }
+  .menu-settings > .setting-card:not(.setting-card--tutorial) small,
+  .menu-settings > .volume-card small { font-size: .65rem; }
 }
 
 .credits { color: #5e7183; font-size: .75rem; letter-spacing: .05em; }

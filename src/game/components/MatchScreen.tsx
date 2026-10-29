@@ -46,6 +46,7 @@ import { GameAudioLayer } from "./GameAudioLayer";
 interface MatchScreenProps {
   alwaysShowJoystick: boolean;
   audioEnabled: boolean;
+  sfxVolume: number;
   tutorialEnabled: boolean;
   state: GameState;
   localPlayerId: PlayerId;
@@ -76,7 +77,7 @@ export function scheduleMatchPresentationTimeout(
   return () => clearTimeout(timeout);
 }
 
-export function MatchScreen({ alwaysShowJoystick, audioEnabled, tutorialEnabled, state, localPlayerId, playerNames = {}, statusText, latencyMs, controlsDisabled = false, reconnectPrompt, interpolatePositions = false, onMovementCommand, onDeploy, onLeave, onPresentationStateChange }: MatchScreenProps) {
+export function MatchScreen({ alwaysShowJoystick, audioEnabled, sfxVolume, tutorialEnabled, state, localPlayerId, playerNames = {}, statusText, latencyMs, controlsDisabled = false, reconnectPrompt, interpolatePositions = false, onMovementCommand, onDeploy, onLeave, onPresentationStateChange }: MatchScreenProps) {
   const [presentationState, setPresentationState] = useState<ArenaPresentationState>("loading");
   const [presentationAttempt, setPresentationAttempt] = useState(0);
   const [compatibilityMode, setCompatibilityMode] = useState(false);
@@ -216,6 +217,7 @@ export function MatchScreen({ alwaysShowJoystick, audioEnabled, tutorialEnabled,
         state={state}
         localPlayerId={localPlayerId}
         enabled={audioEnabled}
+        volume={sfxVolume}
         disabled={interactionDisabled}
       />
       {!hideMatchProgress && (

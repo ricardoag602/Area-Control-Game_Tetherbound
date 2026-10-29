@@ -71,21 +71,48 @@ describe("MainMenu guided setup recommendation", () => {
   });
 });
 
+describe("MainMenu audio mix", () => {
+  it("offers independent accessible music and SFX volume sliders", () => {
+    const markup = renderMainMenu(false, false, false, 0.65, 0.4);
+
+    expect(markup).toContain("Music volume");
+    expect(markup).toContain("Ambient score and match music");
+    expect(markup).toContain("SFX volume");
+    expect(markup).toContain("Footsteps, movement, tethers, and world effects");
+    expect(markup).toMatch(
+      /id="music-volume" type="range" min="0" max="100" step="5"[^>]*value="65"/,
+    );
+    expect(markup).toContain('aria-valuetext="65%"');
+    expect(markup).toMatch(
+      /id="sfx-volume" type="range" min="0" max="100" step="5"[^>]*value="40"/,
+    );
+    expect(markup).toContain('aria-valuetext="40%"');
+    expect(markup).toContain('for="music-volume">65%</output>');
+    expect(markup).toContain('for="sfx-volume">40%</output>');
+  });
+});
+
 function renderMainMenu(
   alwaysShowJoystick: boolean,
   tutorialRecommendationDismissed = false,
   tutorialEnabled = false,
+  musicVolume = 1,
+  sfxVolume = 1,
 ) {
   return renderToStaticMarkup(
     <MainMenu
       alwaysShowJoystick={alwaysShowJoystick}
       audioEnabled={false}
       largeControls={false}
+      musicVolume={musicVolume}
+      sfxVolume={sfxVolume}
       tutorialEnabled={tutorialEnabled}
       tutorialRecommendationDismissed={tutorialRecommendationDismissed}
       onAlwaysShowJoystickChange={() => undefined}
       onAudioEnabledChange={() => undefined}
       onLargeControlsChange={() => undefined}
+      onMusicVolumeChange={() => undefined}
+      onSfxVolumeChange={() => undefined}
       onTutorialEnabledChange={() => undefined}
       onTutorialRecommendationDismiss={() => undefined}
       onBotGame={() => undefined}
