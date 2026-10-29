@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { MainMenu } from "./App";
+import { MainMenu, OfflineBotChoices } from "./App";
 
 describe("MainMenu joystick preference", () => {
   it("offers the always-visible mobile joystick setting", () => {
@@ -25,15 +25,25 @@ describe("MainMenu joystick preference", () => {
 });
 
 describe("MainMenu play choices", () => {
-  it("offers two-, three-, and four-player bot matches", () => {
+  it("starts with one collapsed offline play button", () => {
     const markup = renderMainMenu(false);
 
-    expect(markup).toContain("2-Player Bot Match");
-    expect(markup).toContain("You + 1 bot");
-    expect(markup).toContain("3-Player Bot Match");
-    expect(markup).toContain("You + 2 bots");
-    expect(markup).toContain("4-Player Bot Match");
-    expect(markup).toContain("You + 3 bots");
+    expect(markup).toContain("Play Offline");
+    expect(markup).toContain('aria-expanded="false"');
+    expect(markup).toContain('aria-controls="offline-player-options"');
+    expect(markup).not.toContain("2-player bot match");
+  });
+
+  it("presents simple text choices for every offline player count", () => {
+    const markup = renderToStaticMarkup(
+      <OfflineBotChoices onBotGame={() => undefined} />,
+    );
+
+    expect(markup).toContain('role="group"');
+    expect(markup).toContain("2-player bot match");
+    expect(markup).toContain("3-player bot match");
+    expect(markup).toContain("4-player bot match");
+    expect(markup).not.toContain("<small>");
   });
 });
 

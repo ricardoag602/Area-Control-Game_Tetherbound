@@ -355,6 +355,18 @@ button { -webkit-tap-highlight-color: transparent; }
 
 .menu-actions { display: grid; gap: .75rem; }
 
+.offline-player-options {
+  display: grid;
+  gap: .5rem;
+  padding: .15rem 0 .25rem;
+}
+
+.offline-player-options .button {
+  min-height: calc(3.15rem * var(--control-scale));
+  font-size: calc(.88rem * var(--control-scale));
+  font-weight: 800;
+}
+
 .connection-details {
   border: 1px solid rgba(139, 191, 214, .16);
   border-radius: 1rem;

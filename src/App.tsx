@@ -322,6 +322,8 @@ export function MainMenu({
     roomServerAddress,
     localAddressOnly,
 }: MainMenuProps) {
+    const [offlineOptionsOpen, setOfflineOptionsOpen] = useState(false);
+
     return (
         <div className="screen screen--menu">
             <div className="orbit-mark" aria-hidden="true">
@@ -368,18 +370,16 @@ export function MainMenu({
             )}
 
             <div className="menu-actions">
-                <button className="button button--primary" onClick={() => onBotGame(2)}>
-                    <span>2-Player Bot Match</span>
-                    <small>You + 1 bot</small>
+                <button
+                    className="button button--primary"
+                    type="button"
+                    aria-expanded={offlineOptionsOpen}
+                    aria-controls="offline-player-options"
+                    onClick={() => setOfflineOptionsOpen((open) => !open)}
+                >
+                    <span>Play Offline</span>
                 </button>
-                <button className="button button--primary" onClick={() => onBotGame(3)}>
-                    <span>3-Player Bot Match</span>
-                    <small>You + 2 bots</small>
-                </button>
-                <button className="button button--primary" onClick={() => onBotGame(4)}>
-                    <span>4-Player Bot Match</span>
-                    <small>You + 3 bots</small>
-                </button>
+                {offlineOptionsOpen && <OfflineBotChoices onBotGame={onBotGame} />}
                 <button className="button button--secondary" onClick={onCreateRoom}>
                     <span>Create Multiplayer Room</span>
                     <small>Invite up to three astronauts</small>
@@ -458,6 +458,31 @@ export function MainMenu({
             </div>
 
             <footer className="credits">Created by <span>Ricardo Guerrero</span></footer>
+        </div>
+    );
+}
+
+export function OfflineBotChoices({
+    onBotGame,
+}: {
+    onBotGame: (playerLimit: PlayerLimit) => void;
+}) {
+    return (
+        <div
+            className="offline-player-options"
+            id="offline-player-options"
+            role="group"
+            aria-label="Offline player count"
+        >
+            <button className="button button--secondary" onClick={() => onBotGame(2)}>
+                2-player bot match
+            </button>
+            <button className="button button--secondary" onClick={() => onBotGame(3)}>
+                3-player bot match
+            </button>
+            <button className="button button--secondary" onClick={() => onBotGame(4)}>
+                4-player bot match
+            </button>
         </div>
     );
 }
