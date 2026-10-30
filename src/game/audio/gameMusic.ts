@@ -1,5 +1,5 @@
 import { GAME_RULES } from "../constants";
-import type { GameState } from "../types";
+import type { GameState, MatchWinner, PlayerId } from "../types";
 
 export const GAME_MUSIC_RULES = {
   bpm: 172,
@@ -17,12 +17,19 @@ export const SCORE_SURGE_MUSIC_RULES = {
   duplicateGainScale: 0.56,
   roboticBrassGainScale: 1.4,
   noisePeakGain: 0.017,
+  alertLookAheadMs: GAME_MUSIC_RULES.scheduleAheadSeconds * 1_000,
+  alertLateToleranceMs: 1_000,
 } as const;
+
+export const SCORE_SURGE_ALERT_NOTES = [74, 81] as const;
+export const DEFEAT_RESOLUTION_NOTES = [62, 60, 57] as const;
 
 const STEP_SECONDS = 60 / GAME_MUSIC_RULES.bpm / GAME_MUSIC_RULES.stepsPerBeat;
 const ENVELOPE_FLOOR = 0.0001;
 
 export type MusicScene = "menu" | "gameplay" | "finished";
+export type GameMusicResult = "victory" | "defeat" | "draw";
+export type ResolutionVariant = "standard" | "defeat";
 
 export type GameMusicPresentation =
   | { scene: "menu" }
@@ -31,7 +38,7 @@ export type GameMusicPresentation =
     matchPhase: GameState["matchPhase"];
     remainingMs: number;
   }
-  | { scene: "finished" };
+  | { scene: "finished"; result?: GameMusicResult };
 
 export interface GameMusicArrangement {
   readonly energy: number;
@@ -92,6 +99,7 @@ export interface GameMusicRuntime {
   nextStepTime: number;
   scene: MusicScene;
   scoreSurgeNoiseSource: AudioBufferSourceNode | null;
+  scoreSurgeAlertScheduled: boolean;
   resolutionScheduled: boolean;
   disposed: boolean;
 }
@@ -173,6 +181,44 @@ export function isRoboticBrassActive(
   if (presentation.matchPhase !== "regulation") return false;
   const projectedRemainingMs = presentation.remainingMs - Math.max(0, lookAheadMs);
   return projectedRemainingMs <= SCORE_SURGE_MUSIC_RULES.thresholdMs;
+}
+
+export function getScoreSurgeAlertDelaySeconds(
+  presentation: GameMusicPresentation,
+  alreadyScheduled: boolean,
+) {
+  if (
+    alreadyScheduled
+    || presentation.scene !== "gameplay"
+    || presentation.matchPhase !== "regulation"
+  ) {
+    return null;
+  }
+  const offsetMs = presentation.remainingMs - SCORE_SURGE_MUSIC_RULES.thresholdMs;
+  if (
+    offsetMs > SCORE_SURGE_MUSIC_RULES.alertLookAheadMs
+    || offsetMs < -SCORE_SURGE_MUSIC_RULES.alertLateToleranceMs
+  ) {
+    return null;
+  }
+  return Math.max(0, offsetMs / 1_000);
+}
+
+export function getLocalMusicResult(
+  winner: MatchWinner | null | undefined,
+  localPlayerId: PlayerId,
+): GameMusicResult | undefined {
+  if (!winner) return undefined;
+  if (winner === "draw") return "draw";
+  return winner === localPlayerId ? "victory" : "defeat";
+}
+
+export function getResolutionVariant(
+  presentation: GameMusicPresentation,
+): ResolutionVariant {
+  return presentation.scene === "finished" && presentation.result === "defeat"
+    ? "defeat"
+    : "standard";
 }
 
 export function getMusicArrangement(
@@ -401,6 +447,7 @@ export function createGameMusicRuntime(
     nextStepTime: context.currentTime + 0.055,
     scene: "menu",
     scoreSurgeNoiseSource: null,
+    scoreSurgeAlertScheduled: false,
     resolutionScheduled: false,
     disposed: false,
   };
@@ -420,7 +467,12 @@ export function updateGameMusic(
     runtime.resolutionScheduled = true;
     stopScoreSurgeNoise(runtime, now);
     fadeLoopStems(runtime, now);
-    scheduleResolution(runtime, context, now + 0.025);
+    scheduleResolution(
+      runtime,
+      context,
+      now + 0.025,
+      getResolutionVariant(presentation),
+    );
     return;
   }
 
@@ -432,12 +484,23 @@ export function updateGameMusic(
     runtime.resolutionScheduled = false;
     setTarget(runtime.resolutionGain.gain, ENVELOPE_FLOOR, now, 0.18);
   }
+  if (runtime.scene !== "gameplay" && nextScene === "gameplay") {
+    runtime.scoreSurgeAlertScheduled = false;
+  }
   runtime.scene = nextScene;
 
   const arrangement = getMusicArrangement(presentation);
   applyArrangement(runtime, arrangement, now);
   if (context.state !== "running") return;
   updateScoreSurgeNoise(runtime, context, presentation, now);
+  const scoreSurgeAlertDelay = getScoreSurgeAlertDelaySeconds(
+    presentation,
+    runtime.scoreSurgeAlertScheduled,
+  );
+  if (scoreSurgeAlertDelay !== null) {
+    runtime.scoreSurgeAlertScheduled = true;
+    scheduleScoreSurgeAlert(runtime, context, now + scoreSurgeAlertDelay);
+  }
 
   // A suspended context does not advance its clock. The guard additionally
   // prevents a long debugger pause from causing an audible catch-up burst.
@@ -958,11 +1021,36 @@ function scheduleNoiseHit(
   source.stop(options.time + options.duration + 0.025);
 }
 
-function scheduleResolution(
+function scheduleScoreSurgeAlert(
   runtime: GameMusicRuntime,
   context: AudioContext,
   time: number,
 ) {
+  SCORE_SURGE_ALERT_NOTES.forEach((note, index) => {
+    scheduleVoice(runtime, context, runtime.arpeggioInput, {
+      note,
+      time: time + index * 0.16,
+      duration: 0.3 + index * 0.04,
+      gain: index === 0 ? 0.011 : 0.009,
+      attack: 0.008,
+      release: 0.2,
+      type: index === 0 ? "triangle" : "sine",
+      pan: index === 0 ? -0.12 : 0.12,
+      filterHz: 4_600,
+    });
+  });
+}
+
+function scheduleResolution(
+  runtime: GameMusicRuntime,
+  context: AudioContext,
+  time: number,
+  variant: ResolutionVariant,
+) {
+  if (variant === "defeat") {
+    scheduleDefeatResolution(runtime, context, time);
+    return;
+  }
   scheduleVoice(runtime, context, runtime.resolutionInput, {
     note: 38,
     time,
@@ -1001,6 +1089,37 @@ function scheduleResolution(
       pan: index % 2 === 0 ? -0.32 : 0.32,
     });
   }
+}
+
+function scheduleDefeatResolution(
+  runtime: GameMusicRuntime,
+  context: AudioContext,
+  time: number,
+) {
+  scheduleVoice(runtime, context, runtime.resolutionInput, {
+    note: 38,
+    time,
+    duration: 3.8,
+    gain: 0.052,
+    attack: 0.04,
+    release: 1.9,
+    type: "sine",
+    pan: 0,
+  });
+
+  DEFEAT_RESOLUTION_NOTES.forEach((note, index) => {
+    scheduleVoice(runtime, context, runtime.resolutionInput, {
+      note,
+      time: time + 0.08 + index * 0.32,
+      duration: 2.5 - index * 0.18,
+      gain: 0.02 - index * 0.002,
+      attack: 0.018,
+      release: 1.45,
+      type: index === 1 ? "sine" : "triangle",
+      pan: [-0.22, 0.22, 0][index],
+      filterHz: 2_600 - index * 280,
+    });
+  });
 }
 
 function setTarget(

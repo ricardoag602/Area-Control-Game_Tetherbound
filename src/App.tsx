@@ -11,7 +11,10 @@ import {
     type GameState,
     type PlayerLimit,
 } from "./game/types";
-import type { GameMusicPresentation } from "./game/audio/gameMusic";
+import {
+    getLocalMusicResult,
+    type GameMusicPresentation,
+} from "./game/audio/gameMusic";
 import { getRoomServerUrl, RoomClient } from "./network/RoomClient";
 import {
     createGameAddress,
@@ -95,8 +98,12 @@ export function App() {
     const [gameMode, setGameMode] = useState<GameMode>("bot");
     const [botPlayerLimit, setBotPlayerLimit] = useState<PlayerLimit>(2);
     const [localMusicState, setLocalMusicState] = useState<
-        Pick<GameState, "matchPhase" | "remainingMs">
-    >({ matchPhase: "setup", remainingMs: GAME_RULES.matchDurationMs });
+        Pick<GameState, "matchPhase" | "remainingMs" | "matchOutcome">
+    >({
+        matchPhase: "setup",
+        remainingMs: GAME_RULES.matchDurationMs,
+        matchOutcome: null,
+    });
     const [roomClient] = useState(() => new RoomClient());
     const [gameAddress] = useState(() => createGameAddress(window.location.href));
     const [roomServerAddress] = useState(() => getRoomServerUrl());
@@ -221,6 +228,7 @@ export function App() {
         setLocalMusicState({
             matchPhase: "setup",
             remainingMs: GAME_RULES.matchDurationMs,
+            matchOutcome: null,
         });
         setBotPlayerLimit(playerLimit);
         setGameMode("bot");
@@ -262,14 +270,26 @@ export function App() {
         : "";
     const localAddressOnly = isLoopbackHostname(window.location.hostname);
     const musicPresentation: GameMusicPresentation = (() => {
-        if (view === "result") return { scene: "finished" };
-        if (view !== "game") return { scene: "menu" };
+        if (view !== "game" && view !== "result") return { scene: "menu" };
 
         const match = gameMode === "multiplayer"
             ? roomSession.gameState
             : localMusicState;
         if (!match) return { scene: "menu" };
-        if (match.matchPhase === "finished") return { scene: "finished" };
+        if (view === "result" || match.matchPhase === "finished") {
+            const localPlayerId = gameMode === "multiplayer"
+                ? roomSession.playerId
+                : "player";
+            const winner = gameMode === "multiplayer"
+                ? roomSession.room?.winner ?? match.matchOutcome?.winner
+                : match.matchOutcome?.winner;
+            return {
+                scene: "finished",
+                result: localPlayerId
+                    ? getLocalMusicResult(winner, localPlayerId)
+                    : undefined,
+            };
+        }
         return {
             scene: "gameplay",
             matchPhase: match.matchPhase,

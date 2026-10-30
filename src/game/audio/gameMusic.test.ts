@@ -1,11 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEFEAT_RESOLUTION_NOTES,
   GAME_MUSIC_RULES,
   RESOLUTION_VOICING,
+  SCORE_SURGE_ALERT_NOTES,
   SCORE_SURGE_MUSIC_RULES,
+  getLocalMusicResult,
   getMusicArrangement,
   getMusicIntensity,
   getMusicNotesForStep,
+  getResolutionVariant,
+  getScoreSurgeAlertDelaySeconds,
   getScoreSurgeTransitionState,
   isRoboticBrassActive,
   shouldScheduleResolution,
@@ -104,6 +109,30 @@ describe("background music composition", () => {
     });
   });
 
+  it("schedules one quiet two-note alert precisely around the one-minute mark", () => {
+    const gameplay = (remainingMs: number) => ({
+      scene: "gameplay" as const,
+      matchPhase: "regulation" as const,
+      remainingMs,
+    });
+
+    expect(SCORE_SURGE_ALERT_NOTES).toEqual([74, 81]);
+    expect(SCORE_SURGE_ALERT_NOTES[1] - SCORE_SURGE_ALERT_NOTES[0]).toBe(7);
+    expect(getScoreSurgeAlertDelaySeconds(gameplay(60_601), false)).toBeNull();
+    expect(getScoreSurgeAlertDelaySeconds(gameplay(60_600), false)).toBeCloseTo(0.6, 10);
+    expect(getScoreSurgeAlertDelaySeconds(gameplay(60_250), false)).toBeCloseTo(0.25, 10);
+    expect(getScoreSurgeAlertDelaySeconds(gameplay(60_000), false)).toBe(0);
+    expect(getScoreSurgeAlertDelaySeconds(gameplay(59_500), false)).toBe(0);
+    expect(getScoreSurgeAlertDelaySeconds(gameplay(58_999), false)).toBeNull();
+    expect(getScoreSurgeAlertDelaySeconds(gameplay(60_000), true)).toBeNull();
+    expect(getScoreSurgeAlertDelaySeconds({
+      scene: "gameplay",
+      matchPhase: "overtime",
+      remainingMs: 60_000,
+    }, false)).toBeNull();
+    expect(getScoreSurgeAlertDelaySeconds({ scene: "menu" }, false)).toBeNull();
+  });
+
   it("adds a louder three-voice robotic brass layer without replacing the original toot", () => {
     const gameplay = (remainingMs: number) => ({
       scene: "gameplay" as const,
@@ -162,6 +191,24 @@ describe("background music composition", () => {
     expect(shouldScheduleResolution("menu", "gameplay")).toBe(false);
     expect(shouldScheduleResolution("gameplay", "gameplay")).toBe(false);
     expect(shouldScheduleResolution("finished", "menu")).toBe(false);
+  });
+
+  it("uses a descending sad cadence only when the local player loses", () => {
+    expect(getLocalMusicResult("player", "player")).toBe("victory");
+    expect(getLocalMusicResult("rival", "player")).toBe("defeat");
+    expect(getLocalMusicResult("draw", "player")).toBe("draw");
+    expect(getLocalMusicResult(null, "player")).toBeUndefined();
+
+    expect(getResolutionVariant({ scene: "finished", result: "defeat" }))
+      .toBe("defeat");
+    expect(getResolutionVariant({ scene: "finished", result: "victory" }))
+      .toBe("standard");
+    expect(getResolutionVariant({ scene: "finished", result: "draw" }))
+      .toBe("standard");
+    expect(getResolutionVariant({ scene: "finished" })).toBe("standard");
+    expect(DEFEAT_RESOLUTION_NOTES).toEqual([62, 60, 57]);
+    expect(DEFEAT_RESOLUTION_NOTES[0]).toBeGreaterThan(DEFEAT_RESOLUTION_NOTES[1]);
+    expect(DEFEAT_RESOLUTION_NOTES[1]).toBeGreaterThan(DEFEAT_RESOLUTION_NOTES[2]);
   });
 
   it("resolves to a D-major add-nine voicing", () => {

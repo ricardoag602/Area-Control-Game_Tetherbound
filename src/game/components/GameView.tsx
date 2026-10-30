@@ -21,7 +21,7 @@ interface GameViewProps {
   videoMode?: VideoMode;
   playerLimit: PlayerLimit;
   onMusicStateChange: (
-    state: Pick<GameState, "matchPhase" | "remainingMs">,
+    state: Pick<GameState, "matchPhase" | "remainingMs" | "matchOutcome">,
   ) => void;
   onLeave: () => void;
 }
@@ -59,6 +59,7 @@ export function GameView({
         onMusicStateChange({
           matchPhase: "setup",
           remainingMs: GAME_RULES.matchDurationMs,
+          matchOutcome: null,
         });
         setMatchNumber((current) => current + 1);
       }}
@@ -84,7 +85,7 @@ function LocalMatch({
   videoMode: VideoMode;
   playerLimit: PlayerLimit;
   onMusicStateChange: (
-    state: Pick<GameState, "matchPhase" | "remainingMs">,
+    state: Pick<GameState, "matchPhase" | "remainingMs" | "matchOutcome">,
   ) => void;
   onLeave: () => void;
   onRestart: () => void;
@@ -99,8 +100,9 @@ function LocalMatch({
     onMusicStateChange({
       matchPhase: state.matchPhase,
       remainingMs: Math.max(0, musicSecond * 1_000),
+      matchOutcome: state.matchOutcome,
     });
-  }, [musicSecond, onMusicStateChange, state.matchPhase]);
+  }, [musicSecond, onMusicStateChange, state.matchOutcome, state.matchPhase]);
   const handlePresentationStateChange = useCallback(
     (presentationState: ArenaPresentationState) => {
       setPresentationReady(
