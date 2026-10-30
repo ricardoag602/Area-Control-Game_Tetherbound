@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { lazy, Suspense, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { MenuNetworkBackground } from "./components/MenuNetworkBackground";
 import { GAME_RULES } from "./game/constants";
 import { AppMusicLayer } from "./game/components/AppMusicLayer";
@@ -64,6 +64,11 @@ const SETTINGS_TABS = [
     { id: "audio", label: "Audio" },
     { id: "video", label: "Video" },
 ] as const satisfies readonly { id: SettingsTab; label: string }[];
+
+const AboutStory = lazy(async () => {
+    const module = await import("./game/components/AboutStory");
+    return { default: module.AboutStory };
+});
 
 function readLargeControlsPreference() {
     try {
@@ -443,6 +448,7 @@ export function MainMenu({
     localAddressOnly,
 }: MainMenuProps) {
     const [offlineOptionsOpen, setOfflineOptionsOpen] = useState(false);
+    const [aboutOpen, setAboutOpen] = useState(false);
     const [settingsTab, setSettingsTab] = useState<SettingsTab>("gameplay");
 
     function selectSettingsTab(tab: SettingsTab) {
@@ -474,7 +480,22 @@ export function MainMenu({
     }
 
     return (
-        <div className="screen screen--menu">
+        <>
+        <div
+            className="screen screen--menu"
+            aria-hidden={aboutOpen ? true : undefined}
+        >
+            <button
+                className="about-story-trigger"
+                type="button"
+                aria-haspopup="dialog"
+                aria-expanded={aboutOpen}
+                aria-controls="about-story-dialog"
+                onClick={() => setAboutOpen(true)}
+            >
+                About
+            </button>
+
             <div className="orbit-mark" aria-hidden="true">
                 <span className="orbit-mark__core" />
                 <span className="orbit-mark__ring orbit-mark__ring--one" />
@@ -704,6 +725,24 @@ export function MainMenu({
 
             <footer className="credits">Created by <span>Ricardo Guerrero</span></footer>
         </div>
+        {aboutOpen && (
+            <Suspense
+                fallback={(
+                    <div
+                        className="about-story about-story--loading"
+                        id="about-story-dialog"
+                        role="dialog"
+                        aria-modal="true"
+                        aria-label="Loading Tetherbound story"
+                    >
+                        <span>Loading mission brief…</span>
+                    </div>
+                )}
+            >
+                <AboutStory onClose={() => setAboutOpen(false)} />
+            </Suspense>
+        )}
+        </>
     );
 }
 

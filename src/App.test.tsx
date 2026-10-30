@@ -26,6 +26,14 @@ describe("MainMenu joystick preference", () => {
 });
 
 describe("MainMenu play choices", () => {
+  it("offers a dedicated About story from the main menu", () => {
+    const markup = renderMainMenu(false);
+
+    expect(markup).toMatch(
+      /<button class="about-story-trigger"[^>]*aria-haspopup="dialog"[^>]*aria-expanded="false"[^>]*aria-controls="about-story-dialog"[^>]*>About<\/button>/,
+    );
+  });
+
   it("starts with one collapsed offline play button", () => {
     const markup = renderMainMenu(false);
 
