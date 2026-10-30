@@ -41,7 +41,7 @@ describe("biome audio blending", () => {
   });
 
   it("mixes a terrain biome gradually with the neighboring neutral corridor", () => {
-    const blend = calculateBiomeAudioBlend({ x: 164, y: 100 });
+    const blend = calculateBiomeAudioBlend({ x: 158, y: 100 });
 
     expect(sumBlend(blend)).toBeCloseTo(1, 10);
     expect(blend.water).toBeCloseTo(14.2 / 19.2, 10);

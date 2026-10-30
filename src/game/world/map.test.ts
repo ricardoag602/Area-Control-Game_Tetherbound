@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   BIOME_DEFINITIONS,
+  NEUTRAL_TRAVEL_LANE_WIDTH,
   WORLD_AREA_SCALE_FROM_PROTOTYPE,
   WORLD_BASE_SLOTS,
   WORLD_BOUNDS,
@@ -39,12 +40,38 @@ describe("deterministic world model", () => {
     expect(getBiomeRegionAt({ x: 175, y: 62.0001 })?.id).toBe(
       "vertical-neutral-corridor",
     );
-    expect(getBiomeRegionAt({ x: 100, y: 166 })?.id).toBe(
+    expect(getBiomeRegionAt({ x: 100, y: 160 })?.id).toBe(
       "horizontal-neutral-corridor",
     );
-    expect(getBiomeRegionAt({ x: 100, y: 184 })?.id).toBe(
+    expect(getBiomeRegionAt({ x: 100, y: 190 })?.id).toBe(
       "horizontal-neutral-corridor",
     );
+  });
+
+  it("widens both neutral travel lanes while keeping them centered", () => {
+    const vertical = WORLD_REGIONS.find(
+      (region) => region.id === "vertical-neutral-corridor",
+    );
+    const horizontal = WORLD_REGIONS.find(
+      (region) => region.id === "horizontal-neutral-corridor",
+    );
+
+    expect(NEUTRAL_TRAVEL_LANE_WIDTH).toBe(30);
+    expect(vertical).toMatchObject({ x: 160, width: 30 });
+    expect(horizontal).toMatchObject({ y: 160, height: 30 });
+    expect((vertical?.x ?? 0) + (vertical?.width ?? 0) / 2)
+      .toBe(WORLD_BOUNDS.width / 2);
+    expect((horizontal?.y ?? 0) + (horizontal?.height ?? 0) / 2)
+      .toBe(WORLD_BOUNDS.height / 2);
+
+    expect(getBiomeAt({ x: 159.999, y: 100 })).toBe("water");
+    expect(getBiomeAt({ x: 160, y: 100 })).toBe("neutral");
+    expect(getBiomeAt({ x: 190, y: 100 })).toBe("neutral");
+    expect(getBiomeAt({ x: 190.001, y: 100 })).toBe("jungle");
+    expect(getBiomeAt({ x: 100, y: 159.999 })).toBe("water");
+    expect(getBiomeAt({ x: 100, y: 160 })).toBe("neutral");
+    expect(getBiomeAt({ x: 100, y: 190 })).toBe("neutral");
+    expect(getBiomeAt({ x: 100, y: 190.001 })).toBe("desert");
   });
 
   it("includes every outer edge while rejecting invalid positions", () => {

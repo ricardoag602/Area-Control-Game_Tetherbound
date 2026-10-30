@@ -13,6 +13,13 @@ export const WORLD_BOUNDS = {
 export const WORLD_AREA_SCALE_FROM_PROTOTYPE =
   (WORLD_BOUNDS.width * WORLD_BOUNDS.height) / (100 * 160);
 
+/** Width of the centered neutral cross-road shared by simulation and minimap. */
+export const NEUTRAL_TRAVEL_LANE_WIDTH = 30;
+const VERTICAL_NEUTRAL_LANE_X =
+  (WORLD_BOUNDS.width - NEUTRAL_TRAVEL_LANE_WIDTH) / 2;
+const HORIZONTAL_NEUTRAL_LANE_Y =
+  (WORLD_BOUNDS.height - NEUTRAL_TRAVEL_LANE_WIDTH) / 2;
+
 export type BiomeId =
   | "neutral"
   | "base_corridor"
@@ -170,9 +177,9 @@ export const WORLD_REGIONS = [
     id: "vertical-neutral-corridor",
     biome: "neutral",
     shape: "rectangle",
-    x: 166,
+    x: VERTICAL_NEUTRAL_LANE_X,
     y: 0,
-    width: 18,
+    width: NEUTRAL_TRAVEL_LANE_WIDTH,
     height: 350,
   },
   {
@@ -180,9 +187,9 @@ export const WORLD_REGIONS = [
     biome: "neutral",
     shape: "rectangle",
     x: 0,
-    y: 166,
+    y: HORIZONTAL_NEUTRAL_LANE_Y,
     width: 350,
-    height: 18,
+    height: NEUTRAL_TRAVEL_LANE_WIDTH,
   },
   {
     id: "water-shelf",
