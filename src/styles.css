@@ -358,12 +358,15 @@ button { -webkit-tap-highlight-color: transparent; }
 .offline-player-options {
   display: grid;
   gap: .5rem;
-  padding: .15rem 0 .25rem;
+  padding: .15rem .35rem .3rem;
 }
 
 .offline-player-options .button {
-  min-height: calc(3.15rem * var(--control-scale));
-  font-size: calc(.88rem * var(--control-scale));
+  width: calc(100% - 1rem);
+  min-height: calc(2.75rem * var(--control-scale));
+  justify-self: center;
+  padding: calc(.55rem * var(--control-scale)) calc(.8rem * var(--control-scale));
+  font-size: calc(.8rem * var(--control-scale));
   font-weight: 800;
 }
 
