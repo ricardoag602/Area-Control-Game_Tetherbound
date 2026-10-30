@@ -1,9 +1,12 @@
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { baseId, createInitialGameState } from "../state";
 import type { GameState } from "../types";
 import {
   getInteractionFilamentPath,
   sameStaticNetworkProps,
+  TetherCableLayer,
 } from "./TetherNetworkLayer";
 
 function stateWithAnchor(): GameState {
@@ -61,6 +64,13 @@ describe("tether network presentation equality", () => {
       networkProps(progressing),
     )).toBe(false);
 
+    const redundant = cloneState(previous);
+    redundant.anchors[0].backupParentId = baseId("player");
+    expect(sameStaticNetworkProps(
+      networkProps(previous),
+      networkProps(redundant),
+    )).toBe(false);
+
     previous.elapsedMs = 50;
     previous.anchors[0].protectedUntilMs = 100;
     const expired = cloneState(previous);
@@ -87,6 +97,30 @@ describe("tether network presentation equality", () => {
       networkProps(previous),
       networkProps(collapsing),
     )).toBe(false);
+  });
+});
+
+describe("redundant tether presentation", () => {
+  it("renders both stored circuit links for a bridged anchor", () => {
+    const state = stateWithAnchor();
+    state.anchors.push({
+      ...state.anchors[0],
+      id: "anchor-2",
+      position: { x: 145, y: 130 },
+      parentId: "anchor-1",
+      backupParentId: baseId("player"),
+    });
+
+    const markup = renderToStaticMarkup(createElement(
+      "svg",
+      null,
+      createElement(TetherCableLayer, {
+        state,
+        localPlayerId: "player",
+      }),
+    ));
+
+    expect(markup.match(/<image/g)).toHaveLength(3);
   });
 });
 

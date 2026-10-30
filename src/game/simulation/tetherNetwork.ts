@@ -8,6 +8,18 @@ export interface NetworkNode {
   position: Vec2;
 }
 
+/** Returns the unique incoming circuit links stored on an anchor. */
+export function getAnchorParentIds(anchor: Anchor): string[] {
+  const backupParentId = typeof anchor.backupParentId === "string" &&
+      anchor.backupParentId.length > 0 &&
+      anchor.backupParentId !== anchor.parentId
+    ? anchor.backupParentId
+    : null;
+  return backupParentId
+    ? [anchor.parentId, backupParentId]
+    : [anchor.parentId];
+}
+
 export function getPoweredNodes(
   state: GameState,
   playerId: PlayerId,
@@ -68,12 +80,25 @@ export function findConnectionParent(
   playerId: PlayerId,
   position: Vec2,
 ): NetworkNode | null {
-  const candidates = getPoweredNodes(state, playerId)
+  return findConnectionParents(state, playerId, position)[0] ?? null;
+}
+
+/**
+ * Chooses up to two currently powered nodes. The second connection is recorded
+ * only while the circuit is live, creating a deliberate backup path without
+ * ever extending from a severed branch.
+ */
+export function findConnectionParents(
+  state: GameState,
+  playerId: PlayerId,
+  position: Vec2,
+): NetworkNode[] {
+  return getPoweredNodes(state, playerId)
     .map((node) => ({ ...node, distance: distance(node.position, position) }))
     .filter((node) => node.distance <= GAME_RULES.maximumLinkDistance)
-    .sort((a, b) => a.distance - b.distance);
-
-  return candidates[0] ?? null;
+    .sort((a, b) => a.distance - b.distance || a.id.localeCompare(b.id))
+    .slice(0, 2)
+    .map((node) => ({ id: node.id, position: node.position }));
 }
 
 export function canDeployAnchor(state: GameState, playerId: PlayerId) {
@@ -102,7 +127,11 @@ export function deployAnchor(state: GameState, playerId: PlayerId): GameState {
   if (!canDeployAnchor(state, playerId)) return state;
 
   const player = state.players[playerId];
-  const parent = findConnectionParent(state, playerId, player.astronaut.position);
+  const [parent, backupParent] = findConnectionParents(
+    state,
+    playerId,
+    player.astronaut.position,
+  );
   if (!parent) return state;
 
   const anchor: Anchor = {
@@ -110,6 +139,7 @@ export function deployAnchor(state: GameState, playerId: PlayerId): GameState {
     owner: playerId,
     position: { ...player.astronaut.position },
     parentId: parent.id,
+    backupParentId: backupParent?.id ?? null,
     powered: true,
     disruptedUntilMs: null,
     protectedUntilMs: null,

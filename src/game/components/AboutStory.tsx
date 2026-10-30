@@ -48,8 +48,8 @@ export const ABOUT_STORY_CHAPTERS: readonly AboutStoryChapter[] = [
     eyebrow: "How to play · 2",
     title: "Place tethers to claim land",
     description:
-      "Deploy a tether as you travel. Connected anchors draw the edges of your network, protect your oxygen supply, and turn the land between them into your territory.",
-    tip: "Keep new anchors connected to your powered network.",
+      "Deploy a tether as you travel. Connected anchors extend your safe zone and claim territory. When two powered nodes are in reach, the new tether bridges both and gives the chain a backup route.",
+    tip: "Build the backup while both routes are powered—offline tethers cannot be linked.",
     shortLabel: "Tether",
   },
   {

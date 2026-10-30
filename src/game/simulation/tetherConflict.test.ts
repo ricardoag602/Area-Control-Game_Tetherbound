@@ -151,6 +151,29 @@ describe("competitive tether conflict", () => {
     expect(getAnchorPowerState(child, state.elapsedMs)).toBe("severed");
   });
 
+  it("reroutes an established chain through its live backup branch", () => {
+    const state = conflictState([
+      anchor("branch-a", "player", { x: 150, y: 280 }),
+      anchor("branch-b", "player", { x: 200, y: 280 }),
+      {
+        ...anchor("bridge", "player", { x: 175, y: 220 }, "branch-a"),
+        backupParentId: "branch-b",
+      },
+      anchor("downstream", "player", { x: 175, y: 160 }, "bridge"),
+    ]);
+    state.anchors[0].disruptedUntilMs = 20_000;
+
+    const [branchA, branchB, bridge, downstream] = resolveAnchorPower(
+      state.anchors,
+      state.elapsedMs,
+    );
+
+    expect(branchA.powered).toBe(false);
+    expect(branchB.powered).toBe(true);
+    expect(bridge.powered).toBe(true);
+    expect(downstream.powered).toBe(true);
+  });
+
   it("repairs a directly disrupted anchor early and grants recovery immunity", () => {
     let state = conflictState([
       {
@@ -244,6 +267,31 @@ describe("competitive tether conflict", () => {
       .not.toContain("root");
     expect(isInsideSafeZone(resolved, "player", nodePosition)).toBe(false);
     expect(isAtDeliveryNode(resolved, "player", nodePosition)).toBe(false);
+    expect(canDeployAnchor(resolved, "player")).toBe(false);
+  });
+
+  it("cannot create a backup connection from an already broken circuit", () => {
+    const state = conflictState([
+      {
+        ...anchor("branch-a", "player", { x: 150, y: 280 }),
+        powered: false,
+        disruptedUntilMs: 20_000,
+      },
+      {
+        ...anchor("branch-b", "player", { x: 200, y: 280 }),
+        powered: false,
+        disruptedUntilMs: 20_000,
+      },
+    ]);
+    state.players.player.astronaut.position = { x: 175, y: 220 };
+    state.players.player.astronaut.tetherKits = 2;
+    const resolved = {
+      ...state,
+      anchors: resolveAnchorPower(state.anchors, state.elapsedMs),
+    };
+
+    expect(getPoweredNodes(resolved, "player").map((node) => node.id))
+      .toEqual(["player-base"]);
     expect(canDeployAnchor(resolved, "player")).toBe(false);
   });
 

@@ -19,6 +19,7 @@ import {
   getPlayerConflictTarget,
   type AnchorPowerState,
 } from "../simulation/tetherConflict";
+import { getAnchorParentIds } from "../simulation/tetherNetwork";
 import { baseId } from "../state";
 import { OBJECT_SPRITES } from "../presentation/objectSprites";
 import type { Anchor, GameState, PlayerId, Vec2 } from "../types";
@@ -182,33 +183,40 @@ function NetworkConnections({
     [baseId(playerId), player.basePosition],
     ...anchors.map((anchor) => [anchor.id, anchor.position] as [string, Vec2]),
   ]);
+  const anchorsById = new Map(anchors.map((anchor) => [anchor.id, anchor]));
 
   return (
     <g className={`world__network world__network--${playerId}`} aria-hidden="true">
-      {anchors.map((anchor) => {
-        const parent = nodes.get(anchor.parentId);
-        if (!parent) return null;
-        const powerState = getAnchorPowerState(anchor, state.elapsedMs);
-        const deltaX = anchor.position.x - parent.x;
-        const deltaY = anchor.position.y - parent.y;
-        const length = Math.hypot(deltaX, deltaY);
-        if (length <= 0.01) return null;
-        const midpointX = (parent.x + anchor.position.x) / 2;
-        const midpointY = (parent.y + anchor.position.y) / 2;
-        const angle = Math.atan2(deltaY, deltaX) * 180 / Math.PI;
-        return (
-          <image
-            key={anchor.id}
-            className={`world__cable-sprite world__cable-sprite--${powerState}`}
-            href={OBJECT_SPRITES[playerId].tether}
-            x={-length / 2}
-            y="-3"
-            width={length}
-            height="6"
-            preserveAspectRatio="none"
-            transform={`translate(${midpointX} ${midpointY}) rotate(${angle})`}
-          />
-        );
+      {anchors.flatMap((anchor) => {
+        const anchorPowerState = getAnchorPowerState(anchor, state.elapsedMs);
+        return getAnchorParentIds(anchor).flatMap((parentId) => {
+          const parent = nodes.get(parentId);
+          if (!parent) return [];
+          const parentAnchor = anchorsById.get(parentId);
+          const powerState = anchor.powered && parentAnchor && !parentAnchor.powered
+            ? "severed"
+            : anchorPowerState;
+          const deltaX = anchor.position.x - parent.x;
+          const deltaY = anchor.position.y - parent.y;
+          const length = Math.hypot(deltaX, deltaY);
+          if (length <= 0.01) return [];
+          const midpointX = (parent.x + anchor.position.x) / 2;
+          const midpointY = (parent.y + anchor.position.y) / 2;
+          const angle = Math.atan2(deltaY, deltaX) * 180 / Math.PI;
+          return [(
+            <image
+              key={`${anchor.id}:${parentId}`}
+              className={`world__cable-sprite world__cable-sprite--${powerState}`}
+              href={OBJECT_SPRITES[playerId].tether}
+              x={-length / 2}
+              y="-3"
+              width={length}
+              height="6"
+              preserveAspectRatio="none"
+              transform={`translate(${midpointX} ${midpointY}) rotate(${angle})`}
+            />
+          )];
+        });
       })}
     </g>
   );
@@ -641,6 +649,7 @@ export function sameStaticNetworkProps(
       previousAnchor.position.x !== nextAnchor.position.x ||
       previousAnchor.position.y !== nextAnchor.position.y ||
       previousAnchor.parentId !== nextAnchor.parentId ||
+      previousAnchor.backupParentId !== nextAnchor.backupParentId ||
       previousAnchor.powered !== nextAnchor.powered ||
       previousAnchor.disruptedUntilMs !== nextAnchor.disruptedUntilMs ||
       previousAnchor.protectedUntilMs !== nextAnchor.protectedUntilMs ||

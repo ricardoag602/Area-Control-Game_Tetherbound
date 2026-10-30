@@ -71,8 +71,15 @@ export interface Anchor {
   id: string;
   owner: PlayerId;
   position: Vec2;
+  /** Primary powered node selected when this tether was deployed. */
   parentId: string;
-  /** Derived from this anchor's disruption and the power of every ancestor. */
+  /**
+   * Optional second live connection captured at deployment. It lets an active
+   * circuit keep this anchor powered when either incoming branch is disrupted.
+   * Older serialized matches omit the field and retain their original tree.
+   */
+  backupParentId?: string | null;
+  /** Derived from this anchor's disruption and at least one powered path home. */
   powered: boolean;
   /** Match-clock deadline for a direct overload. Null means locally healthy. */
   disruptedUntilMs: number | null;

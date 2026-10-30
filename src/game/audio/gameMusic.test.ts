@@ -2,9 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   GAME_MUSIC_RULES,
   RESOLUTION_VOICING,
+  SCORE_SURGE_MUSIC_RULES,
   getMusicArrangement,
   getMusicIntensity,
   getMusicNotesForStep,
+  getScoreSurgeTransitionState,
+  isRoboticBrassActive,
   shouldScheduleResolution,
 } from "./gameMusic";
 
@@ -60,6 +63,66 @@ describe("background music composition", () => {
       expect(intensity).toBeLessThanOrEqual(1);
     }
     expect(getMusicIntensity({ matchPhase: "finished", remainingMs: 0 })).toBe(0);
+  });
+
+  it("builds an eight-second white-noise transition around the one-minute alert", () => {
+    const gameplay = (remainingMs: number) => ({
+      scene: "gameplay" as const,
+      matchPhase: "regulation" as const,
+      remainingMs,
+    });
+
+    expect(SCORE_SURGE_MUSIC_RULES.riserDurationMs).toBe(4_000);
+    expect(SCORE_SURGE_MUSIC_RULES.tailDurationMs).toBe(4_000);
+    expect(getScoreSurgeTransitionState(gameplay(65_000))).toEqual({
+      phase: "idle",
+      progress: 0,
+    });
+    expect(getScoreSurgeTransitionState(gameplay(64_000))).toEqual({
+      phase: "riser",
+      progress: 0,
+    });
+    expect(getScoreSurgeTransitionState(gameplay(62_000))).toEqual({
+      phase: "riser",
+      progress: 0.5,
+    });
+    expect(getScoreSurgeTransitionState(gameplay(60_000))).toEqual({
+      phase: "riser",
+      progress: 1,
+    });
+    expect(getScoreSurgeTransitionState(gameplay(58_000))).toEqual({
+      phase: "tail",
+      progress: 0.5,
+    });
+    expect(getScoreSurgeTransitionState(gameplay(56_000))).toEqual({
+      phase: "complete",
+      progress: 1,
+    });
+    expect(getScoreSurgeTransitionState({ scene: "menu" })).toEqual({
+      phase: "idle",
+      progress: 0,
+    });
+  });
+
+  it("switches the toot into a three-voice robotic brass spread at one minute", () => {
+    const gameplay = (remainingMs: number) => ({
+      scene: "gameplay" as const,
+      matchPhase: "regulation" as const,
+      remainingMs,
+    });
+
+    expect(SCORE_SURGE_MUSIC_RULES.brassPans).toEqual([-0.3, 0, 0.3]);
+    expect(SCORE_SURGE_MUSIC_RULES.duplicateGainScale).toBeGreaterThan(0);
+    expect(SCORE_SURGE_MUSIC_RULES.duplicateGainScale).toBeLessThan(1);
+    expect(isRoboticBrassActive(gameplay(60_001))).toBe(false);
+    expect(isRoboticBrassActive(gameplay(60_000))).toBe(true);
+    expect(isRoboticBrassActive(gameplay(60_250), 300)).toBe(true);
+    expect(isRoboticBrassActive({
+      scene: "gameplay",
+      matchPhase: "overtime",
+      remainingMs: 60_000,
+    })).toBe(true);
+    expect(isRoboticBrassActive({ scene: "menu" })).toBe(false);
   });
 
   it("forms a seamless 128-step loop", () => {

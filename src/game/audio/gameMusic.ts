@@ -9,6 +9,15 @@ export const GAME_MUSIC_RULES = {
   outputGain: 0.48 * 1.3 * 1.3,
 } as const;
 
+export const SCORE_SURGE_MUSIC_RULES = {
+  thresholdMs: GAME_RULES.scoreSurgeDurationMs,
+  riserDurationMs: 4_000,
+  tailDurationMs: 4_000,
+  brassPans: [-0.3, 0, 0.3],
+  duplicateGainScale: 0.56,
+  noisePeakGain: 0.017,
+} as const;
+
 const STEP_SECONDS = 60 / GAME_MUSIC_RULES.bpm / GAME_MUSIC_RULES.stepsPerBeat;
 const ENVELOPE_FLOOR = 0.0001;
 
@@ -71,6 +80,9 @@ export interface GameMusicRuntime {
   readonly bassFilter: BiquadFilterNode;
   readonly highShelf: BiquadFilterNode;
   readonly reverbReturn: GainNode;
+  readonly scoreSurgeNoiseFilter: BiquadFilterNode;
+  readonly scoreSurgeNoiseGain: GainNode;
+  readonly scoreSurgeNoiseSend: GainNode;
   readonly output: GainNode;
   readonly noiseBuffer: AudioBuffer;
   readonly activeSources: Set<AudioScheduledSourceNode>;
@@ -78,8 +90,17 @@ export interface GameMusicRuntime {
   nextStep: number;
   nextStepTime: number;
   scene: MusicScene;
+  scoreSurgeNoiseSource: AudioBufferSourceNode | null;
   resolutionScheduled: boolean;
   disposed: boolean;
+}
+
+export type ScoreSurgeTransitionPhase = "idle" | "riser" | "tail" | "complete";
+
+export interface ScoreSurgeTransitionState {
+  readonly phase: ScoreSurgeTransitionPhase;
+  /** Normalized progress through the active riser or tail. */
+  readonly progress: number;
 }
 
 export function getMusicIntensity(
@@ -107,6 +128,50 @@ export function getMusicIntensity(
       + smoothstep(regulationProgress) * 0.33
       + smoothstep(finalMinuteProgress) * 0.13,
   );
+}
+
+export function getScoreSurgeTransitionState(
+  presentation: GameMusicPresentation,
+): ScoreSurgeTransitionState {
+  if (
+    presentation.scene !== "gameplay"
+    || presentation.matchPhase !== "regulation"
+  ) {
+    return { phase: "idle", progress: 0 };
+  }
+
+  const remainingMs = Number.isFinite(presentation.remainingMs)
+    ? presentation.remainingMs
+    : Number.POSITIVE_INFINITY;
+  const threshold = SCORE_SURGE_MUSIC_RULES.thresholdMs;
+  const riserStart = threshold + SCORE_SURGE_MUSIC_RULES.riserDurationMs;
+  const tailEnd = threshold - SCORE_SURGE_MUSIC_RULES.tailDurationMs;
+
+  if (remainingMs > riserStart) return { phase: "idle", progress: 0 };
+  if (remainingMs >= threshold) {
+    return {
+      phase: "riser",
+      progress: clamp01((riserStart - remainingMs) / SCORE_SURGE_MUSIC_RULES.riserDurationMs),
+    };
+  }
+  if (remainingMs > tailEnd) {
+    return {
+      phase: "tail",
+      progress: clamp01((threshold - remainingMs) / SCORE_SURGE_MUSIC_RULES.tailDurationMs),
+    };
+  }
+  return { phase: "complete", progress: 1 };
+}
+
+export function isRoboticBrassActive(
+  presentation: GameMusicPresentation,
+  lookAheadMs = 0,
+) {
+  if (presentation.scene !== "gameplay") return false;
+  if (presentation.matchPhase === "overtime") return true;
+  if (presentation.matchPhase !== "regulation") return false;
+  const projectedRemainingMs = presentation.remainingMs - Math.max(0, lookAheadMs);
+  return projectedRemainingMs <= SCORE_SURGE_MUSIC_RULES.thresholdMs;
 }
 
 export function getMusicArrangement(
@@ -238,6 +303,15 @@ export function createGameMusicRuntime(
   const reverbReturn = context.createGain();
   reverbReturn.gain.value = 0.36;
 
+  const scoreSurgeNoiseFilter = context.createBiquadFilter();
+  scoreSurgeNoiseFilter.type = "bandpass";
+  scoreSurgeNoiseFilter.frequency.value = 720;
+  scoreSurgeNoiseFilter.Q.value = 0.62;
+  const scoreSurgeNoiseGain = context.createGain();
+  scoreSurgeNoiseGain.gain.value = ENVELOPE_FLOOR;
+  const scoreSurgeNoiseSend = context.createGain();
+  scoreSurgeNoiseSend.gain.value = 0.36;
+
   const delay = context.createDelay(0.9);
   delay.delayTime.value = STEP_SECONDS * 3;
   const delayFeedback = context.createGain();
@@ -254,6 +328,8 @@ export function createGameMusicRuntime(
   arpeggioInput.connect(arpeggioGain).connect(input);
   percussionInput.connect(percussionGain).connect(input);
   resolutionInput.connect(resolutionGain).connect(input);
+  scoreSurgeNoiseFilter.connect(scoreSurgeNoiseGain).connect(input);
+  scoreSurgeNoiseGain.connect(scoreSurgeNoiseSend).connect(reverbInput);
 
   harmonicFilter.connect(harmonicSend).connect(reverbInput);
   arpeggioInput.connect(arpeggioSend).connect(reverbInput);
@@ -283,6 +359,9 @@ export function createGameMusicRuntime(
     bassFilter,
     highShelf,
     reverbReturn,
+    scoreSurgeNoiseFilter,
+    scoreSurgeNoiseGain,
+    scoreSurgeNoiseSend,
     output,
     noiseBuffer: createNoiseBuffer(context, 1.4, 0x2f6e3a91),
     activeSources,
@@ -309,6 +388,9 @@ export function createGameMusicRuntime(
       convolver,
       reverbTone,
       reverbReturn,
+      scoreSurgeNoiseFilter,
+      scoreSurgeNoiseGain,
+      scoreSurgeNoiseSend,
       delay,
       delayFeedback,
       delayReturn,
@@ -317,6 +399,7 @@ export function createGameMusicRuntime(
     nextStep: 0,
     nextStepTime: context.currentTime + 0.055,
     scene: "menu",
+    scoreSurgeNoiseSource: null,
     resolutionScheduled: false,
     disposed: false,
   };
@@ -334,6 +417,7 @@ export function updateGameMusic(
   if (shouldScheduleResolution(runtime.scene, nextScene)) {
     runtime.scene = "finished";
     runtime.resolutionScheduled = true;
+    stopScoreSurgeNoise(runtime, now);
     fadeLoopStems(runtime, now);
     scheduleResolution(runtime, context, now + 0.025);
     return;
@@ -352,6 +436,7 @@ export function updateGameMusic(
   const arrangement = getMusicArrangement(presentation);
   applyArrangement(runtime, arrangement, now);
   if (context.state !== "running") return;
+  updateScoreSurgeNoise(runtime, context, presentation, now);
 
   // A suspended context does not advance its clock. The guard additionally
   // prevents a long debugger pause from causing an audible catch-up burst.
@@ -359,12 +444,14 @@ export function updateGameMusic(
     runtime.nextStepTime = now + 0.04;
   }
   while (runtime.nextStepTime < now + GAME_MUSIC_RULES.scheduleAheadSeconds) {
+    const lookAheadMs = Math.max(0, runtime.nextStepTime - now) * 1_000;
     scheduleMusicStep(
       runtime,
       context,
       runtime.nextStep,
       runtime.nextStepTime,
       arrangement,
+      isRoboticBrassActive(presentation, lookAheadMs),
     );
     runtime.nextStep += 1;
     runtime.nextStepTime += STEP_SECONDS;
@@ -399,6 +486,73 @@ function effectiveScene(presentation: GameMusicPresentation): MusicScene {
     return "finished";
   }
   return presentation.scene;
+}
+
+function updateScoreSurgeNoise(
+  runtime: GameMusicRuntime,
+  context: AudioContext,
+  presentation: GameMusicPresentation,
+  now: number,
+) {
+  const transition = getScoreSurgeTransitionState(presentation);
+  if (transition.phase !== "riser" && transition.phase !== "tail") {
+    stopScoreSurgeNoise(runtime, now);
+    return;
+  }
+
+  ensureScoreSurgeNoise(runtime, context, now);
+  const strength = transition.phase === "riser"
+    ? smoothstep(transition.progress)
+    : 1 - smoothstep(transition.progress);
+  const gain = Math.max(
+    ENVELOPE_FLOOR,
+    SCORE_SURGE_MUSIC_RULES.noisePeakGain * strength,
+  );
+  setTarget(runtime.scoreSurgeNoiseGain.gain, gain, now, 0.16);
+  setTarget(
+    runtime.scoreSurgeNoiseFilter.frequency,
+    720 + strength * 6_200,
+    now,
+    0.2,
+  );
+  setTarget(runtime.scoreSurgeNoiseFilter.Q, 0.62 + strength * 0.9, now, 0.2);
+}
+
+function ensureScoreSurgeNoise(
+  runtime: GameMusicRuntime,
+  context: AudioContext,
+  now: number,
+) {
+  if (runtime.scoreSurgeNoiseSource) return;
+  const source = context.createBufferSource();
+  source.buffer = runtime.noiseBuffer;
+  source.loop = true;
+  source.connect(runtime.scoreSurgeNoiseFilter);
+  runtime.scoreSurgeNoiseSource = source;
+  trackSource(runtime.activeSources, source);
+  source.addEventListener("ended", () => {
+    if (runtime.scoreSurgeNoiseSource === source) {
+      runtime.scoreSurgeNoiseSource = null;
+    }
+    try {
+      source.disconnect();
+    } catch {
+      // Teardown may already have disconnected the transition source.
+    }
+  }, { once: true });
+  source.start(now);
+}
+
+function stopScoreSurgeNoise(runtime: GameMusicRuntime, now: number) {
+  setTarget(runtime.scoreSurgeNoiseGain.gain, ENVELOPE_FLOOR, now, 0.08);
+  const source = runtime.scoreSurgeNoiseSource;
+  if (!source) return;
+  runtime.scoreSurgeNoiseSource = null;
+  try {
+    source.stop(now + 0.16);
+  } catch {
+    // An already-ended transition source needs no further teardown.
+  }
 }
 
 function applyArrangement(
@@ -450,6 +604,7 @@ function scheduleMusicStep(
   step: number,
   time: number,
   arrangement: GameMusicArrangement,
+  roboticBrassActive: boolean,
 ) {
   const notes = getMusicNotesForStep(step);
   if (notes.pad) {
@@ -505,28 +660,38 @@ function scheduleMusicStep(
   }
 
   if (notes.arpeggio !== null) {
-    scheduleVoice(runtime, context, runtime.arpeggioInput, {
-      note: notes.arpeggio,
-      time,
-      duration: STEP_SECONDS * 2.7,
-      gain: 0.014 + arrangement.energy * 0.009,
-      attack: 0.009,
-      release: 0.2,
-      type: "triangle",
-      pan: notes.normalizedStep % 4 === 0 ? -0.38 : 0.38,
-      filterHz: 2_800 + arrangement.energy * 2_900,
-    });
-    if (arrangement.energy >= 0.78 && notes.normalizedStep % 8 === 6) {
+    if (roboticBrassActive) {
+      scheduleRoboticBrass(
+        runtime,
+        context,
+        notes.arpeggio,
+        time,
+        arrangement.energy,
+      );
+    } else {
       scheduleVoice(runtime, context, runtime.arpeggioInput, {
-        note: notes.arpeggio + 12,
-        time: time + STEP_SECONDS,
-        duration: STEP_SECONDS * 1.8,
-        gain: 0.008,
-        attack: 0.008,
-        release: 0.13,
-        type: "sine",
-        pan: -0.2,
+        note: notes.arpeggio,
+        time,
+        duration: STEP_SECONDS * 2.7,
+        gain: 0.014 + arrangement.energy * 0.009,
+        attack: 0.009,
+        release: 0.2,
+        type: "triangle",
+        pan: notes.normalizedStep % 4 === 0 ? -0.38 : 0.38,
+        filterHz: 2_800 + arrangement.energy * 2_900,
       });
+      if (arrangement.energy >= 0.78 && notes.normalizedStep % 8 === 6) {
+        scheduleVoice(runtime, context, runtime.arpeggioInput, {
+          note: notes.arpeggio + 12,
+          time: time + STEP_SECONDS,
+          duration: STEP_SECONDS * 1.8,
+          gain: 0.008,
+          attack: 0.008,
+          release: 0.13,
+          type: "sine",
+          pan: -0.2,
+        });
+      }
     }
   }
 
@@ -539,6 +704,100 @@ function scheduleMusicStep(
   if (notes.ghost && arrangement.energy >= 0.7) {
     scheduleSnare(runtime, context, time, arrangement.energy, true);
   }
+}
+
+function scheduleRoboticBrass(
+  runtime: GameMusicRuntime,
+  context: AudioContext,
+  note: number,
+  time: number,
+  energy: number,
+) {
+  SCORE_SURGE_MUSIC_RULES.brassPans.forEach((pan, index) => {
+    const widthGain = index === 1 ? 1 : 0.72;
+    const primaryGain = (0.0058 + energy * 0.0032) * widthGain;
+    const detune = [-10, 0, 10][index];
+    scheduleRoboticBrassVoice(runtime, context, {
+      note,
+      time,
+      duration: STEP_SECONDS * 2.45,
+      gain: primaryGain,
+      pan,
+      detune,
+      voiceIndex: index,
+    });
+    scheduleRoboticBrassVoice(runtime, context, {
+      note,
+      time: time + STEP_SECONDS * 0.72,
+      duration: STEP_SECONDS * 2.05,
+      gain: primaryGain * SCORE_SURGE_MUSIC_RULES.duplicateGainScale,
+      pan,
+      detune: detune + (index - 1) * 3,
+      voiceIndex: index + SCORE_SURGE_MUSIC_RULES.brassPans.length,
+    });
+  });
+}
+
+function scheduleRoboticBrassVoice(
+  runtime: GameMusicRuntime,
+  context: AudioContext,
+  options: {
+    note: number;
+    time: number;
+    duration: number;
+    gain: number;
+    pan: number;
+    detune: number;
+    voiceIndex: number;
+  },
+) {
+  const carrier = context.createOscillator();
+  carrier.type = options.voiceIndex % 3 === 1 ? "square" : "sawtooth";
+  const frequency = midiFrequency(options.note);
+  carrier.frequency.setValueAtTime(frequency * 1.018, options.time);
+  carrier.frequency.exponentialRampToValueAtTime(
+    frequency,
+    options.time + Math.min(0.045, options.duration * 0.28),
+  );
+  carrier.detune.value = options.detune;
+
+  const robotModulator = context.createOscillator();
+  robotModulator.type = "square";
+  robotModulator.frequency.value = 19 + (options.voiceIndex % 3) * 5;
+  const modulationDepth = context.createGain();
+  modulationDepth.gain.value = 5 + (options.voiceIndex % 3) * 1.5;
+  robotModulator.connect(modulationDepth).connect(carrier.detune);
+
+  const filter = context.createBiquadFilter();
+  filter.type = "bandpass";
+  filter.Q.value = 2.7 + (options.voiceIndex % 3) * 0.45;
+  filter.frequency.setValueAtTime(760, options.time);
+  filter.frequency.exponentialRampToValueAtTime(
+    3_100 + (options.voiceIndex % 3) * 420,
+    options.time + Math.min(0.06, options.duration * 0.36),
+  );
+  filter.frequency.exponentialRampToValueAtTime(
+    1_250 + (options.voiceIndex % 3) * 160,
+    options.time + options.duration,
+  );
+
+  const envelope = context.createGain();
+  const end = options.time + options.duration;
+  const peak = Math.max(ENVELOPE_FLOOR, options.gain);
+  envelope.gain.setValueAtTime(ENVELOPE_FLOOR, options.time);
+  envelope.gain.exponentialRampToValueAtTime(peak, options.time + 0.011);
+  envelope.gain.exponentialRampToValueAtTime(peak * 0.62, end - 0.075);
+  envelope.gain.exponentialRampToValueAtTime(ENVELOPE_FLOOR, end);
+
+  const panner = context.createStereoPanner();
+  panner.pan.value = options.pan;
+  carrier.connect(filter).connect(envelope).connect(panner).connect(runtime.arpeggioInput);
+  trackSource(runtime.activeSources, carrier);
+  trackSource(runtime.activeSources, robotModulator);
+  carrier.start(options.time);
+  robotModulator.start(options.time);
+  carrier.stop(end + 0.04);
+  robotModulator.stop(end + 0.04);
 }
 
 function scheduleVoice(

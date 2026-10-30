@@ -2,6 +2,7 @@ import { GAME_RULES } from "../constants";
 import { distance } from "../geometry";
 import { baseId } from "../state";
 import { PLAYER_IDS, type Anchor, type GameState, type PlayerId } from "../types";
+import { getAnchorParentIds } from "./tetherNetwork";
 
 export type AnchorPowerState = "powered" | "shielded" | "disrupted" | "severed";
 
@@ -151,7 +152,11 @@ export function advanceTetherConflict(
   };
 }
 
-/** Recomputes every descendant so a severed branch cannot remain safe. */
+/**
+ * Recomputes circuit reachability from each home base. Anchors with a stored
+ * backup link remain powered when either incoming branch is still live; a
+ * disconnected cycle with no path home stays severed.
+ */
 export function resolveAnchorPower(
   anchors: Anchor[],
   elapsedMs: number,
@@ -161,35 +166,30 @@ export function resolveAnchorPower(
     (anchor) => normalizeAnchor(anchor, elapsedMs),
   );
   const byId = new Map(normalized.map((anchor) => [anchor.id, anchor]));
-  const memo = new Map<string, boolean>();
+  const poweredIds = new Set<string>();
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const anchor of normalized) {
+      if (
+        poweredIds.has(anchor.id) ||
+        isAnchorDirectlyDisrupted(anchor, elapsedMs)
+      ) continue;
 
-  function isPowered(anchor: Anchor, visiting: Set<string>): boolean {
-    const cached = memo.get(anchor.id);
-    if (cached !== undefined) return cached;
-    if (isAnchorDirectlyDisrupted(anchor, elapsedMs) || visiting.has(anchor.id)) {
-      memo.set(anchor.id, false);
-      return false;
+      const hasPoweredPath = getAnchorParentIds(anchor).some((parentId) => {
+        if (parentId === baseId(anchor.owner)) return true;
+        const parent = byId.get(parentId);
+        return parent?.owner === anchor.owner && poweredIds.has(parentId);
+      });
+      if (!hasPoweredPath) continue;
+      poweredIds.add(anchor.id);
+      changed = true;
     }
-    if (anchor.parentId === baseId(anchor.owner)) {
-      memo.set(anchor.id, true);
-      return true;
-    }
-
-    const parent = byId.get(anchor.parentId);
-    if (!parent || parent.owner !== anchor.owner) {
-      memo.set(anchor.id, false);
-      return false;
-    }
-    const nextVisiting = new Set(visiting);
-    nextVisiting.add(anchor.id);
-    const powered = isPowered(parent, nextVisiting);
-    memo.set(anchor.id, powered);
-    return powered;
   }
 
   return mapAnchorsPreservingIdentity(normalized, (anchor) => updateAnchor(
     anchor,
-    { powered: isPowered(anchor, new Set()) },
+    { powered: poweredIds.has(anchor.id) },
   ));
 }
 
@@ -366,8 +366,9 @@ function isParentPowered(
   anchor: Anchor,
   poweredById: ReadonlyMap<string, boolean>,
 ) {
-  if (anchor.parentId === baseId(anchor.owner)) return true;
-  return poweredById.get(anchor.parentId) === true;
+  return getAnchorParentIds(anchor).some((parentId) => (
+    parentId === baseId(anchor.owner) || poweredById.get(parentId) === true
+  ));
 }
 
 function decay(value: number, rate: number, deltaSeconds: number) {

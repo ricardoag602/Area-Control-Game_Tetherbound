@@ -2,7 +2,12 @@ import { GAME_RULES } from "../constants";
 import { distance } from "../geometry";
 import { MOVEMENT_RULES } from "../movement/movement";
 import { isAnchorDirectlyDisrupted, isAnchorProtected } from "../simulation/tetherConflict";
-import { canDeployAnchor, getPoweredNodes, isInsideSafeZone } from "../simulation/tetherNetwork";
+import {
+  canDeployAnchor,
+  getAnchorParentIds,
+  getPoweredNodes,
+  isInsideSafeZone,
+} from "../simulation/tetherNetwork";
 import type { PlayerCommand } from "../simulation/playerController";
 import type { Anchor, GameState, MovementCommand, PlayerId, Vec2 } from "../types";
 
@@ -694,9 +699,11 @@ function closestPoweredNode(state: GameState, playerId: PlayerId) {
 function descendantCount(state: GameState, root: Anchor) {
   const children = new Map<string, Anchor[]>();
   for (const anchor of state.anchors) {
-    const siblings = children.get(anchor.parentId) ?? [];
-    siblings.push(anchor);
-    children.set(anchor.parentId, siblings);
+    for (const parentId of getAnchorParentIds(anchor)) {
+      const siblings = children.get(parentId) ?? [];
+      siblings.push(anchor);
+      children.set(parentId, siblings);
+    }
   }
   let count = 0;
   const pending = [...(children.get(root.id) ?? [])];
@@ -712,10 +719,14 @@ function descendantCount(state: GameState, root: Anchor) {
 }
 
 function parentIsPowered(state: GameState, anchor: Anchor) {
-  if (anchor.parentId === `${anchor.owner}-base`) return true;
-  return state.anchors.some(
-    (candidate) => candidate.id === anchor.parentId && candidate.powered,
-  );
+  return getAnchorParentIds(anchor).some((parentId) => (
+    parentId === `${anchor.owner}-base` || state.anchors.some(
+      (candidate) =>
+        candidate.id === parentId &&
+        candidate.owner === anchor.owner &&
+        candidate.powered,
+    )
+  ));
 }
 
 function enemyBaseIsExposed(state: GameState, opponentId: PlayerId) {

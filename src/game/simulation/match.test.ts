@@ -399,6 +399,45 @@ describe("Tetherbound simulation", () => {
     expect(deployed.anchors[1].parentId).toBe("long-link-parent");
   });
 
+  it("records a second live connection when deploying between powered branches", () => {
+    const state = createInitialGameState("redundant-deployment");
+    state.anchors = [
+      {
+        id: "branch-a",
+        owner: "player",
+        position: { x: 150, y: 280 },
+        parentId: "player-base",
+        powered: true,
+        disruptedUntilMs: null,
+        protectedUntilMs: null,
+        overloadProgress: 0,
+        repairProgress: 0,
+      },
+      {
+        id: "branch-b",
+        owner: "player",
+        position: { x: 200, y: 280 },
+        parentId: "player-base",
+        powered: true,
+        disruptedUntilMs: null,
+        protectedUntilMs: null,
+        overloadProgress: 0,
+        repairProgress: 0,
+      },
+    ];
+    state.players.player.astronaut.position = { x: 175, y: 220 };
+
+    const deployed = deployAnchor(state, "player");
+    const bridge = deployed.anchors.at(-1);
+
+    expect(bridge).toMatchObject({
+      parentId: "branch-a",
+      backupParentId: "branch-b",
+      powered: true,
+    });
+    expect(deployed.players.player.astronaut.tetherKits).toBe(1);
+  });
+
   it("allows every collected tether kit to become an anchor without a cap", () => {
     const state = createInitialGameState();
     state.anchors = Array.from({ length: 12 }, (_, index) => ({
