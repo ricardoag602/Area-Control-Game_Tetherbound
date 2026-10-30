@@ -423,39 +423,21 @@ button { -webkit-tap-highlight-color: transparent; }
 .button--compact { min-height: 2.8rem; background: #17364a; border-color: rgba(133, 219, 245, .3); }
 
 .about-story-trigger {
-  position: fixed;
-  top: 50%;
-  right: max(.7rem, env(safe-area-inset-right));
-  z-index: 45;
-  min-width: 3.15rem;
-  min-height: 7rem;
-  padding: 1rem .7rem;
-  border: 1px solid rgba(255, 181, 165, .7);
-  border-radius: 1rem;
+  border-color: rgba(255, 181, 165, .7);
   color: #fff4f1;
   background:
     linear-gradient(165deg, rgba(236, 82, 70, .98), rgba(125, 30, 38, .98));
   box-shadow:
-    0 1rem 2.8rem rgba(75, 8, 16, .42),
+    0 .8rem 2.2rem rgba(75, 8, 16, .32),
     inset 0 1px rgba(255, 255, 255, .22),
     0 0 1.5rem rgba(255, 102, 88, .13);
-  cursor: pointer;
-  font-size: .74rem;
-  font-weight: 950;
-  letter-spacing: .16em;
-  text-transform: uppercase;
-  transform: translateY(-50%);
-  transition: transform 160ms ease, border-color 160ms ease, filter 160ms ease;
-  writing-mode: vertical-rl;
 }
 
 .about-story-trigger:hover {
   border-color: #ffd2c8;
   filter: brightness(1.08);
-  transform: translateY(-50%) translateX(-.18rem);
 }
 
-.about-story-trigger:active { transform: translateY(-50%) scale(.97); }
 .about-story-trigger:focus-visible {
   outline: 2px solid #fff;
   outline-offset: 4px;
@@ -927,19 +909,6 @@ button { -webkit-tap-highlight-color: transparent; }
 ) { filter: none; }
 
 @media (max-width: 48rem) {
-  .about-story-trigger {
-    top: max(.75rem, env(safe-area-inset-top));
-    right: max(.75rem, env(safe-area-inset-right));
-    min-width: 0;
-    min-height: 2.75rem;
-    padding: .68rem .85rem;
-    border-radius: .8rem;
-    font-size: .65rem;
-    transform: none;
-    writing-mode: horizontal-tb;
-  }
-  .about-story-trigger:hover { transform: translateY(-.12rem); }
-  .about-story-trigger:active { transform: scale(.97); }
   .about-story__shell { min-height: 100%; }
   .about-story__chapter {
     grid-template-columns: 1fr;

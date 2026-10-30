@@ -30,7 +30,10 @@ describe("MainMenu play choices", () => {
     const markup = renderMainMenu(false);
 
     expect(markup).toMatch(
-      /<button class="about-story-trigger"[^>]*aria-haspopup="dialog"[^>]*aria-expanded="false"[^>]*aria-controls="about-story-dialog"[^>]*>About<\/button>/,
+      /<button class="button button--about about-story-trigger"[^>]*aria-haspopup="dialog"[^>]*aria-expanded="false"[^>]*aria-controls="about-story-dialog"[^>]*><span>About<\/span><\/button>/,
+    );
+    expect(markup.indexOf("<span>About</span>")).toBeGreaterThan(
+      markup.indexOf("<span>Join Multiplayer Room</span>"),
     );
   });
 

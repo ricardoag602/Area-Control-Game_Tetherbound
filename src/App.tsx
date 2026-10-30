@@ -485,17 +485,6 @@ export function MainMenu({
             className="screen screen--menu"
             aria-hidden={aboutOpen ? true : undefined}
         >
-            <button
-                className="about-story-trigger"
-                type="button"
-                aria-haspopup="dialog"
-                aria-expanded={aboutOpen}
-                aria-controls="about-story-dialog"
-                onClick={() => setAboutOpen(true)}
-            >
-                About
-            </button>
-
             <div className="orbit-mark" aria-hidden="true">
                 <span className="orbit-mark__core" />
                 <span className="orbit-mark__ring orbit-mark__ring--one" />
@@ -557,6 +546,16 @@ export function MainMenu({
                 <button className="button button--secondary" onClick={onJoinRoom}>
                     <span>Join Multiplayer Room</span>
                     <small>Enter a code or browse public rooms</small>
+                </button>
+                <button
+                    className="button button--about about-story-trigger"
+                    type="button"
+                    aria-haspopup="dialog"
+                    aria-expanded={aboutOpen}
+                    aria-controls="about-story-dialog"
+                    onClick={() => setAboutOpen(true)}
+                >
+                    <span>About</span>
                 </button>
             </div>
 
