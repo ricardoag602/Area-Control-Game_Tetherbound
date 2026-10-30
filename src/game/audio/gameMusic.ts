@@ -15,6 +15,7 @@ export const SCORE_SURGE_MUSIC_RULES = {
   tailDurationMs: 4_000,
   brassPans: [-0.3, 0, 0.3],
   duplicateGainScale: 0.56,
+  roboticBrassGainScale: 1.4,
   noisePeakGain: 0.017,
 } as const;
 
@@ -660,6 +661,31 @@ function scheduleMusicStep(
   }
 
   if (notes.arpeggio !== null) {
+    // The original toot is the through-line of the arrangement. Later layers
+    // build on top of it instead of replacing any part of the existing phrase.
+    scheduleVoice(runtime, context, runtime.arpeggioInput, {
+      note: notes.arpeggio,
+      time,
+      duration: STEP_SECONDS * 2.7,
+      gain: 0.014 + arrangement.energy * 0.009,
+      attack: 0.009,
+      release: 0.2,
+      type: "triangle",
+      pan: notes.normalizedStep % 4 === 0 ? -0.38 : 0.38,
+      filterHz: 2_800 + arrangement.energy * 2_900,
+    });
+    if (arrangement.energy >= 0.78 && notes.normalizedStep % 8 === 6) {
+      scheduleVoice(runtime, context, runtime.arpeggioInput, {
+        note: notes.arpeggio + 12,
+        time: time + STEP_SECONDS,
+        duration: STEP_SECONDS * 1.8,
+        gain: 0.008,
+        attack: 0.008,
+        release: 0.13,
+        type: "sine",
+        pan: -0.2,
+      });
+    }
     if (roboticBrassActive) {
       scheduleRoboticBrass(
         runtime,
@@ -668,30 +694,6 @@ function scheduleMusicStep(
         time,
         arrangement.energy,
       );
-    } else {
-      scheduleVoice(runtime, context, runtime.arpeggioInput, {
-        note: notes.arpeggio,
-        time,
-        duration: STEP_SECONDS * 2.7,
-        gain: 0.014 + arrangement.energy * 0.009,
-        attack: 0.009,
-        release: 0.2,
-        type: "triangle",
-        pan: notes.normalizedStep % 4 === 0 ? -0.38 : 0.38,
-        filterHz: 2_800 + arrangement.energy * 2_900,
-      });
-      if (arrangement.energy >= 0.78 && notes.normalizedStep % 8 === 6) {
-        scheduleVoice(runtime, context, runtime.arpeggioInput, {
-          note: notes.arpeggio + 12,
-          time: time + STEP_SECONDS,
-          duration: STEP_SECONDS * 1.8,
-          gain: 0.008,
-          attack: 0.008,
-          release: 0.13,
-          type: "sine",
-          pan: -0.2,
-        });
-      }
     }
   }
 
@@ -715,7 +717,9 @@ function scheduleRoboticBrass(
 ) {
   SCORE_SURGE_MUSIC_RULES.brassPans.forEach((pan, index) => {
     const widthGain = index === 1 ? 1 : 0.72;
-    const primaryGain = (0.0058 + energy * 0.0032) * widthGain;
+    const primaryGain = (0.0058 + energy * 0.0032)
+      * widthGain
+      * SCORE_SURGE_MUSIC_RULES.roboticBrassGainScale;
     const detune = [-10, 0, 10][index];
     scheduleRoboticBrassVoice(runtime, context, {
       note,

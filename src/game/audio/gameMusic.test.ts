@@ -104,7 +104,7 @@ describe("background music composition", () => {
     });
   });
 
-  it("switches the toot into a three-voice robotic brass spread at one minute", () => {
+  it("adds a louder three-voice robotic brass layer without replacing the original toot", () => {
     const gameplay = (remainingMs: number) => ({
       scene: "gameplay" as const,
       matchPhase: "regulation" as const,
@@ -114,6 +114,7 @@ describe("background music composition", () => {
     expect(SCORE_SURGE_MUSIC_RULES.brassPans).toEqual([-0.3, 0, 0.3]);
     expect(SCORE_SURGE_MUSIC_RULES.duplicateGainScale).toBeGreaterThan(0);
     expect(SCORE_SURGE_MUSIC_RULES.duplicateGainScale).toBeLessThan(1);
+    expect(SCORE_SURGE_MUSIC_RULES.roboticBrassGainScale).toBe(1.4);
     expect(isRoboticBrassActive(gameplay(60_001))).toBe(false);
     expect(isRoboticBrassActive(gameplay(60_000))).toBe(true);
     expect(isRoboticBrassActive(gameplay(60_250), 300)).toBe(true);
